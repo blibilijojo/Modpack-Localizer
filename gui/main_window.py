@@ -16,17 +16,21 @@ from gui.tab_ai_parameters import TabAiParameters
 from gui.tab_pack_settings import TabPackSettings
 from utils.logger_setup import setup_logging
 from utils import update_checker
-from main import __version__ 
+# 从单一信息源导入版本号，不再从 main.py 导入
+from _version import __version__ 
 
 class MainWindow:
     def __init__(self, root: ttk.Window):
         self.root = root
+        # 使用导入的版本号
         self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
         self.root.geometry("850x950") 
         self.root.minsize(800, 850)
         
         self._create_menu()
         main_pane = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
+        # ... 此处代码与上一版完全相同，无需改动，直到文件末尾 ...
+        # (为了简洁，省略了未改动的代码)
         main_pane.pack(fill="both", expand=True, padx=10, pady=10)
         notebook_frame = ttk.Frame(main_pane)
         main_pane.add(notebook_frame, weight=1)
@@ -57,7 +61,6 @@ class MainWindow:
         help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
 
     def start_update_check(self, user_initiated=False):
-        # 只有在打包成exe后才执行更新检查
         if not getattr(sys, 'frozen', False):
             if user_initiated:
                 messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。")
@@ -117,47 +120,31 @@ class MainWindow:
         old_exe_path = exe_dir / (exe_name + ".old")
         batch_script_path = exe_dir / "update.bat"
 
-        # 1. 下载新版本
         download_ok = update_checker.download_update(update_info["asset_url"], new_exe_path,
                                                      lambda s, p: self.root.after(0, self._update_progress_ui, s, p))
         if not download_ok:
             self.root.after(0, lambda: messagebox.showerror("更新失败", "下载新版本失败，请检查网络或稍后重试。", parent=self.root))
-            self.root.after(0, self.later_btn.master.master.destroy) # 关闭对话框
+            self.root.after(0, self.later_btn.master.master.destroy)
             return
 
-        # 2. 创建批处理脚本
         script_content = f"""
 @echo off
 echo 更新程序正在执行...
 echo.
-:: 1. 等待主程序完全退出 (3秒)，确保文件锁释放
 ping 127.0.0.1 -n 4 > nul
-
-:: 2. 如果存在上上个版本留下的.old文件，先删除
 if exist "{old_exe_path}" (
     del /F /Q "{old_exe_path}"
 )
-
-:: 3. 将当前运行的exe重命名为.old作为备份
 echo 备份当前版本...
 move /Y "{current_exe}" "{old_exe_path}"
-
-:: 4. 将下载的.new文件重命名为exe
 echo 应用新版本...
 move /Y "{new_exe_path}" "{current_exe}"
-
-:: 5. 启动新版本的程序
 echo 重启应用程序...
 start "" "{current_exe}"
-
-:: 6. 删除自己这个批处理脚本
 del "%~f0"
 """
         with open(batch_script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
 
-        # 3. 启动批处理脚本并退出本程序
-        # DETACHED_PROCESS 让脚本在新的进程组中运行，不随父进程退出而退出
-        # CREATE_NO_WINDOW 不显示黑色的cmd窗口
         subprocess.Popen(f'"{batch_script_path}"', shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
         self.root.after(100, self.root.destroy)

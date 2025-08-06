@@ -31,3 +31,4 @@ RELEASE_NOTES.md
 
 # 其他可能包含密钥的文件
 .env
+packaging

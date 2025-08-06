@@ -1,3 +1,5 @@
+# .github/workflows/build-release.yml
+
 name: Build and Release Executable
 
 on:
@@ -5,8 +7,6 @@ on:
     tags:
       - 'v*'
 
-# --- ADDED: Explicitly grant permissions for the job ---
-# This is a modern security best practice and ensures the action can write a release.
 permissions:
   contents: write
 
@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,12 +30,12 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable with PyInstaller
-        # --- REMOVED: The --icon flag that was causing the build to fail ---
         run: pyinstaller --onefile --windowed --name "Modpack-Localizer-Pro" main.py
 
       - name: Create Release and Upload Asset
         uses: ncipollo/release-action@v1
         with:
+          # 直接上传 dist 目录下的 .exe 文件
           artifacts: "dist/Modpack-Localizer-Pro.exe"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true

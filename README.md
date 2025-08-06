@@ -13,8 +13,8 @@
 **Modpack Localizer Pro** 是一款专业的 Minecraft 整合包汉化工具，旨在通过 AI 翻译和社区资源叠加，为整合包作者和玩家提供一键式的本地化解决方案。它能够智能处理模组中的 `.json` 和 `.lang` 语言文件，并允许用户深度自定义 AI 翻译的各项参数。
 
 <p align="center">
-  <!-- 强烈建议您截一张软件运行的图片，上传到图床（例如 https://imgur.com/），然后把链接替换到下面 -->
-  <img src="[https://i.imgur.com/your_screenshot_url.png](https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1)" alt="应用截图" width="700"/>
+  <!-- 这里是您的应用截图 -->
+  <img src="https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1" alt="应用截图" width="700"/>
 </p>
 
 ## ✨ 功能特性
@@ -47,30 +47,31 @@
 
 ## 🌎 Introduction
 
-**Modpack Localizer Pro** is a professional localization tool for Minecraft modpacks, designed to provide a one-click localization solution for modpack creators and players through AI translation and community resource overlays. It intelligently handles both `.json` and `.lang` language files from mods and allows users to deeply customize various AI translation parameters.
+**Modpack Localizer Pro** is a professional localization tool for Minecraft modpacks, designed to provide a one-click localization solution for modpack creators 和 players through AI translation 和 community resource overlays. It intelligently handles both `.json` 和 `.lang` language files from mods 和 allows users to deeply customize various AI translation parameters.
 
 <p align="center">
-  <img src="[https://i.imgur.com/your_screenshot_url.png](https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1)" alt="Application Screenshot" width="700"/>
+  <!-- Here is your application screenshot -->
+  <img src="https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1" alt="Application Screenshot" width="700"/>
 </p>
 
 ## ✨ Features
 
 - **🚀 Intelligent Translation Engine**: Integrates with the Google Gemini API to provide high-quality, configurable AI translation.
-- **🧩 Multi-Format Support**: Automatically detects and processes `.json` and `.lang` language files from mods, with a `.json`-first strategy for resolving conflicts.
-- **📚 Community Pack Overlay**: Supports loading multiple community translation packs and intelligently merges them based on priority.
-- **🛠️ AI Parameter Tuning**: Allows customization of advanced parameters such as prompts, AI models, concurrent threads, and retry attempts.
-- **⚙️ Flexible Resource Pack Settings**: Easily configure the target game version, description, and icon for the generated resource pack.
-- **🖥️ Modern GUI**: Built with `ttkbootstrap` to provide a clean, beautiful, and cross-platform graphical user interface.
-- **📄 Professional Logging System**: Automatically generates a detailed log file (`ModpackLocalizer.log`) for easy troubleshooting.
+- **🧩 Multi-Format Support**: Automatically detects 和 processes `.json` 和 `.lang` language files from mods, with a `.json`-first strategy for resolving conflicts.
+- **📚 Community Pack Overlay**: Supports loading multiple community translation packs 和 intelligently merges them based 在 priority.
+- **🛠️ AI Parameter Tuning**: Allows customization of advanced parameters such as prompts, AI models, concurrent threads, 和 retry attempts.
+- **⚙️ Flexible Resource Pack Settings**: Easily configure the target game version, description, 和 icon for the generated resource pack.
+- **🖥️ Modern GUI**: Built with `ttkbootstrap` to provide a clean, beautiful, 和 cross-platform graphical user interface.
+- **📄 Professional Logging 系统**: Automatically generates a detailed log file (`ModpackLocalizer.log`) for easy troubleshooting.
 
 ## 🚀 How to Use
 
 1.  Download the latest packaged version from the **[Releases Page](https://github.com/blibilijojo/Modpack-Localizer/releases)**.
-2.  Extract and run the main application.
+2.  Extract 和 run the main application.
 3.  In the **`AI Service`** tab, enter your Google Gemini API Key(s).
-4.  In the **`Translate`** tab, set your `Mods Folder` and `Output Folder`.
-5.  (Optional) Add any existing community translation packs and adjust their priority using the "Move Up/Down" buttons.
-6.  Click the main **"--- Start Smart Localization ---"** button and wait for the process to complete!
+4.  In the **`Translate`** tab (Chinese: `一键汉化`), set your `Mods Folder` 和 `Output Folder`.
+5.  (Optional) Add any existing community translation packs 和 adjust their priority using the "Move Up/Down" buttons.
+6.  Click the main **"--- Start Smart Localization ---"** button 和 wait for the process to complete!
 
 ## 📄 License
 

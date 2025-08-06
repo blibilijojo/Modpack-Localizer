@@ -14,7 +14,7 @@
 
 <p align="center">
   <!-- 强烈建议您截一张软件运行的图片，上传到图床（例如 https://imgur.com/），然后把链接替换到下面 -->
-  <img src="https://i.imgur.com/your_screenshot_url.png" alt="应用截图" width="700"/>
+  <img src="[https://i.imgur.com/your_screenshot_url.png](https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1)" alt="应用截图" width="700"/>
 </p>
 
 ## ✨ 功能特性
@@ -50,8 +50,7 @@
 **Modpack Localizer Pro** is a professional localization tool for Minecraft modpacks, designed to provide a one-click localization solution for modpack creators and players through AI translation and community resource overlays. It intelligently handles both `.json` and `.lang` language files from mods and allows users to deeply customize various AI translation parameters.
 
 <p align="center">
-  <!-- You can use the same screenshot link here -->
-  <img src="https://i.imgur.com/your_screenshot_url.png" alt="Application Screenshot" width="700"/>
+  <img src="[https://i.imgur.com/your_screenshot_url.png](https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1)" alt="Application Screenshot" width="700"/>
 </p>
 
 ## ✨ Features

@@ -22,7 +22,6 @@ DEFAULT_PROMPT = """
 输入: {input_texts}
 """
 
-# --- MODIFIED: Updated github_proxies list to new CDN bases ---
 DEFAULT_CONFIG = {
     "api_keys": [], "model": "gemini-1.5-flash-latest", "model_list": [],
     "prompt": DEFAULT_PROMPT.strip(),
@@ -36,12 +35,7 @@ DEFAULT_CONFIG = {
     "last_pack_settings": {
         "pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""},
     "use_github_proxy": True,
-    "github_proxies": [ # 新的CDN加速服务基础URL，不包含协议头
-        "gh-proxy.com",
-        "hk.gh-proxy.com",
-        "cdn.gh-proxy.com",
-        "edgeone.gh-proxy.com"
-    ]
+    "last_dict_version": "" # --- 关键修改：默认值改为空字符串 ---
 }
 
 def load_config() -> dict:
@@ -49,19 +43,33 @@ def load_config() -> dict:
         logging.info("未找到配置文件，正在创建默认的 config.json...")
         save_config(DEFAULT_CONFIG)
         return DEFAULT_CONFIG.copy()
+    
     try:
         with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
             config = json.load(f)
             
-            if "global_dict_path" in config and "community_dict_path" not in config:
-                config["community_dict_path"] = config.pop("global_dict_path")
-                
-            for key, value in DEFAULT_CONFIG.items():
-                if key == "prompt" and "绝对不要" not in config.get("prompt", ""):
-                    config["prompt"] = DEFAULT_CONFIG["prompt"]
-                else:
-                    config.setdefault(key, value)
-            return config
+        config_updated = False
+
+        if "global_dict_path" in config and "community_dict_path" not in config:
+            config["community_dict_path"] = config.pop("global_dict_path")
+            config_updated = True
+            
+        for key, value in DEFAULT_CONFIG.items():
+            if key not in config:
+                logging.warning(f"配置文件中缺少 '{key}' 项目，将使用默认值进行补充。")
+                config[key] = value
+                config_updated = True
+        
+        if "github_proxies" in config:
+            del config["github_proxies"]
+            config_updated = True
+
+        if config_updated:
+            logging.info("配置文件已自动更新和补充，正在保存...")
+            save_config(config)
+
+        return config
+
     except (json.JSONDecodeError, TypeError):
         logging.error("配置文件格式错误或损坏，将加载默认配置并覆盖旧文件。")
         save_config(DEFAULT_CONFIG)

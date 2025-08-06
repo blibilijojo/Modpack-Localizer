@@ -10,27 +10,25 @@ import sys
 import subprocess
 from pathlib import Path
 
+# (导入部分保持不变)
 from gui.tab_main_control import TabMainControl
 from gui.tab_ai_service import TabAiService
 from gui.tab_ai_parameters import TabAiParameters
 from gui.tab_pack_settings import TabPackSettings
 from utils.logger_setup import setup_logging
 from utils import update_checker
-# 从单一信息源导入版本号，不再从 main.py 导入
 from _version import __version__ 
 
 class MainWindow:
     def __init__(self, root: ttk.Window):
+        # ... __init__ 方法的前半部分保持不变 ...
         self.root = root
-        # 使用导入的版本号
         self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
         self.root.geometry("850x950") 
         self.root.minsize(800, 850)
         
         self._create_menu()
         main_pane = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
-        # ... 此处代码与上一版完全相同，无需改动，直到文件末尾 ...
-        # (为了简洁，省略了未改动的代码)
         main_pane.pack(fill="both", expand=True, padx=10, pady=10)
         notebook_frame = ttk.Frame(main_pane)
         main_pane.add(notebook_frame, weight=1)
@@ -50,7 +48,8 @@ class MainWindow:
 
         setup_logging(main_control_tab.log_message)
         self.start_update_check()
-
+        
+    # ... _create_menu, start_update_check, _check_for_updates_thread, _show_update_dialog 方法保持不变 ...
     def _create_menu(self):
         menu_bar = tk.Menu(self.root)
         self.root.config(menu=menu_bar)
@@ -107,9 +106,11 @@ class MainWindow:
         self.update_btn.pack(side="right", padx=5)
         self.later_btn = ttk.Button(btn_frame, text="稍后提醒", command=dialog.destroy)
         self.later_btn.pack(side="right")
-        
-    def _update_progress_ui(self, status, percentage):
-        self.status_label.config(text=f"{status} {int(percentage)}%")
+
+    def _update_progress_ui(self, status: str, percentage: float, speed: str):
+        """更新下载对话框中的UI元素，现在包含速度。"""
+        # --- 关键修改：在状态文本中加入速度信息 ---
+        self.status_label.config(text=f"{status}... {int(percentage)}% ({speed})")
         self.progress_bar['value'] = percentage
 
     def _start_update_process(self, update_info: dict):
@@ -120,8 +121,11 @@ class MainWindow:
         old_exe_path = exe_dir / (exe_name + ".old")
         batch_script_path = exe_dir / "update.bat"
 
+        # --- 关键修改：传递新的回调函数签名 ---
         download_ok = update_checker.download_update(update_info["asset_url"], new_exe_path,
-                                                     lambda s, p: self.root.after(0, self._update_progress_ui, s, p))
+                                                     lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
+        
+        # ... _start_update_process 方法的其余部分保持不变 ...
         if not download_ok:
             self.root.after(0, lambda: messagebox.showerror("更新失败", "下载新版本失败，请检查网络或稍后重试。", parent=self.root))
             self.root.after(0, self.later_btn.master.master.destroy)

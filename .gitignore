@@ -28,7 +28,7 @@ config.json
 汉化包测试/
 downloads/
 RELEASE_NOTES.md
-
+Dict-Sqlite.db
 # 其他可能包含密钥的文件
 .env
 packaging

@@ -6,8 +6,9 @@ import logging
 
 CONFIG_FILE_PATH = Path("config.json")
 
-# --- MODIFICATION: Restored the explicit JSON instruction in the prompt ---
-# This is crucial when not using a strict response_schema.
+# --- MODIFIED: A much stricter, "bulletproof" prompt ---
+# This version adds strong negative constraints and re-emphasizes the output format
+# to minimize the chance of the AI returning malformed JSON.
 DEFAULT_PROMPT = """
 你是一名精通《我的世界》(Minecraft) 游戏模组的专业汉化者。
 请将输入JSON数组中的每一个英文短语或句子精确地翻译成简体中文。
@@ -15,8 +16,11 @@ DEFAULT_PROMPT = """
 核心翻译规则：
 - **精准翻译**: 必须保持原文的技术术语、游戏机制和语气。
 - **格式保留**: 必须完整保留原文中的所有格式化代码（例如 %s, %d, §a, \n 等）。
+- **数量一致**: 返回的JSON数组中的元素数量必须与输入数组严格相等。
 
-你的回复必须只包含一个JSON数组，数组元素为翻译后的字符串。
+输出格式要求：
+- 你的回复**必须且只能是**一个符合JSON规范的数组，例如 ["翻译1", "翻译2", ...]。
+- **绝对不要**在回复中包含任何JSON格式之外的解释性文字、注释或代码块标记 (```json ... ```)。
 
 输入: {input_texts}
 """
@@ -26,6 +30,7 @@ DEFAULT_CONFIG = {
     "prompt": DEFAULT_PROMPT.strip(),
     "api_endpoint": "", "use_grounding": False, "ai_batch_size": 50, "ai_max_threads": 4,
     "ai_max_retries": 3, "ai_retry_interval": 2, "mods_dir": "", "output_dir": "",
+    "community_dict_path": "",
     "community_pack_paths": [], 
     "pack_settings_presets": {
         "默认预案": {"pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""}
@@ -34,7 +39,6 @@ DEFAULT_CONFIG = {
         "pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""}
 }
 
-# ... [load_config and save_config methods remain unchanged] ...
 def load_config() -> dict:
     if not CONFIG_FILE_PATH.exists():
         logging.info("未找到配置文件，正在创建默认的 config.json...")
@@ -43,8 +47,17 @@ def load_config() -> dict:
     try:
         with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
             config = json.load(f)
+            
+            # Backward compatibility for old key
+            if "global_dict_path" in config and "community_dict_path" not in config:
+                config["community_dict_path"] = config.pop("global_dict_path")
+                
             for key, value in DEFAULT_CONFIG.items():
-                config.setdefault(key, value)
+                if key == "prompt" and "绝对不要" not in config.get("prompt", ""):
+                    # Force update to the new, stricter prompt if the old one is detected
+                    config["prompt"] = DEFAULT_CONFIG["prompt"]
+                else:
+                    config.setdefault(key, value)
             return config
     except (json.JSONDecodeError, TypeError):
         logging.error("配置文件格式错误或损坏，将加载默认配置并覆盖旧文件。")

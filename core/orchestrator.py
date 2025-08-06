@@ -1,6 +1,6 @@
 # core/orchestrator.py
 
-import logging # 只需要导入 logging
+import logging 
 from pathlib import Path
 from core.data_aggregator import DataAggregator
 from core.decision_engine import DecisionEngine
@@ -16,23 +16,25 @@ class Orchestrator:
 
     def run_workflow(self):
         try:
-            # --- 阶段 1: 聚合数据 ---
             p_agg_base, p_agg_range = 0, 20
             self.progress_callback(f"阶段 1/4: 准备聚合文件...", p_agg_base)
-            aggregator = DataAggregator(Path(self.settings['mods_dir']), [Path(p) for p in self.settings.get('zip_paths', [])])
-            master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
+            
+            aggregator = DataAggregator(
+                Path(self.settings['mods_dir']), 
+                [Path(p) for p in self.settings.get('zip_paths', [])],
+                self.settings.get('community_dict_path', '')
+            )
+            community_dict, master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
+            
             if not master_english_dicts:
-                logging.error("未能从Mods文件夹提取任何有效原文。")
                 raise ValueError("未能从Mods文件夹提取任何有效原文。请确保Mods文件夹内有.jar模组文件。")
 
-            # --- 阶段 2: 决策引擎 ---
             p_dec_base, p_dec_range = 20, 5
             self.progress_callback("阶段 2/4: 应用翻译优先级...", p_dec_base)
             engine = DecisionEngine()
-            final_translations_lookup, items_for_ai = engine.run(master_english_dicts, internal_chinese, pack_chinese)
+            final_translations_lookup, items_for_ai = engine.run(community_dict, master_english_dicts, internal_chinese, pack_chinese)
             self.progress_callback("阶段 2/4: 决策完成", p_dec_base + p_dec_range)
             
-            # --- 阶段 3: AI 翻译 (已优化) ---
             p_ai_base, p_ai_range = 25, 70
             use_ai = items_for_ai and self.settings.get('api_keys')
             
@@ -48,16 +50,13 @@ class Orchestrator:
                 
                 if total_batches > 0:
                     with ThreadPoolExecutor(max_workers=max_threads) as executor:
-                        future_to_batch_index = {}
-                        for i, batch in enumerate(text_batches):
-                            batch_args = (
-                                i, batch, self.settings['model'], self.settings['prompt'],
-                                self.settings.get('ai_max_retries', 3), 
-                                self.settings.get('ai_retry_interval', 2),
-                                self.settings.get('use_grounding', False)
-                            )
-                            future = executor.submit(translator.translate_batch, batch_args)
-                            future_to_batch_index[future] = i
+                        future_to_batch_index = {
+                            executor.submit(
+                                translator.translate_batch, 
+                                (i, batch, self.settings['model'], self.settings['prompt'], 0, 0, self.settings.get('use_grounding', False))
+                            ): i
+                            for i, batch in enumerate(text_batches)
+                        }
 
                         completed_batches = 0
                         for future in as_completed(future_to_batch_index):
@@ -65,9 +64,11 @@ class Orchestrator:
                             try:
                                 result_batch = future.result()
                                 translations_nested[batch_index] = result_batch
+                            # --- MODIFIED: This now implements a "fail-fast" strategy ---
                             except Exception as exc:
-                                logging.error(f"批次 {batch_index + 1} 翻译时发生严重错误: {exc}", exc_info=True)
-                                translations_nested[batch_index] = text_batches[batch_index]
+                                logging.critical(f"翻译线程池中的批次 {batch_index + 1} 遭遇不可恢复的致命错误: {exc}", exc_info=True)
+                                # Re-raise the exception to halt the entire workflow, preventing a partial (and incorrect) result.
+                                raise exc
                             
                             completed_batches += 1
                             progress_percentage = p_ai_base + (completed_batches / total_batches) * p_ai_range
@@ -75,18 +76,18 @@ class Orchestrator:
                             self.progress_callback(status_message, progress_percentage)
 
                 translations = list(itertools.chain.from_iterable(translations_nested))
-                if translations and len(translations) == len(items_for_ai):
-                    for i, (namespace, key, _) in enumerate(items_for_ai):
-                        final_translations_lookup[namespace][key] = translations[i]
-                    logging.info("AI翻译结果已成功回填。")
-                else:
-                    logging.error("AI翻译返回结果异常，部分文本可能未被翻译。")
+                if not translations or len(translations) != len(items_for_ai):
+                    raise ValueError("AI翻译返回结果异常或为空，流程中止。")
+
+                for i, (namespace, key, _) in enumerate(items_for_ai):
+                    final_translations_lookup[namespace][key] = translations[i]
+                logging.info("AI翻译结果已成功回填。")
+
             else:
                 final_progress = p_ai_base + p_ai_range
                 self.progress_callback(f"阶段 3/4: 跳过AI翻译", final_progress)
                 logging.info("未提供API密钥或没有待翻译内容，跳过AI翻译阶段。")
 
-            # --- 阶段 4: 构建资源包 ---
             p_build_base, p_build_range = 95, 5
             self.progress_callback("阶段 4/4: 准备生成资源包...", p_build_base)
             builder = PackBuilder()
@@ -104,7 +105,5 @@ class Orchestrator:
                 raise RuntimeError(f"构建资源包失败: {msg}")
 
         except Exception as e:
-            # 使用 CRITICAL 记录致命错误，并附带 exc_info=True
-            # 这会自动将完整的错误堆栈信息记录到日志文件中
             logging.critical(f"工作流执行出错: {e}", exc_info=True)
             self.progress_callback(f"错误: {e}", -1)

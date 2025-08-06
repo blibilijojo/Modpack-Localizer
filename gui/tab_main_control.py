@@ -85,7 +85,6 @@ class PackSettingsDialog(tk.Toplevel):
         self.destroy()
 
 class TabMainControl:
-    # --- MODIFIED: Update constructor signature ---
     def __init__(self, parent, ai_service_tab, ai_parameters_tab, pack_settings_tab):
         self.frame = ttk.Frame(parent, padding="10")
         self.ai_service_tab = ai_service_tab
@@ -99,8 +98,13 @@ class TabMainControl:
         
         self.mods_dir_var = tk.StringVar(value=self.config.get("mods_dir", ""))
         self._create_path_entry(path_frame, "Mods 文件夹:", self.mods_dir_var, "directory", "包含所有.jar模组文件的文件夹")
+        
+        # --- MODIFIED: Updated variable name, label, and tooltip ---
+        self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
+        self._create_path_entry(path_frame, "社区词典文件:", self.community_dict_var, "file", "可选。一个包含补充翻译的 Dict-Sqlite.db 文件")
 
-        packs_frame = ttk.LabelFrame(path_frame, text="社区汉化包列表 (优先级由上至下)", padding="10")
+        # --- MODIFIED: Updated frame label ---
+        packs_frame = ttk.LabelFrame(path_frame, text="第三方汉化包列表 (优先级由上至下)", padding="10")
         packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         
         list_container = ttk.Frame(packs_frame)
@@ -119,6 +123,8 @@ class TabMainControl:
         list_btn_frame.pack(fill="x", pady=(5,0))
 
         add_btn = ttk.Button(list_btn_frame, text="✚ 添加", command=self._add_packs, bootstyle="success-outline", width=8)
+        # --- MODIFIED: Updated tooltip ---
+        ToolTip(add_btn, "添加一个或多个第三方汉化资源包(.zip)")
         add_btn.pack(side="left", padx=2)
         remove_btn = ttk.Button(list_btn_frame, text="✖ 移除", command=self._remove_packs, bootstyle="danger-outline", width=8)
         remove_btn.pack(side="left", padx=2)
@@ -139,8 +145,11 @@ class TabMainControl:
         self._create_log_frame()
 
     def _save_config(self):
+        """Saves all path settings from the UI to the config file."""
         self.config["mods_dir"] = self.mods_dir_var.get()
         self.config["output_dir"] = self.output_dir_var.get()
+        # --- MODIFIED: Updated variable and key name ---
+        self.config["community_dict_path"] = self.community_dict_var.get()
         self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
         config_manager.save_config(self.config)
 
@@ -157,7 +166,9 @@ class TabMainControl:
         def browse_and_save():
             if browse_type == "directory":
                 ui_utils.browse_directory(var)
-            else:
+            elif browse_type == "file":
+                ui_utils.browse_file(var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")])
+            else: # Handle zip files specifically
                 ui_utils.browse_file(var, [("ZIP压缩包", "*.zip")])
         
         ttk.Button(row_frame, text="浏览...", command=browse_and_save, bootstyle="primary-outline").pack(side="left")
@@ -186,15 +197,15 @@ class TabMainControl:
         
         try:
             self._save_config()
-            # --- MODIFIED: Collect settings from both AI tabs ---
             service_settings = self.ai_service_tab.get_and_save_settings()
             param_settings = self.ai_parameters_tab.get_and_save_settings()
             
-            # Combine all settings into a single dictionary
             settings = {**service_settings, **param_settings}
             
             settings['mods_dir'] = self.config.get("mods_dir", "")
             settings['output_dir'] = self.config.get("output_dir", "")
+            # --- MODIFIED: Pass the new path with the correct key ---
+            settings['community_dict_path'] = self.config.get("community_dict_path", "")
             settings['zip_paths'] = self.config.get("community_pack_paths", [])
             settings['pack_settings'] = pack_settings
             
@@ -214,14 +225,15 @@ class TabMainControl:
         except Exception as e:
             self.update_progress(f"启动失败: {e}", -1)
 
-    # ... [The rest of the methods remain unchanged] ...
     def _add_packs(self):
-        paths = filedialog.askopenfilenames(title="选择一个或多个社区汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")])
+        # --- MODIFIED: Updated dialog title ---
+        paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")])
         for path in paths:
             if path not in self.packs_listbox.get(0, tk.END):
                 self.packs_listbox.insert(tk.END, path)
         self._save_config()
 
+    # ... [The rest of the methods remain unchanged] ...
     def _remove_packs(self):
         selected_indices = self.packs_listbox.curselection()
         for i in reversed(selected_indices):

@@ -210,15 +210,36 @@ class TabMainControl:
                 self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。"))
                 return
             
+            # --- 关键修复：使用自定义对话框和 wait_variable 解决死锁 ---
             msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"
             
-            user_wants_to_update = tk.BooleanVar(value=False) # Default to False
+            user_wants_to_update = tk.BooleanVar(value=False)
             
-            def ask_on_main_thread():
-                result = ui_utils.show_warning("发现新版本", msg)
-                user_wants_to_update.set(result)
+            def create_and_show_dialog():
+                dialog = Toplevel(self.root)
+                dialog.title("发现新版本")
+                dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
+                
+                main_frame = ttk.Frame(dialog, padding=20)
+                main_frame.pack(fill="both", expand=True)
+                ttk.Label(main_frame, text=msg, justify="left").pack(pady=(0, 20))
+                
+                btn_frame = ttk.Frame(main_frame)
+                btn_frame.pack(fill="x")
+                
+                def on_yes():
+                    user_wants_to_update.set(True)
+                    dialog.destroy()
+                
+                def on_no():
+                    user_wants_to_update.set(False)
+                    dialog.destroy()
+                
+                ttk.Button(btn_frame, text="立即更新", command=on_yes, bootstyle="success").pack(side="right", padx=5)
+                ttk.Button(btn_frame, text="稍后提醒", command=on_no).pack(side="right")
+                dialog.protocol("WM_DELETE_WINDOW", on_no)
 
-            self.root.after(0, ask_on_main_thread)
+            self.root.after(0, create_and_show_dialog)
             self.root.wait_variable(user_wants_to_update)
 
             if not user_wants_to_update.get():

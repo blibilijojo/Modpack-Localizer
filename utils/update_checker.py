@@ -57,7 +57,7 @@ def check_for_updates(current_version_str: str) -> dict | None:
         return None
 
 def download_update(url: str, save_path: Path, progress_callback=None) -> bool:
-    logging.info(f"开始下载更新文件... URL: {url}")
+    logging.info(f"开始下载文件... URL: {url}")
     
     try:
         with requests.get(url, stream=True, timeout=180) as r:

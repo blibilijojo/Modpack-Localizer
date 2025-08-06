@@ -12,8 +12,6 @@ from pathlib import Path
 import os
 import sys
 import subprocess
-import random
-import json
 import time
 from gui.custom_widgets import ToolTip
 from utils import config_manager
@@ -196,10 +194,6 @@ class TabMainControl:
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
 
-    def _format_speed(self, speed_bps: float) -> str:
-        if speed_bps > 1024 * 1024: return f"{speed_bps / (1024 * 1024):.2f} MB/s"
-        return f"{speed_bps / 1024:.1f} KB/s"
-
     def _dict_update_worker(self):
         try:
             remote_info = self._get_remote_dict_info()
@@ -216,26 +210,21 @@ class TabMainControl:
                 self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。"))
                 return
             
-            # --- 关键修复：使用 wait_variable 实现线程同步 ---
             msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"
             
-            user_wants_to_update = tk.BooleanVar()
+            user_wants_to_update = tk.BooleanVar(value=False) # Default to False
             
             def ask_on_main_thread():
-                # 这个函数将在主线程中执行，安全地显示对话框
                 result = ui_utils.show_warning("发现新版本", msg)
                 user_wants_to_update.set(result)
 
             self.root.after(0, ask_on_main_thread)
-            # 后台线程在这里暂停，等待主线程的 ask_on_main_thread 函数设置 user_wants_to_update 变量
             self.root.wait_variable(user_wants_to_update)
 
-            # 当用户点击按钮后，wait_variable 结束，我们可以在这里获取结果
             if not user_wants_to_update.get():
                 logging.info("用户选择不更新社区词典。")
-                return # 线程结束
+                return
 
-            # --- 用户同意更新，继续执行下载 ---
             progress_dialog = DownloadProgressDialog(self.root, title="下载社区词典")
             
             STABLE_PROXY_URL = "https://lucky-moth-20.deno.dev/"

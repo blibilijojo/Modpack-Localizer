@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import time
 
-# 从单一信息源导入版本号
 from _version import __version__
 
 def cleanup_old_files():
@@ -28,7 +27,6 @@ def cleanup_old_files():
     except Exception as e:
         logging.warning(f"删除旧版本文件失败，可能需要手动删除: {e}")
 
-# 将项目根目录添加到Python的模块搜索路径中
 try:
     script_dir = Path(__file__).resolve().parent
     if str(script_dir) not in sys.path:
@@ -38,10 +36,9 @@ except NameError:
     if str(script_dir) not in sys.path:
         sys.path.insert(0, str(script_dir))
 
-# 导入新的日志设置函数和主窗口
 from utils.logger_setup import setup_logging
-from gui.main_window import MainWindow
 from utils.config_manager import load_config
+from gui.main_window import MainWindow
 
 if __name__ == '__main__':
     cleanup_old_files()

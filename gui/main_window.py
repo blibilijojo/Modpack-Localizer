@@ -3,18 +3,13 @@
 import tkinter as tk
 from tkinter import messagebox, Toplevel
 import ttkbootstrap as ttk
-from tkinter import scrolledtext
-from gui import ui_utils
-from core.orchestrator import Orchestrator
+import logging
 import threading
-import requests
-from pathlib import Path
-import os
+import webbrowser
 import sys
 import subprocess
-import random
-import json
-import time
+from pathlib import Path
+import os
 from gui.custom_widgets import ToolTip
 from utils import config_manager, update_checker
 from _version import __version__ 
@@ -34,7 +29,6 @@ class MainWindow:
         notebook = ttk.Notebook(notebook_frame)
         notebook.pack(fill="both", expand=True)
 
-        # 解决循环导入的最终方案：将 main_control_tab 的创建和 setup_logging 放在一起
         from gui.tab_main_control import TabMainControl
         from gui.tab_ai_service import TabAiService
         from gui.tab_ai_parameters import TabAiParameters
@@ -117,17 +111,12 @@ class MainWindow:
         self.progress_bar['value'] = percentage
 
     def _start_update_process(self, update_info: dict):
-        # --- 关键修复：尊重用户自定义的文件名 ---
-        
-        # 1. 动态获取当前正在运行的程序路径和名称
         current_exe_path = Path(sys.executable)
         exe_dir = current_exe_path.parent
         
-        # 2. 定义临时文件和备份文件的路径，严格基于当前运行的文件名
         new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new")
         old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
 
-        # 3. 下载新版本
         download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path,
                                                      lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
         if not download_ok:
@@ -135,33 +124,22 @@ class MainWindow:
             self.root.after(0, self.later_btn.master.master.destroy)
             return
 
-        # 4. 创建健壮的、使用动态文件名的批处理脚本
         batch_script_path = exe_dir / "update.bat"
         script_content = f"""
 @echo off
 echo 更新程序正在执行...
 echo.
-:: 1. 等待主程序完全退出 (3秒)，确保文件锁释放
 ping 127.0.0.1 -n 4 > nul
-
-:: 2. 将当前正在运行的程序（无论叫什么）重命名为备份
 echo 备份当前版本...
 move /Y "{current_exe_path}" "{old_exe_backup_path}"
-
-:: 3. 将下载的 .new 文件重命名为当前程序原来的名字
 echo 应用新版本...
 move /Y "{new_exe_temp_path}" "{current_exe_path}"
-
-:: 4. 重新启动更新后的程序
 echo 重启应用程序...
 start "" "{current_exe_path}"
-
-:: 5. 删除自己这个批处理脚本
 del "%~f0"
 """
         with open(batch_script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
 
-        # 5. 启动批处理脚本并退出本程序
         subprocess.Popen(f'"{batch_script_path}"', shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
         self.root.after(100, self.root.destroy)

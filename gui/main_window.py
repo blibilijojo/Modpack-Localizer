@@ -1,27 +1,26 @@
 # gui/main_window.py
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, Toplevel
 import ttkbootstrap as ttk
-import logging
+from tkinter import scrolledtext
+from gui import ui_utils
+from core.orchestrator import Orchestrator
 import threading
-import webbrowser
+import requests
+from pathlib import Path
+import os
 import sys
 import subprocess
-from pathlib import Path
-
-# (导入部分保持不变)
-from gui.tab_main_control import TabMainControl
-from gui.tab_ai_service import TabAiService
-from gui.tab_ai_parameters import TabAiParameters
-from gui.tab_pack_settings import TabPackSettings
-from utils.logger_setup import setup_logging
-from utils import update_checker
+import random
+import json
+import time
+from gui.custom_widgets import ToolTip
+from utils import config_manager, update_checker
 from _version import __version__ 
 
 class MainWindow:
     def __init__(self, root: ttk.Window):
-        # ... __init__ 方法的前半部分保持不变 ...
         self.root = root
         self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
         self.root.geometry("850x950") 
@@ -35,21 +34,27 @@ class MainWindow:
         notebook = ttk.Notebook(notebook_frame)
         notebook.pack(fill="both", expand=True)
 
+        # 解决循环导入的最终方案：将 main_control_tab 的创建和 setup_logging 放在一起
+        from gui.tab_main_control import TabMainControl
+        from gui.tab_ai_service import TabAiService
+        from gui.tab_ai_parameters import TabAiParameters
+        from gui.tab_pack_settings import TabPackSettings
+        
         ai_service_tab = TabAiService(notebook)
         ai_parameters_tab = TabAiParameters(notebook)
         pack_settings_tab = TabPackSettings(notebook)
-        main_control_tab = TabMainControl(notebook, ai_service_tab, ai_parameters_tab, pack_settings_tab)
+        self.main_control_tab = TabMainControl(notebook, ai_service_tab, ai_parameters_tab, pack_settings_tab)
 
-        notebook.add(main_control_tab.frame, text=" 一键汉化 ")
+        notebook.add(self.main_control_tab.frame, text=" 一键汉化 ")
         notebook.add(ai_service_tab.frame, text=" AI 服务 ")
         notebook.add(ai_parameters_tab.frame, text=" AI 参数 ")
         notebook.add(pack_settings_tab.frame, text=" 资源包设置 ")
-        main_pane.add(main_control_tab.get_log_frame(), weight=1)
+        main_pane.add(self.main_control_tab.get_log_frame(), weight=1)
 
-        setup_logging(main_control_tab.log_message)
+        from utils.logger_setup import setup_logging
+        setup_logging(self.main_control_tab.log_message)
         self.start_update_check()
-        
-    # ... _create_menu, start_update_check, _check_for_updates_thread, _show_update_dialog 方法保持不变 ...
+
     def _create_menu(self):
         menu_bar = tk.Menu(self.root)
         self.root.config(menu=menu_bar)
@@ -74,17 +79,17 @@ class MainWindow:
         if update_info:
             self.root.after(0, self._show_update_dialog, update_info)
         elif user_initiated:
-            self.root.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，你使用的已是最新版本！"))
+            self.root.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，您使用的已是最新版本！"))
 
     def _show_update_dialog(self, update_info: dict):
-        dialog = tk.Toplevel(self.root)
+        dialog = Toplevel(self.root)
         dialog.title(f"发现新版本: {update_info['version']}")
         dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
 
         message_frame = ttk.Frame(dialog, padding=20)
         message_frame.pack(fill="x")
+        
         message_text = (f"一个新版本 ({update_info['version']}) 可用！\n\n"
-                        f"更新日志:\n---\n{update_info['notes']}\n---\n\n"
                         "是否立即下载并安装更新？")
         ttk.Label(message_frame, text=message_text, justify="left").pack(anchor="w")
 
@@ -106,49 +111,57 @@ class MainWindow:
         self.update_btn.pack(side="right", padx=5)
         self.later_btn = ttk.Button(btn_frame, text="稍后提醒", command=dialog.destroy)
         self.later_btn.pack(side="right")
-
-    def _update_progress_ui(self, status: str, percentage: float, speed: str):
-        """更新下载对话框中的UI元素，现在包含速度。"""
-        # --- 关键修改：在状态文本中加入速度信息 ---
+        
+    def _update_progress_ui(self, status, percentage, speed):
         self.status_label.config(text=f"{status}... {int(percentage)}% ({speed})")
         self.progress_bar['value'] = percentage
 
     def _start_update_process(self, update_info: dict):
-        current_exe = Path(sys.executable)
-        exe_name = current_exe.name
-        exe_dir = current_exe.parent
-        new_exe_path = exe_dir / (exe_name + ".new")
-        old_exe_path = exe_dir / (exe_name + ".old")
-        batch_script_path = exe_dir / "update.bat"
-
-        # --- 关键修改：传递新的回调函数签名 ---
-        download_ok = update_checker.download_update(update_info["asset_url"], new_exe_path,
-                                                     lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
+        # --- 关键修复：尊重用户自定义的文件名 ---
         
-        # ... _start_update_process 方法的其余部分保持不变 ...
+        # 1. 动态获取当前正在运行的程序路径和名称
+        current_exe_path = Path(sys.executable)
+        exe_dir = current_exe_path.parent
+        
+        # 2. 定义临时文件和备份文件的路径，严格基于当前运行的文件名
+        new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new")
+        old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
+
+        # 3. 下载新版本
+        download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path,
+                                                     lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
         if not download_ok:
             self.root.after(0, lambda: messagebox.showerror("更新失败", "下载新版本失败，请检查网络或稍后重试。", parent=self.root))
             self.root.after(0, self.later_btn.master.master.destroy)
             return
 
+        # 4. 创建健壮的、使用动态文件名的批处理脚本
+        batch_script_path = exe_dir / "update.bat"
         script_content = f"""
 @echo off
 echo 更新程序正在执行...
 echo.
+:: 1. 等待主程序完全退出 (3秒)，确保文件锁释放
 ping 127.0.0.1 -n 4 > nul
-if exist "{old_exe_path}" (
-    del /F /Q "{old_exe_path}"
-)
+
+:: 2. 将当前正在运行的程序（无论叫什么）重命名为备份
 echo 备份当前版本...
-move /Y "{current_exe}" "{old_exe_path}"
+move /Y "{current_exe_path}" "{old_exe_backup_path}"
+
+:: 3. 将下载的 .new 文件重命名为当前程序原来的名字
 echo 应用新版本...
-move /Y "{new_exe_path}" "{current_exe}"
+move /Y "{new_exe_temp_path}" "{current_exe_path}"
+
+:: 4. 重新启动更新后的程序
 echo 重启应用程序...
-start "" "{current_exe}"
+start "" "{current_exe_path}"
+
+:: 5. 删除自己这个批处理脚本
 del "%~f0"
 """
         with open(batch_script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
 
+        # 5. 启动批处理脚本并退出本程序
         subprocess.Popen(f'"{batch_script_path}"', shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
         self.root.after(100, self.root.destroy)

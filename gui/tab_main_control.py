@@ -12,11 +12,14 @@ from pathlib import Path
 import os
 import sys
 import subprocess
+import random
+import json # Ensure json is imported for JSONDecodeError check
 from gui.custom_widgets import ToolTip
 from utils import config_manager
+import logging
 
-# ... [PackSettingsDialog class remains unchanged] ...
 class PackSettingsDialog(tk.Toplevel):
+    # ... (此内部类无需任何改动) ...
     def __init__(self, parent, presets_dict):
         super().__init__(parent)
         self.title("选择资源包元数据")
@@ -99,11 +102,35 @@ class TabMainControl:
         self.mods_dir_var = tk.StringVar(value=self.config.get("mods_dir", ""))
         self._create_path_entry(path_frame, "Mods 文件夹:", self.mods_dir_var, "directory", "包含所有.jar模组文件的文件夹")
         
-        # --- MODIFIED: Updated variable name, label, and tooltip ---
         self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
-        self._create_path_entry(path_frame, "社区词典文件:", self.community_dict_var, "file", "可选。一个包含补充翻译的 Dict-Sqlite.db 文件")
+        
+        dict_path_frame = ttk.Frame(path_frame)
+        dict_path_frame.pack(fill="x", pady=5)
+        
+        dict_label = ttk.Label(dict_path_frame, text="社区词典文件:", width=15)
+        dict_label.pack(side="left")
+        ToolTip(dict_label, "可选。一个包含补充翻译的 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
+        
+        dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var)
+        dict_entry.pack(side="left", fill="x", expand=True, padx=5)
+        self.community_dict_var.trace_add("write", lambda *args: self._save_config())
+        
+        browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline")
+        browse_btn.pack(side="left")
 
-        # --- MODIFIED: Updated frame label ---
+        self.download_dict_button = ttk.Button(dict_path_frame, text="下载最新", command=self._download_community_dict_async, bootstyle="info")
+        self.download_dict_button.pack(side="left", padx=(5, 0))
+        ToolTip(self.download_dict_button, "从GitHub仓库下载最新的社区词典文件。\n文件将保存到程序目录下。")
+
+        proxy_frame = ttk.Frame(path_frame)
+        proxy_frame.pack(fill="x", padx=5, pady=(0, 5))
+        
+        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
+        proxy_check = ttk.Checkbutton(proxy_frame, text="使用 GitHub 代理加速词典下载", variable=self.use_proxy_var, bootstyle="primary")
+        proxy_check.pack(side="left", padx=(105, 0)) # Align with entry boxes
+        ToolTip(proxy_check, "开启后，在下载社区词典时会自动检测并使用可用的CDN代理，解决国内访问GitHub困难的问题。")
+        self.use_proxy_var.trace_add("write", lambda *args: self._save_config())
+        
         packs_frame = ttk.LabelFrame(path_frame, text="第三方汉化包列表 (优先级由上至下)", padding="10")
         packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         
@@ -123,7 +150,6 @@ class TabMainControl:
         list_btn_frame.pack(fill="x", pady=(5,0))
 
         add_btn = ttk.Button(list_btn_frame, text="✚ 添加", command=self._add_packs, bootstyle="success-outline", width=8)
-        # --- MODIFIED: Updated tooltip ---
         ToolTip(add_btn, "添加一个或多个第三方汉化资源包(.zip)")
         add_btn.pack(side="left", padx=2)
         remove_btn = ttk.Button(list_btn_frame, text="✖ 移除", command=self._remove_packs, bootstyle="danger-outline", width=8)
@@ -148,9 +174,9 @@ class TabMainControl:
         """Saves all path settings from the UI to the config file."""
         self.config["mods_dir"] = self.mods_dir_var.get()
         self.config["output_dir"] = self.output_dir_var.get()
-        # --- MODIFIED: Updated variable and key name ---
         self.config["community_dict_path"] = self.community_dict_var.get()
         self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
+        self.config["use_github_proxy"] = self.use_proxy_var.get() # Save proxy setting
         config_manager.save_config(self.config)
 
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
@@ -168,7 +194,7 @@ class TabMainControl:
                 ui_utils.browse_directory(var)
             elif browse_type == "file":
                 ui_utils.browse_file(var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")])
-            else: # Handle zip files specifically
+            else: 
                 ui_utils.browse_file(var, [("ZIP压缩包", "*.zip")])
         
         ttk.Button(row_frame, text="浏览...", command=browse_and_save, bootstyle="primary-outline").pack(side="left")
@@ -204,7 +230,6 @@ class TabMainControl:
             
             settings['mods_dir'] = self.config.get("mods_dir", "")
             settings['output_dir'] = self.config.get("output_dir", "")
-            # --- MODIFIED: Pass the new path with the correct key ---
             settings['community_dict_path'] = self.config.get("community_dict_path", "")
             settings['zip_paths'] = self.config.get("community_pack_paths", [])
             settings['pack_settings'] = pack_settings
@@ -226,14 +251,12 @@ class TabMainControl:
             self.update_progress(f"启动失败: {e}", -1)
 
     def _add_packs(self):
-        # --- MODIFIED: Updated dialog title ---
         paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")])
         for path in paths:
             if path not in self.packs_listbox.get(0, tk.END):
                 self.packs_listbox.insert(tk.END, path)
         self._save_config()
 
-    # ... [The rest of the methods remain unchanged] ...
     def _remove_packs(self):
         selected_indices = self.packs_listbox.curselection()
         for i in reversed(selected_indices):
@@ -343,3 +366,121 @@ class TabMainControl:
                 ui_utils.show_error("打开失败", f"无法打开文件夹：{e}")
         else:
             ui_utils.show_error("路径无效", "输出文件夹路径不存在或无效")
+    
+    def _download_community_dict_async(self):
+        self.download_dict_button.config(state="disabled", text="下载中...")
+        threading.Thread(target=self._download_worker, daemon=True).start()
+
+    def _find_available_proxy(self) -> str | None:
+        """
+        Finds a working GitHub proxy by testing them in random order.
+        A proxy is considered working if it can successfully access the GitHub API rate_limit endpoint.
+        Returns the base URL of the working proxy (e.g., "gh-proxy.com").
+        """
+        proxies = self.config.get("github_proxies", [])
+        if not proxies:
+            logging.warning("GitHub代理列表为空。")
+            return None
+        
+        random.shuffle(proxies)
+        
+        # This is the original GitHub API URL, which will be proxied
+        CHECK_API_URL_ORIGINAL = "https://api.github.com/rate_limit" 
+        
+        for proxy_base_url in proxies:
+            # Construct the full URL that goes through the CDN proxy
+            # Example: https://gh-proxy.com/https://api.github.com/rate_limit
+            proxied_check_url = f"https://{proxy_base_url}/{CHECK_API_URL_ORIGINAL}"
+            logging.info(f"正在测试GitHub代理: {proxy_base_url}...")
+            try:
+                # Use a GET request with a short timeout
+                response = requests.get(proxied_check_url, timeout=5) 
+                
+                if response.status_code == 200:
+                    try:
+                        # Ensure it's a valid JSON response from GitHub API
+                        # Some proxies might return 200 but with garbage content.
+                        response.json() 
+                        logging.info(f"代理 {proxy_base_url} 可用！")
+                        return proxy_base_url
+                    except json.JSONDecodeError:
+                        logging.warning(f"代理 {proxy_base_url} 返回非JSON响应，可能无法正确代理API请求。")
+                        continue # Try the next one
+                else:
+                    logging.warning(f"代理 {proxy_base_url} 测试失败，状态码: {response.status_code}")
+            except (requests.exceptions.RequestException, requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                logging.warning(f"代理 {proxy_base_url} 测试失败: {e}")
+                continue # Try the next one
+        
+        logging.error("所有GitHub代理均测试失败。")
+        return None
+
+    def _download_worker(self):
+        """
+        Performs the download logic, using CDN proxy if enabled and available.
+        """
+        # Original GitHub API URL for latest release
+        GITHUB_API_RELEASE_URL = "https://api.github.com/repos/blibilijojo/i18n-Dict-Extender/releases/latest"
+        DEST_FILE = Path("Dict-Sqlite.db").resolve()
+        
+        chosen_proxy_base = None
+        if self.use_proxy_var.get():
+            logging.info("已启用GitHub代理，正在寻找可用CDN代理...")
+            chosen_proxy_base = self._find_available_proxy()
+            if not chosen_proxy_base:
+                error_message = "下载社区词典失败: 所有CDN代理均不可用。\n请尝试关闭代理后重试，或检查网络连接。"
+                self.root.after(0, self._update_ui_after_download, False, error_message)
+                return
+
+        try:
+            # Determine the URL for fetching release data (proxied or direct)
+            api_fetch_url = f"https://{chosen_proxy_base}/{GITHUB_API_RELEASE_URL}" if chosen_proxy_base else GITHUB_API_RELEASE_URL
+            
+            logging.info(f"正在向GitHub API发送请求: {api_fetch_url}")
+            response = requests.get(api_fetch_url, timeout=15)
+            response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
+            release_data = response.json()
+            
+            # Get the direct download URL for the asset from GitHub's response
+            asset_download_url_original = None
+            for asset in release_data.get("assets", []):
+                if asset.get("name") == "Dict-Sqlite.db":
+                    asset_download_url_original = asset.get("browser_download_url")
+                    break
+            
+            if not asset_download_url_original:
+                raise ValueError("在最新的Release中未找到'Dict-Sqlite.db'文件。")
+            
+            # Determine the final download URL (proxied or direct)
+            # Example proxied URL: https://gh-proxy.com/https://github.com/blibilijojo/.../Dict-Sqlite.db
+            final_download_url = f"https://{chosen_proxy_base}/{asset_download_url_original}" if chosen_proxy_base else asset_download_url_original
+            
+            logging.info(f"成功找到下载链接，开始下载: {final_download_url}")
+
+            with requests.get(final_download_url, stream=True, timeout=60) as r:
+                r.raise_for_status() # Raises HTTPError for 4xx/5xx responses during file download
+                with open(DEST_FILE, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            
+            logging.info(f"文件已成功下载到: {DEST_FILE}")
+            self.root.after(0, self._update_ui_after_download, True, str(DEST_FILE))
+
+        except requests.exceptions.RequestException as e:
+            # Catch all requests-related exceptions (HTTPError, ConnectionError, Timeout, etc.)
+            error_message = f"下载社区词典失败: 网络或CDN代理错误 - {e}"
+            logging.error(error_message, exc_info=True)
+            self.root.after(0, self._update_ui_after_download, False, error_message)
+        except Exception as e:
+            # Catch other general errors (e.g., JSON parsing failure, file not found in release)
+            error_message = f"下载社区词典失败: {e}"
+            logging.error(error_message, exc_info=True)
+            self.root.after(0, self._update_ui_after_download, False, error_message)
+
+    def _update_ui_after_download(self, success: bool, message: str):
+        self.download_dict_button.config(state="normal", text="下载最新")
+        if success:
+            self.community_dict_var.set(message)
+            ui_utils.show_info("下载成功", f"社区词典已更新！\n路径已自动设置为:\n{message}")
+        else:
+            ui_utils.show_error("下载失败", message)

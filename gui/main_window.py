@@ -14,8 +14,9 @@ class MainWindow:
     def __init__(self, root: ttk.Window):
         self.root = root
         self.root.title("Minecraft 整合包汉化工坊 Pro")
-        self.root.geometry("850x850") 
-        self.root.minsize(800, 750)
+        # --- MODIFIED: Adjusted window height and minsize ---
+        self.root.geometry("850x950") 
+        self.root.minsize(800, 850)
 
         main_pane = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
         main_pane.pack(fill="both", expand=True, padx=10, pady=10)
@@ -43,5 +44,3 @@ class MainWindow:
         # --- 将日志设置的调用放在这里 ---
         # 这样可以确保 main_control_tab.log_message 已经存在并可以作为回调函数传递
         setup_logging(main_control_tab.log_message)
-
-    # _setup_logging 方法已被新的 setup_logging 函数取代，可以删除

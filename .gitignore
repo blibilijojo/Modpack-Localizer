@@ -27,6 +27,7 @@ config.json
 模组包/
 汉化包测试/
 downloads/
+RELEASE_NOTES.md
 
 # 其他可能包含密钥的文件
 .env

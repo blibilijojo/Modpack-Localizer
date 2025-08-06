@@ -6,9 +6,6 @@ import logging
 
 CONFIG_FILE_PATH = Path("config.json")
 
-# --- MODIFIED: A much stricter, "bulletproof" prompt ---
-# This version adds strong negative constraints and re-emphasizes the output format
-# to minimize the chance of the AI returning malformed JSON.
 DEFAULT_PROMPT = """
 你是一名精通《我的世界》(Minecraft) 游戏模组的专业汉化者。
 请将输入JSON数组中的每一个英文短语或句子精确地翻译成简体中文。
@@ -25,6 +22,7 @@ DEFAULT_PROMPT = """
 输入: {input_texts}
 """
 
+# --- MODIFIED: Updated github_proxies list to new CDN bases ---
 DEFAULT_CONFIG = {
     "api_keys": [], "model": "gemini-1.5-flash-latest", "model_list": [],
     "prompt": DEFAULT_PROMPT.strip(),
@@ -36,7 +34,14 @@ DEFAULT_CONFIG = {
         "默认预案": {"pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""}
     },
     "last_pack_settings": {
-        "pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""}
+        "pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""},
+    "use_github_proxy": True,
+    "github_proxies": [ # 新的CDN加速服务基础URL，不包含协议头
+        "gh-proxy.com",
+        "hk.gh-proxy.com",
+        "cdn.gh-proxy.com",
+        "edgeone.gh-proxy.com"
+    ]
 }
 
 def load_config() -> dict:
@@ -48,13 +53,11 @@ def load_config() -> dict:
         with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
             config = json.load(f)
             
-            # Backward compatibility for old key
             if "global_dict_path" in config and "community_dict_path" not in config:
                 config["community_dict_path"] = config.pop("global_dict_path")
                 
             for key, value in DEFAULT_CONFIG.items():
                 if key == "prompt" and "绝对不要" not in config.get("prompt", ""):
-                    # Force update to the new, stricter prompt if the old one is detected
                     config["prompt"] = DEFAULT_CONFIG["prompt"]
                 else:
                     config.setdefault(key, value)

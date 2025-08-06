@@ -24,7 +24,7 @@ class Orchestrator:
                 [Path(p) for p in self.settings.get('zip_paths', [])],
                 self.settings.get('community_dict_path', '')
             )
-            community_dict, master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
+            community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
             
             if not master_english_dicts:
                 raise ValueError("未能从Mods文件夹提取任何有效原文。请确保Mods文件夹内有.jar模组文件。")
@@ -32,7 +32,18 @@ class Orchestrator:
             p_dec_base, p_dec_range = 20, 5
             self.progress_callback("阶段 2/4: 应用翻译优先级...", p_dec_base)
             engine = DecisionEngine()
-            final_translations_lookup, items_for_ai = engine.run(community_dict, master_english_dicts, internal_chinese, pack_chinese)
+            
+            final_translations_lookup, items_for_ai, key_contribution, origin_name_contribution = engine.run(
+                community_dict_by_key, community_dict_by_origin, 
+                master_english_dicts, internal_chinese, pack_chinese,
+                self.settings.get('use_origin_name_lookup', True)
+            )
+            
+            if key_contribution > 0:
+                logging.info(f"分析完成：社区词典通过 [精准 Key] 匹配贡献了 {key_contribution} 条翻译。")
+            if origin_name_contribution > 0:
+                logging.info(f"分析完成：社区词典通过 [原文 Origin Name] 匹配贡献了 {origin_name_contribution} 条翻译。")
+            
             self.progress_callback("阶段 2/4: 决策完成", p_dec_base + p_dec_range)
             
             p_ai_base, p_ai_range = 25, 70
@@ -64,10 +75,8 @@ class Orchestrator:
                             try:
                                 result_batch = future.result()
                                 translations_nested[batch_index] = result_batch
-                            # --- MODIFIED: This now implements a "fail-fast" strategy ---
                             except Exception as exc:
                                 logging.critical(f"翻译线程池中的批次 {batch_index + 1} 遭遇不可恢复的致命错误: {exc}", exc_info=True)
-                                # Re-raise the exception to halt the entire workflow, preventing a partial (and incorrect) result.
                                 raise exc
                             
                             completed_batches += 1
@@ -77,7 +86,7 @@ class Orchestrator:
 
                 translations = list(itertools.chain.from_iterable(translations_nested))
                 if not translations or len(translations) != len(items_for_ai):
-                    raise ValueError("AI翻译返回结果异常或为空，流程中止。")
+                    raise ValueError(f"AI翻译返回结果数量不匹配！预期: {len(items_for_ai)}, 得到: {len(translations)}。流程中止。")
 
                 for i, (namespace, key, _) in enumerate(items_for_ai):
                     final_translations_lookup[namespace][key] = translations[i]

@@ -73,10 +73,22 @@ class TabMainControl:
         self.community_dict_var.trace_add("write", lambda *args: self._save_config())
         browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline"); browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新词典", command=self._check_and_update_dict_async, bootstyle="info"); self.download_dict_button.pack(side="left", padx=(5, 0)); ToolTip(self.download_dict_button, "检查云端是否有新版本的社区词典，并按需下载。")
-        proxy_frame = ttk.Frame(path_frame); proxy_frame.pack(fill="x", padx=5, pady=(0, 5))
+        
+        options_frame_container = ttk.Frame(path_frame)
+        options_frame_container.pack(fill="x", padx=5, pady=(0, 5))
+        options_frame = ttk.Frame(options_frame_container)
+        options_frame.pack(padx=(105, 0))
+
+        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
+        origin_check = ttk.Checkbutton(options_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
+        origin_check.pack(side="left", padx=(0, 20))
+        ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文(Origin Name)进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+        self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_config())
+
         self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
-        proxy_check = ttk.Checkbutton(proxy_frame, text="使用 GitHub 代理加速词典下载", variable=self.use_proxy_var, bootstyle="primary"); proxy_check.pack(side="left", padx=(105, 0)); ToolTip(proxy_check, "开启后，在下载社区词典时会自动使用内置的代理服务，解决国内访问GitHub困难的问题。")
+        proxy_check = ttk.Checkbutton(options_frame, text="使用代理加速词典下载", variable=self.use_proxy_var, bootstyle="primary"); proxy_check.pack(side="left"); ToolTip(proxy_check, "开启后，在下载社区词典时会自动使用内置的代理服务，解决国内访问GitHub困难的问题。")
         self.use_proxy_var.trace_add("write", lambda *args: self._save_config())
+        
         packs_frame = ttk.LabelFrame(path_frame, text="第三方汉化包列表 (优先级由上至下)", padding="10"); packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         list_container = ttk.Frame(packs_frame); list_container.pack(fill="both", expand=True)
         scrollbar = ttk.Scrollbar(list_container, orient="vertical")
@@ -91,7 +103,16 @@ class TabMainControl:
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", "")); self._create_path_entry(path_frame, "输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
         self.start_button = ttk.Button(self.frame, text="--- 开始智能汉化更新 ---", command=self.start_workflow_prompt, bootstyle="success"); self.start_button.pack(fill="x", pady=20, ipady=10)
         self._create_log_frame()
-    def _save_config(self): self.config["mods_dir"] = self.mods_dir_var.get(); self.config["output_dir"] = self.output_dir_var.get(); self.config["community_dict_path"] = self.community_dict_var.get(); self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END)); self.config["use_github_proxy"] = self.use_proxy_var.get(); config_manager.save_config(self.config)
+    
+    def _save_config(self):
+        self.config["mods_dir"] = self.mods_dir_var.get()
+        self.config["output_dir"] = self.output_dir_var.get()
+        self.config["community_dict_path"] = self.community_dict_var.get()
+        self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
+        self.config["use_github_proxy"] = self.use_proxy_var.get()
+        self.config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
+        config_manager.save_config(self.config)
+
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
         row_frame = ttk.Frame(parent); row_frame.pack(fill="x", pady=5)
         label = ttk.Label(row_frame, text=label_text, width=15); label.pack(side="left"); ToolTip(label, tooltip)
@@ -102,6 +123,7 @@ class TabMainControl:
             elif browse_type == "file": ui_utils.browse_file(var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")])
             else: ui_utils.browse_file(var, [("ZIP压缩包", "*.zip")])
         ttk.Button(row_frame, text="浏览...", command=browse, bootstyle="primary-outline").pack(side="left")
+    
     def start_workflow_prompt(self):
         self.config = config_manager.load_config(); presets = self.config.get("pack_settings_presets", {})
         dialog = PackSettingsDialog(self.root, presets); choice = dialog.result
@@ -113,7 +135,7 @@ class TabMainControl:
         self._prepare_ui_for_workflow()
         try:
             self._save_config(); settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
-            settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings})
+            settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings, 'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True)})
             if not all([settings['mods_dir'], settings['output_dir']]): raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
             from core.orchestrator import Orchestrator
             orchestrator = Orchestrator(settings, self.update_progress)
@@ -210,7 +232,6 @@ class TabMainControl:
                 self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。"))
                 return
             
-            # --- 关键修复：使用自定义对话框和 wait_variable 解决死锁 ---
             msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"
             
             user_wants_to_update = tk.BooleanVar(value=False)
@@ -219,22 +240,11 @@ class TabMainControl:
                 dialog = Toplevel(self.root)
                 dialog.title("发现新版本")
                 dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
-                
-                main_frame = ttk.Frame(dialog, padding=20)
-                main_frame.pack(fill="both", expand=True)
+                main_frame = ttk.Frame(dialog, padding=20); main_frame.pack(fill="both", expand=True)
                 ttk.Label(main_frame, text=msg, justify="left").pack(pady=(0, 20))
-                
-                btn_frame = ttk.Frame(main_frame)
-                btn_frame.pack(fill="x")
-                
-                def on_yes():
-                    user_wants_to_update.set(True)
-                    dialog.destroy()
-                
-                def on_no():
-                    user_wants_to_update.set(False)
-                    dialog.destroy()
-                
+                btn_frame = ttk.Frame(main_frame); btn_frame.pack(fill="x")
+                def on_yes(): user_wants_to_update.set(True); dialog.destroy()
+                def on_no(): user_wants_to_update.set(False); dialog.destroy()
                 ttk.Button(btn_frame, text="立即更新", command=on_yes, bootstyle="success").pack(side="right", padx=5)
                 ttk.Button(btn_frame, text="稍后提醒", command=on_no).pack(side="right")
                 dialog.protocol("WM_DELETE_WINDOW", on_no)

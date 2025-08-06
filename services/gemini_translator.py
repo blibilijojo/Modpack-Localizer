@@ -7,6 +7,7 @@ import time
 from itertools import cycle
 import threading
 from utils.retry_logic import professional_retry
+from utils.error_logger import log_ai_error
 
 class GeminiTranslator:
     def __init__(self, api_keys: list[str], api_endpoint: str | None = None):
@@ -16,7 +17,6 @@ class GeminiTranslator:
         self.api_endpoint = api_endpoint.strip() if api_endpoint else None
         
         self.api_keys_iterable = api_keys
-        # --- MODIFIED: Initialize the cycle here ---
         self.api_keys_cycle = cycle(self.api_keys_iterable)
         self.current_api_key = next(self.api_keys_cycle)
         self._key_rotation_lock = threading.Lock()
@@ -28,20 +28,17 @@ class GeminiTranslator:
         
         logging.info(f"翻译器已初始化 (OpenAI 兼容模式)。API服务器: {self.api_endpoint or 'Google官方'}, 密钥数量: {len(self.api_keys_iterable)}")
 
-    # --- MODIFIED: This now correctly handles the exhaustion of the cycle ---
     def _rotate_key(self):
-        """Rotates to the next API key, recreating the cycle if it's exhausted."""
         with self._key_rotation_lock:
             try:
                 self.current_api_key = next(self.api_keys_cycle)
                 logging.warning(f"线程 {threading.get_ident()} 正在轮换到下一个密钥: ...{self.current_api_key[-4:]}")
             except StopIteration:
                 logging.warning("所有API密钥已轮换一遍，正在重置循环。")
-                # Re-create the cycle to start over from the beginning
                 self.api_keys_cycle = cycle(self.api_keys_iterable)
                 self.current_api_key = next(self.api_keys_cycle)
                 logging.info(f"已重置到第一个密钥: ...{self.current_api_key[-4:]}")
-        return True # Always returns True because it can now cycle infinitely
+        return True
 
     def _get_client(self, timeout=120.0):
         if self.api_endpoint:
@@ -56,9 +53,8 @@ class GeminiTranslator:
 
     def fetch_models(self) -> list[str]:
         logging.info(f"正在获取模型列表...")
-        # This function's logic remains robust.
         initial_key = self.current_api_key
-        for _ in range(len(self.api_keys_iterable) * 2): # Try each key twice
+        for _ in range(len(self.api_keys_iterable) * 2):
             try:
                 client = self._get_client()
                 models_response = client.models.list()
@@ -76,7 +72,7 @@ class GeminiTranslator:
             except Exception as e:
                 logging.error(f"使用密钥 ...{self.current_api_key[-4:]} 获取模型列表失败: {e}")
                 self._rotate_key()
-                if self.current_api_key == initial_key: # Full cycle done
+                if self.current_api_key == initial_key:
                     break
         logging.error("所有API密钥均无法获取模型列表")
         return []
@@ -94,11 +90,7 @@ class GeminiTranslator:
             client = self._get_client()
             prompt_content = prompt_template.format(input_texts=json.dumps(batch_inner, ensure_ascii=False))
             
-            request_params = {
-                "model": effective_model_name,
-                "messages": [{"role": "user", "content": prompt_content}],
-                "response_format": {"type": "json_object"}
-            }
+            request_params = { "model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}] }
             
             if use_grounding:
                 request_params["tools"] = [{"type": "google_search_retrieval"}]
@@ -113,7 +105,8 @@ class GeminiTranslator:
                 logging.info(f"线程 {thread_id} 成功完成批次 {batch_index_inner + 1}")
                 return translated_batch
             else:
-                raise ValueError("AI响应解析或验证失败，将触发重试")
+                log_ai_error(prompt_content, response_text)
+                raise ValueError("AI响应解析或验证失败，将触发立即重试")
 
         return _do_translation(batch_info)
 
@@ -121,30 +114,32 @@ class GeminiTranslator:
         if not response_text: 
             logging.error("AI未返回任何文本内容")
             return None
+        
         try:
-            data = json.loads(response_text)
-            final_list = None
-            if isinstance(data, list):
-                final_list = data
-            elif isinstance(data, dict):
-                for value in data.values():
-                    if isinstance(value, list):
-                        final_list = value
-                        break
+            start_index = response_text.find('[')
+            end_index = response_text.rfind(']')
             
-            if final_list is None: 
-                logging.warning(f"AI响应JSON中找不到列表。响应内容: {response_text[:200]}...")
+            if start_index == -1 or end_index == -1 or start_index >= end_index:
+                logging.error(f"AI响应中找不到有效的JSON数组。")
+                return None
+            
+            json_str = response_text[start_index : end_index + 1]
+            data = json.loads(json_str)
+            
+            if not isinstance(data, list):
+                logging.warning(f"AI响应解析出的内容不是一个列表。")
                 return None
                 
-            if all(isinstance(item, str) for item in final_list):
-                if len(final_list) == expected_length:
-                    return final_list
-                else:
-                    logging.warning(f"AI响应长度不匹配！预期: {expected_length}, 得到: {len(final_list)}")
+            if len(data) != expected_length:
+                logging.warning(f"AI响应长度不匹配！预期: {expected_length}, 得到: {len(data)}")
+                return None
+                
+            if all(isinstance(item, str) for item in data):
+                return data
             else:
                 logging.warning("AI响应列表中的元素不全是字符串")
-            return None
+                return None
+
         except (json.JSONDecodeError, AttributeError) as e:
             logging.error(f"解析AI的JSON响应失败: {e}")
-            logging.debug(f"无法解析的响应内容: {response_text[:500]}")
             return None

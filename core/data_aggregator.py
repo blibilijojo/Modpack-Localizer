@@ -5,20 +5,15 @@ import io
 import json
 import logging
 import sqlite3
-import re  # --- ADDED: Import regular expressions for comment removal ---
+import re
 from pathlib import Path
 from utils import file_utils
 from collections import defaultdict
 
-# --- ADDED: Helper function to remove comments from a JSON string before parsing ---
 def _remove_comments_from_json(json_str: str) -> str:
-    """Removes C-style comments (// and /* */) from a JSON string."""
-    # Remove // comments
     json_str = re.sub(r"//.*$", "", json_str, flags=re.MULTILINE)
-    # Remove /* */ comments
     json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)
     return json_str
-
 
 class DataAggregator:
     def __init__(self, mods_dir: Path, zip_paths: list[Path], community_dict_path: str):
@@ -28,30 +23,44 @@ class DataAggregator:
 
     def run(self, progress_update_callback=None):
         logging.info("开始聚合数据...")
-        community_dict = self._load_community_dictionary()
+        community_dict_by_key, community_dict_by_origin = self._load_community_dictionary()
         master_english_dicts, internal_chinese_dicts, namespace_formats = self._aggregate_from_mods(progress_update_callback)
         pack_chinese_dict = self._aggregate_from_zips()
-        return community_dict, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats
+        return community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats
 
-    def _load_community_dictionary(self) -> dict:
-        community_dict = {}
+    def _load_community_dictionary(self) -> tuple[dict, dict]:
+        community_dict_by_key = {}
+        community_dict_by_origin = defaultdict(list)
+        
         if not self.community_dict_path or not self.community_dict_path.is_file():
             logging.info("未提供或未找到社区词典文件，跳过加载。")
-            return community_dict
+            return community_dict_by_key, dict(community_dict_by_origin)
+            
         logging.info(f"正在从社区词典加载: {self.community_dict_path.name}")
         try:
             con = sqlite3.connect(self.community_dict_path)
             cur = con.cursor()
-            cur.execute("SELECT key, trans_name FROM dict")
+            cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
             rows = cur.fetchall()
-            community_dict = {row[0]: row[1] for row in rows}
-            logging.info(f"成功从社区词典加载 {len(community_dict)} 条补充翻译。")
+            
+            for row in rows:
+                key, origin_name, trans_name, version = row
+                if key:
+                    community_dict_by_key[key] = trans_name
+                if origin_name and trans_name:
+                    community_dict_by_origin[origin_name].append(
+                        {"trans": trans_name, "version": version or "0.0.0"}
+                    )
+            
+            total_entries = len(community_dict_by_key) + sum(len(v) for v in community_dict_by_origin.values())
+            logging.info(f"成功从社区词典加载 {total_entries} 条数据。")
         except sqlite3.Error as e:
             logging.error(f"读取社区词典数据库时发生错误: {e}")
         finally:
             if 'con' in locals() and con:
                 con.close()
-        return community_dict
+        
+        return community_dict_by_key, dict(community_dict_by_origin)
 
     def _get_namespace_from_path(self, path_str: str) -> str:
         try:
@@ -60,8 +69,7 @@ class DataAggregator:
                 assets_index = parts.index('assets')
                 if len(parts) > assets_index + 1:
                     return parts[assets_index + 1]
-        except Exception:
-            pass
+        except Exception: pass
         return 'minecraft'
 
     def _aggregate_from_mods(self, progress_update_callback=None):
@@ -73,8 +81,7 @@ class DataAggregator:
         total_jars = len(jar_files)
         
         for i, jar_file in enumerate(jar_files):
-            if progress_update_callback:
-                progress_update_callback(i + 1, total_jars)
+            if progress_update_callback: progress_update_callback(i + 1, total_jars)
             try:
                 with zipfile.ZipFile(jar_file, 'r') as zf:
                     file_list = sorted(zf.infolist(), key=lambda f: f.filename.lower().endswith('.lang'))
@@ -82,7 +89,6 @@ class DataAggregator:
                         if file_info.is_dir(): continue
                         path_str_lower = file_info.filename.lower()
                         
-                        # --- MODIFIED: Handle commented en_us.json ---
                         if 'lang/en_us.json' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
                             if namespace in namespace_formats: continue
@@ -91,11 +97,9 @@ class DataAggregator:
                             with zf.open(file_info) as f:
                                 try:
                                     content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    clean_content = _remove_comments_from_json(content)
-                                    data = json.loads(clean_content)
+                                    data = json.loads(_remove_comments_from_json(content), strict=False)
                                     master_english_dicts[namespace].update(data)
-                                except Exception as e:
-                                    logging.warning(f"解析 en_us.json 失败: {file_info.filename} - {e}")
+                                except Exception as e: logging.warning(f"解析 en_us.json 失败: {file_info.filename} - {e}")
                         
                         elif 'lang/en_us.lang' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
@@ -108,22 +112,17 @@ class DataAggregator:
                                     for line in lines:
                                         if line and not line.startswith('#'):
                                             parts = line.split('=', 1)
-                                            if len(parts) == 2:
-                                                master_english_dicts[namespace][parts[0]] = parts[1]
-                                except Exception as e:
-                                    logging.warning(f"解析 en_us.lang 失败: {file_info.filename} - {e}")
+                                            if len(parts) == 2: master_english_dicts[namespace][parts[0]] = parts[1]
+                                except Exception as e: logging.warning(f"解析 en_us.lang 失败: {file_info.filename} - {e}")
 
-                        # --- MODIFIED: Handle commented zh_cn.json ---
                         elif 'lang/zh_cn.json' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
                             with zf.open(file_info) as f:
                                 try:
                                     content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    clean_content = _remove_comments_from_json(content)
-                                    data = json.loads(clean_content)
+                                    data = json.loads(_remove_comments_from_json(content), strict=False)
                                     internal_chinese_dicts[namespace].update(data)
-                                except Exception as e:
-                                    logging.warning(f"解析 zh_cn.json 失败: {file_info.filename} - {e}")
+                                except Exception as e: logging.warning(f"解析 zh_cn.json 失败: {file_info.filename} - {e}")
                         
                         elif 'lang/zh_cn.lang' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
@@ -134,10 +133,8 @@ class DataAggregator:
                                     for line in lines:
                                         if line and not line.startswith('#'):
                                             parts = line.split('=', 1)
-                                            if len(parts) == 2:
-                                                internal_chinese_dicts[namespace][parts[0]] = parts[1]
-                                except Exception as e:
-                                    logging.warning(f"解析 zh_cn.lang 失败: {file_info.filename} - {e}")
+                                            if len(parts) == 2: internal_chinese_dicts[namespace][parts[0]] = parts[1]
+                                except Exception as e: logging.warning(f"解析 zh_cn.lang 失败: {file_info.filename} - {e}")
                                     
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取JAR文件: {jar_file.name} - 错误: {e}")
@@ -162,12 +159,9 @@ class DataAggregator:
                         if "assets" in file_path.parts and file_path.name == 'zh_cn.json':
                             with zf.open(file_info) as f:
                                 try:
-                                    # --- MODIFIED: Also handle commented JSON in zip files ---
                                     content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    clean_content = _remove_comments_from_json(content)
-                                    current_zip_dict.update(json.loads(clean_content))
-                                except Exception as e:
-                                    logging.warning(f"解析ZIP中的 {file_info.filename} 失败: {e}")
+                                    current_zip_dict.update(json.loads(_remove_comments_from_json(content), strict=False))
+                                except Exception as e: logging.warning(f"解析ZIP中的 {file_info.filename} 失败: {e}")
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取第三方汉化包: {zip_path.name} - 错误: {e}")
             final_pack_chinese_dict.update(current_zip_dict)

@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
 
+# --- ADDED: Explicitly grant permissions for the job ---
+# This is a modern security best practice and ensures the action can write a release.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -12,7 +17,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # We still need this to allow the release-action to access the tag message
         with:
           fetch-depth: 0
 
@@ -28,16 +32,12 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --name "Modpack-Localizer-Pro" --icon=assets/icon.ico main.py
-
-      # --- REMOVED: The manual 'Get release notes' step has been deleted. ---
-      # The release-action will now handle this automatically.
+        # --- REMOVED: The --icon flag that was causing the build to fail ---
+        run: pyinstaller --onefile --windowed --name "Modpack-Localizer-Pro" main.py
 
       - name: Create Release and Upload Asset
         uses: ncipollo/release-action@v1
         with:
-          # --- REMOVED: The 'body' parameter has been deleted. ---
-          # The action will now automatically use the annotated tag's message as the body.
           artifacts: "dist/Modpack-Localizer-Pro.exe"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true

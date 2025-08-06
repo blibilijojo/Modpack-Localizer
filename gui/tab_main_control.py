@@ -15,8 +15,6 @@ import subprocess
 import random
 import json
 import time
-# 移除不再需要的 parse_version
-# from packaging.version import parse as parse_version 
 from gui.custom_widgets import ToolTip
 from utils import config_manager
 import logging
@@ -119,6 +117,7 @@ class TabMainControl:
             self._save_config(); settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
             settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings})
             if not all([settings['mods_dir'], settings['output_dir']]): raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
+            from core.orchestrator import Orchestrator
             orchestrator = Orchestrator(settings, self.update_progress)
             threading.Thread(target=orchestrator.run_workflow, daemon=True).start()
         except Exception as e: self.update_progress(f"启动失败: {e}", -1)
@@ -179,9 +178,11 @@ class TabMainControl:
             elif sys.platform == "darwin": subprocess.Popen(["open", output_path])
             else: subprocess.Popen(["xdg-open", output_path])
         except Exception as e: ui_utils.show_error("打开失败", f"无法打开文件夹：{e}")
+    
     def _check_and_update_dict_async(self):
         self.download_dict_button.config(state="disabled", text="检查中...")
         threading.Thread(target=self._dict_update_worker, daemon=True).start()
+
     def _get_remote_dict_info(self) -> dict | None:
         api_url = "https://api.github.com/repos/blibilijojo/i18n-Dict-Extender/releases/latest"
         logging.info(f"正在直接请求GitHub API获取词典信息: {api_url}")
@@ -194,9 +195,11 @@ class TabMainControl:
             if version and url: return {"version": version, "url": url}
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
+
     def _format_speed(self, speed_bps: float) -> str:
         if speed_bps > 1024 * 1024: return f"{speed_bps / (1024 * 1024):.2f} MB/s"
         return f"{speed_bps / 1024:.1f} KB/s"
+
     def _dict_update_worker(self):
         try:
             remote_info = self._get_remote_dict_info()
@@ -209,22 +212,30 @@ class TabMainControl:
             
             logging.info(f"本地词典版本: {local_version}, 远程词典版本: {remote_version}")
 
-            # --- 关键修复：使用简单的字符串比较，而不是 parse_version ---
             if local_version == remote_version:
                 self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。"))
                 return
             
+            # --- 关键修复：使用 wait_variable 实现线程同步 ---
             msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"
-            if not self.root.after(0, lambda: ui_utils.show_warning("发现新版本", msg)):
-                 # 在主线程中显示对话框并获取返回值
-                user_response = tk.BooleanVar()
-                def ask():
-                    user_response.set(ui_utils.show_warning("发现新版本", msg))
-                self.root.after(0, ask)
-                self.root.wait_variable(user_response) # 等待用户响应
-                if not user_response.get():
-                    return
             
+            user_wants_to_update = tk.BooleanVar()
+            
+            def ask_on_main_thread():
+                # 这个函数将在主线程中执行，安全地显示对话框
+                result = ui_utils.show_warning("发现新版本", msg)
+                user_wants_to_update.set(result)
+
+            self.root.after(0, ask_on_main_thread)
+            # 后台线程在这里暂停，等待主线程的 ask_on_main_thread 函数设置 user_wants_to_update 变量
+            self.root.wait_variable(user_wants_to_update)
+
+            # 当用户点击按钮后，wait_variable 结束，我们可以在这里获取结果
+            if not user_wants_to_update.get():
+                logging.info("用户选择不更新社区词典。")
+                return # 线程结束
+
+            # --- 用户同意更新，继续执行下载 ---
             progress_dialog = DownloadProgressDialog(self.root, title="下载社区词典")
             
             STABLE_PROXY_URL = "https://lucky-moth-20.deno.dev/"

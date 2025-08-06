@@ -1,0 +1,32 @@
+# Python 运行时文件
+__pycache__/
+*.pyc
+
+# 虚拟环境文件夹
+venv/
+.venv/
+
+# IDE 和操作系统生成的临时文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 打包程序时生成的文件夹
+dist/
+build/
+*.egg-info/
+
+# 程序运行时生成的日志文件 (不上传)
+ModpackLocalizer.log
+
+# 包含您私人API密钥的配置文件 (绝对不能上传!)
+config.json
+
+# 本地测试用的模组、汉化包和下载文件 (不上传!)
+模组包/
+汉化包测试/
+downloads/
+
+# 其他可能包含密钥的文件
+.env

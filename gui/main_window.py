@@ -125,17 +125,31 @@ class MainWindow:
             return
 
         batch_script_path = exe_dir / "update.bat"
+        exe_name = current_exe_path.name
         script_content = f"""
 @echo off
-echo 更新程序正在执行...
 echo.
-ping 127.0.0.1 -n 4 > nul
-echo 备份当前版本...
+echo 更新程序已启动，请勿关闭此窗口...
+echo.
+
+REM 等待主程序启动这个脚本后自行退出 (ping -n 3 等待2秒)
+ping 127.0.0.1 -n 3 > nul
+
+REM 强制终止任何可能仍在运行的旧版本进程，这是最关键的一步，可防止文件占用
+echo 正在关闭旧版程序...
+taskkill /F /IM "{exe_name}" > nul
+ping 127.0.0.1 -n 2 > nul
+
+echo 正在备份当前版本: "{current_exe_path}"
 move /Y "{current_exe_path}" "{old_exe_backup_path}"
-echo 应用新版本...
+
+echo 正在应用新版本...
 move /Y "{new_exe_temp_path}" "{current_exe_path}"
-echo 重启应用程序...
+
+echo 更新完成，正在重启应用程序...
 start "" "{current_exe_path}"
+
+REM 自删除脚本
 del "%~f0"
 """
         with open(batch_script_path, "w", encoding="utf-8") as f:

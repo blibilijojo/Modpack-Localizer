@@ -3,7 +3,7 @@ name: Build and Release Executable
 on:
   push:
     tags:
-      - 'v*' # 只有当一个 v 开头的标签被推送时才触发
+      - 'v*'
 
 jobs:
   build:
@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # --- ADDED: Fetch all history and tags to read the annotated tag message ---
+        # We still need this to allow the release-action to access the tag message
         with:
           fetch-depth: 0
 
@@ -30,18 +30,14 @@ jobs:
       - name: Build executable with PyInstaller
         run: pyinstaller --onefile --windowed --name "Modpack-Localizer-Pro" --icon=assets/icon.ico main.py
 
-      # --- ADDED: A new step to extract the release notes from the annotated tag ---
-      - name: Get release notes from tag
-        id: get_release_notes
-        run: echo "body=$(git tag -l --format='%(contents:body)' ${{ github.ref_name }})" >> $GITHUB_OUTPUT
-        shell: bash
+      # --- REMOVED: The manual 'Get release notes' step has been deleted. ---
+      # The release-action will now handle this automatically.
 
       - name: Create Release and Upload Asset
         uses: ncipollo/release-action@v1
         with:
-          # --- MODIFIED: The body of the release now uses the output from our new step ---
-          body: ${{ steps.get_release_notes.outputs.body }}
+          # --- REMOVED: The 'body' parameter has been deleted. ---
+          # The action will now automatically use the annotated tag's message as the body.
           artifacts: "dist/Modpack-Localizer-Pro.exe"
           token: ${{ secrets.GITHUB_TOKEN }}
-          # This allows updating the release if it already exists (useful for retries)
           allowUpdates: true

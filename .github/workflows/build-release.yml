@@ -1,4 +1,4 @@
-# .github/workflows/build-release.yml (Corrected Version)
+# .github/workflows/build-release.yml (Final Corrected Version)
 
 name: Build and Release Executable
 
@@ -27,14 +27,14 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          # 步骤 1: 安装 psutil，这是 updater.py 的一个依赖项
-          pip install psutil
+          # 步骤 1: 安装所有构建时需要的依赖 (psutil 和 pyinstaller)
+          pip install psutil pyinstaller
 
           # 步骤 2: 首先，单独构建 updater.py 为 updater.exe
           pyinstaller --noconfirm --onefile --noconsole --name updater updater.py
           
           # 步骤 3: 接着，构建主程序 main.py
-          # 注意：这里我们将所有换行符 \ 替换为了 PowerShell 的换行符 `
+          # 使用 PowerShell 的倒引号 ` 作为换行符
           pyinstaller --noconfirm --onefile --windowed `
             --add-data="dist/updater.exe;." `
             --icon="icon.ico" `

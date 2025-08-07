@@ -25,22 +25,24 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build updater.exe
-      # 终极修复：使用 --hidden-import 强制 PyInstaller 打包 psutil 库
       run: |
         pyinstaller --noconfirm --onefile --name "updater" --hidden-import "psutil" updater.py
 
     - name: Build Main Executable (Modpack-Localizer-Pro.exe)
-      # 编译主程序，并从 dist 目录添加 updater.exe
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." main.py
 
     - name: Get release notes from tag
       id: get_release_notes
+      # 终极修复：使用 GitHub Actions 推荐的、健壮的多行文本输出方法
       run: |
-        $TAG_MESSAGE = git tag -l --format='%(contents)' ${{ github.ref_name }}
-        $TAG_MESSAGE -replace "`r`n", "%0A" | Out-File -FilePath release_notes.txt -Encoding utf8
-        $RELEASE_NOTES = Get-Content -Path release_notes.txt -Raw
-        echo "body=$RELEASE_NOTES" >> $env:GITHUB_OUTPUT
+        $RELEASE_NOTES = git tag -l --format='%(contents)' ${{ github.ref_name }}
+        $DELIMITER = "ghadelimiter_$(Get-Random)"
+        Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append -InputObject @"
+        body<<$DELIMITER
+        $RELEASE_NOTES
+        $DELIMITER
+        "@
       shell: pwsh
 
     - name: Create Release

@@ -1,12 +1,11 @@
-# gui/manual_translation_window.py
-
 import tkinter as tk
 import ttkbootstrap as ttk
-from tkinter import scrolledtext, messagebox, filedialog
+from tkinter import scrolledtext, messagebox, filedialog, simpledialog
 from collections import defaultdict
 import json
 from datetime import datetime
 from pathlib import Path
+from utils import config_manager # 核心修改：导入 config_manager
 
 class ManualTranslationWindow(tk.Toplevel):
     def __init__(self, parent, items_to_process: list | dict, existing_translations: dict, namespace_formats: dict, current_settings: dict):
@@ -20,7 +19,6 @@ class ManualTranslationWindow(tk.Toplevel):
         self.after_id = None
         self.is_dirty = False
         
-        # 新增：用于防止事件连锁反应的标志位
         self.is_programmatically_updating_text = False
 
         self._setup_window()
@@ -86,7 +84,13 @@ class ManualTranslationWindow(tk.Toplevel):
         self.zh_text_input.bind("<KeyRelease>", self._on_zh_text_changed)
         editor_btn_frame = ttk.Frame(editor_frame)
         editor_btn_frame.grid(row=2, column=1, sticky="e", pady=(5,0))
-        ttk.Button(editor_btn_frame, text="查询词典", command=self._open_dict_search, bootstyle="info-outline").pack()
+        
+        # --- 核心修改：新增“存入个人词典”按钮 ---
+        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="⭐ 存入个人词典", command=self._add_to_user_dictionary, bootstyle="info-outline")
+        self.add_to_dict_btn.pack(side="left", padx=(0, 10))
+        ttk.Button(editor_btn_frame, text="查询词典", command=self._open_dict_search, bootstyle="info-outline").pack(side="left")
+        # --- 修改结束 ---
+
         right_pane.add(editor_frame, weight=1)
 
         btn_frame = ttk.Frame(self, padding=10)
@@ -96,6 +100,44 @@ class ManualTranslationWindow(tk.Toplevel):
         ttk.Button(btn_frame, text="保存项目...", command=self._save_project, bootstyle="info").pack(side="left", padx=(0, 20))
         ttk.Button(btn_frame, text="完成并生成资源包", command=self._on_finish, bootstyle="success").pack(side="right")
         ttk.Button(btn_frame, text="取消", command=self._on_close_request, bootstyle="secondary").pack(side="right", padx=10)
+
+    # --- 新增：将当前翻译存入个人词典的方法 ---
+    def _add_to_user_dictionary(self):
+        if not self.current_selection_info:
+            return
+
+        info = self.current_selection_info
+        item_data = self.data_by_namespace[info['ns']][info['idx']]
+        key = item_data['key']
+        origin_name = item_data['en']
+        translation = self.zh_text_input.get("1.0", "end-1c").strip()
+
+        if not translation:
+            messagebox.showwarning("操作无效", "译文不能为空！", parent=self)
+            return
+
+        # 弹窗询问用户保存模式
+        # askyesnocancel returns True for Yes, False for No, None for Cancel
+        save_by_key = messagebox.askyesnocancel(
+            "选择保存模式",
+            f"如何保存这条翻译？\n\n- [是] 按“Key”保存 (最高优先级，精确匹配 {key}) \n- [否] 按“原文”保存 (较高优先级，模糊匹配 {origin_name})\n- [取消] 不执行任何操作",
+            parent=self
+        )
+
+        if save_by_key is None: # 用户点击了取消
+            return
+        
+        user_dict = config_manager.load_user_dict()
+        
+        if save_by_key: # 按Key保存
+            user_dict["by_key"][key] = translation
+            save_mode_str = f"Key: {key}"
+        else: # 按原文保存
+            user_dict["by_origin_name"][origin_name] = translation
+            save_mode_str = f"原文: {origin_name}"
+
+        config_manager.save_user_dict(user_dict)
+        self.status_label.config(text=f"成功！已将“{translation}”存入个人词典 ({save_mode_str})")
 
     def _open_dict_search(self):
         from gui.dictionary_search_window import DictionarySearchWindow
@@ -190,22 +232,22 @@ class ManualTranslationWindow(tk.Toplevel):
             current_values = self.trans_tree.item(row_id, 'values')
             self.trans_tree.item(row_id, values=(current_values[0], current_values[1], new_zh_text))
             
-            self.status_label.config(text=f"已保存编辑: {info['row_id']}")
+            self.status_label.config(text=f"已自动保存编辑: {info['row_id']}")
         
     def _update_ui_state(self):
-        if self.current_selection_info:
-            self.zh_text_input.config(state="normal")
+        is_item_selected = bool(self.current_selection_info)
+
+        self.zh_text_input.config(state="normal" if is_item_selected else "disabled")
+        self.add_to_dict_btn.config(state="normal" if is_item_selected else "disabled")
+
+        if is_item_selected:
             self.status_label.config(text=f"正在编辑: {self.current_selection_info['row_id']}")
         else:
-            # 【核心修复】确保清空和禁用操作的正确顺序
-            # 1. 先清空原文和译文编辑框的内容
             self.en_text_display.config(state="normal")
             self.en_text_display.delete("1.0", "end")
-            self.zh_text_input.delete("1.0", "end")
-            
-            # 2. 然后再将它们设置为禁用状态
             self.en_text_display.config(state="disabled")
-            self.zh_text_input.config(state="disabled")
+            
+            self.zh_text_input.delete("1.0", "end")
             
             self.status_label.config(text="请选择一个条目进行翻译")
     

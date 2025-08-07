@@ -50,6 +50,7 @@ class GeminiTranslator:
             )
 
     def fetch_models(self) -> list[str]:
+        # ... (此函数无需修改) ...
         logging.info(f"正在获取模型列表...")
         initial_key = self.current_api_key
         for _ in range(len(self.api_keys_iterable) * 2):
@@ -86,7 +87,13 @@ class GeminiTranslator:
             
             effective_model_name = f"models/{model_name}" if not self.api_endpoint else model_name
             client = self._get_client()
-            prompt_content = prompt_template.format(input_texts=json.dumps(batch_inner, ensure_ascii=False))
+            
+            # --- 核心修复：将列表转换为带编号的JSON对象 ---
+            input_dict = dict(enumerate(batch_inner))
+            prompt_content = prompt_template.replace(
+                '{input_data_json}', 
+                json.dumps(input_dict, ensure_ascii=False)
+            )
             
             request_params = { "model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}] }
             
@@ -97,7 +104,9 @@ class GeminiTranslator:
 
             response = client.chat.completions.create(**request_params)
             response_text = response.choices[0].message.content
-            translated_batch = self._parse_response(response_text, len(batch_inner))
+            
+            # --- 核心修复：使用新的解析函数，传入原始批次用于回填 ---
+            translated_batch = self._parse_response(response_text, batch_inner)
             
             if translated_batch:
                 logging.info(f"线程 {thread_id} 成功完成批次 {batch_index_inner + 1}")
@@ -108,35 +117,58 @@ class GeminiTranslator:
 
         return _do_translation(batch_info)
 
-    def _parse_response(self, response_text: str | None, expected_length: int) -> list[str] | None:
+    def _parse_response(self, response_text: str | None, original_batch: list[str]) -> list[str] | None:
         if not response_text: 
             logging.error("AI未返回任何文本内容")
             return None
         
+        expected_length = len(original_batch)
+        text_to_parse = response_text.strip()
+        
+        if text_to_parse.startswith("```json"):
+            text_to_parse = text_to_parse[7:]
+            if text_to_parse.endswith("```"):
+                text_to_parse = text_to_parse[:-3].strip()
+        
         try:
-            start_index = response_text.find('[')
-            end_index = response_text.rfind(']')
+            # --- 核心修复：解析逻辑现在处理对象{}，而非数组[] ---
+            start_index = text_to_parse.find('{')
+            end_index = text_to_parse.rfind('}')
             
             if start_index == -1 or end_index == -1 or start_index >= end_index:
-                logging.error(f"AI响应中找不到有效的JSON数组。")
+                logging.error(f"AI响应中找不到有效的JSON对象。")
                 return None
             
-            json_str = response_text[start_index : end_index + 1]
+            json_str = text_to_parse[start_index : end_index + 1]
             data = json.loads(json_str)
             
-            if not isinstance(data, list):
-                logging.warning(f"AI响应解析出的内容不是一个列表。")
+            if not isinstance(data, dict):
+                logging.warning(f"AI响应解析出的内容不是一个字典对象。")
                 return None
-                
-            if len(data) != expected_length:
-                logging.warning(f"AI响应长度不匹配！预期: {expected_length}, 得到: {len(data)}")
-                return None
-                
-            if all(isinstance(item, str) for item in data):
-                return data
-            else:
-                logging.warning("AI响应列表中的元素不全是字符串")
-                return None
+            
+            # --- 核心修复：根据编号重建结果列表，并自动填补缺失项 ---
+            reconstructed_list = [None] * expected_length
+            for key, value in data.items():
+                try:
+                    index = int(key)
+                    if 0 <= index < expected_length:
+                        if isinstance(value, str):
+                            reconstructed_list[index] = value
+                        else:
+                             logging.warning(f"AI为键'{key}'返回了非字符串类型的值，将使用原文回填。")
+                except (ValueError, TypeError):
+                    logging.warning(f"AI返回了无效的键'{key}'，已忽略。")
+            
+            missing_count = 0
+            for i in range(expected_length):
+                if reconstructed_list[i] is None:
+                    reconstructed_list[i] = original_batch[i] # 使用原文回填
+                    missing_count += 1
+            
+            if missing_count > 0:
+                logging.warning(f"AI返回结果缺失 {missing_count} 项，已使用原文自动回填。")
+
+            return reconstructed_list
 
         except (json.JSONDecodeError, AttributeError) as e:
             logging.error(f"解析AI的JSON响应失败: {e}")

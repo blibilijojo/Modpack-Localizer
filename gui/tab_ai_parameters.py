@@ -1,5 +1,3 @@
-# gui/tab_ai_parameters.py
-
 import tkinter as tk
 import ttkbootstrap as ttk
 from tkinter import scrolledtext
@@ -54,7 +52,7 @@ class TabAiParameters:
         self.prompt_text.pack(fill='both', expand=True, side='left', pady=2)
         
         restore_button = ttk.Button(prompt_frame, text="恢复默认", command=self._restore_default_prompt, bootstyle="warning-outline")
-        restore_button.pack(side='top', padx=(5,0), anchor='ne')
+        restore_button.pack(side='top', padx=(0,5), anchor='ne')
         ToolTip(restore_button, "将提示词恢复到程序内置的默认值")
 
         self._load_settings_to_ui()
@@ -95,16 +93,26 @@ class TabAiParameters:
         self.prompt_text.insert(tk.END, config_manager.DEFAULT_PROMPT)
 
     def get_and_save_settings(self) -> dict:
+        def get_spinbox_val(var_name, default_key):
+            try:
+                val = getattr(self, var_name).get()
+                return val
+            except (tk.TclError, ValueError):
+                default_val = config_manager.DEFAULT_CONFIG.get(default_key)
+                getattr(self, var_name).set(default_val)
+                return default_val
+
         param_settings = {
             "model": self.model_var.get(),
             "model_list": self.current_model_list,
             "prompt": self.prompt_text.get("1.0", tk.END).strip(),
             "use_grounding": self.use_grounding_var.get(),
-            "ai_batch_size": getattr(self, 'ai_batch_size_var', tk.IntVar(value=50)).get(),
-            "ai_max_threads": getattr(self, 'ai_max_threads_var', tk.IntVar(value=4)).get(),
-            "ai_max_retries": getattr(self, 'ai_max_retries_var', tk.IntVar(value=3)).get(),
-            "ai_retry_interval": getattr(self, 'ai_retry_interval_var', tk.IntVar(value=2)).get()
+            "ai_batch_size": get_spinbox_val('ai_batch_size_var', 'ai_batch_size'),
+            "ai_max_threads": get_spinbox_val('ai_max_threads_var', 'ai_max_threads'),
+            "ai_max_retries": get_spinbox_val('ai_max_retries_var', 'ai_max_retries'),
+            "ai_retry_interval": get_spinbox_val('ai_retry_interval_var', 'ai_retry_interval'),
         }
+        
         full_config = config_manager.load_config()
         full_config.update(param_settings)
         config_manager.save_config(full_config)

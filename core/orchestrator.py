@@ -1,5 +1,3 @@
-# core/orchestrator.py
-
 import logging 
 from pathlib import Path
 import json
@@ -53,7 +51,7 @@ class Orchestrator:
                     [Path(p) for p in self.settings.get('zip_paths', [])],
                     self.settings.get('community_dict_path', '')
                 )
-                community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
+                user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese, pack_chinese, namespace_formats = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/4: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
                 
                 if not master_english_dicts:
                     raise ValueError("未能从Mods文件夹提取任何有效原文。请确保Mods文件夹内有.jar模组文件。")
@@ -63,7 +61,7 @@ class Orchestrator:
                 engine = DecisionEngine()
                 
                 final_translations_lookup, items_for_ai, key_contribution, origin_name_contribution = engine.run(
-                    community_dict_by_key, community_dict_by_origin, 
+                    user_dictionary, community_dict_by_key, community_dict_by_origin, 
                     master_english_dicts, internal_chinese, pack_chinese,
                     self.settings.get('use_origin_name_lookup', True)
                 )
@@ -81,7 +79,11 @@ class Orchestrator:
                 use_ai = items_for_ai and self.settings.get('api_keys')
                 if use_ai:
                     translator = GeminiTranslator(self.settings['api_keys'], self.settings.get('api_endpoint'))
+                    
+                    # --- 已修改：只提取纯文本列表，不再包含key ---
                     texts_to_translate = [val for _, _, val in items_for_ai]
+                    logging.info("已构建纯文本列表用于AI翻译，上下文功能已移除。")
+
                     batch_size = self.settings.get('ai_batch_size', 50)
                     max_threads = self.settings.get('ai_max_threads', 4)
                     

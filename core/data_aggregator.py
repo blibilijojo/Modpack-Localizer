@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import re
 from pathlib import Path
-from utils import file_utils
+from utils import file_utils, config_manager
 from collections import defaultdict
 
 def _remove_comments_from_json(json_str: str) -> str:
@@ -21,10 +21,24 @@ class DataAggregator:
 
     def run(self, progress_update_callback=None):
         logging.info("开始聚合数据...")
+        # 核心修改：增加了用户词典的加载
+        user_dictionary = self._load_user_dictionary()
         community_dict_by_key, community_dict_by_origin = self._load_community_dictionary()
         master_english_dicts, internal_chinese_dicts, namespace_formats = self._aggregate_from_mods(progress_update_callback)
         pack_chinese_dict = self._aggregate_from_zips()
-        return community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats
+        
+        # 核心修改：返回签名增加了用户词典
+        return user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats
+
+    def _load_user_dictionary(self) -> dict:
+        """加载用户个人词典。"""
+        logging.info("正在加载用户个人词典...")
+        user_dict = config_manager.load_user_dict()
+        key_count = len(user_dict.get('by_key', {}))
+        origin_count = len(user_dict.get('by_origin_name', {}))
+        if key_count > 0 or origin_count > 0:
+            logging.info(f"成功从个人词典加载 {key_count} 条Key匹配和 {origin_count} 条原文匹配。")
+        return user_dict
 
     def _load_community_dictionary(self) -> tuple[dict, dict]:
         community_dict_by_key = {}

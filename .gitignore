@@ -31,6 +31,8 @@ config.json
 downloads/
 RELEASE_NOTES.md
 Dict-Sqlite.db
+user_dict.json
+
 # 其他可能包含密钥的文件
 .env
 packaging

@@ -3,25 +3,22 @@ from pathlib import Path
 import logging
 
 CONFIG_FILE_PATH = Path("config.json")
+USER_DICT_PATH = Path("user_dict.json")
 
+# --- 最终修复：使用基于键值对的、最稳健的提示词 ---
 DEFAULT_PROMPT = """
-你是一名精通《我的世界》(Minecraft) 游戏模组的专业汉化者，并且是一个严格遵循指令的JSON格式化工具。
-你的任务是：将输入的JSON数组中的每一个英文短语或句子精确地翻译成简体中文。
+你是一个只输出JSON的翻译AI。
+任务：将输入JSON对象中，每个数字键对应的字符串值翻译为简体中文。
 
-**绝对核心规则 (必须严格遵守):**
-1.  **数量严格相等**: 输出的JSON数组中的元素数量，必须与输入的JSON数组严格相等。不允许增加或减少任何一个元素。
-2.  **格式完全保留**: 必须完整保留原文中的所有格式化代码（例如 `%s`, `%d`, `§a`, `\n` 等）。这些是程序代码，绝对不能翻译或修改。
-3.  **精确翻译**: 在保证以上规则的前提下，对游戏术语进行精准翻译。
+核心指令:
+1. 保持所有格式代码 (如 %s, §a, \n) 不变。
+2. 返回的JSON对象的键必须与输入的数字键完全一致。
 
-**输出格式要求 (这是最重要的规则):**
--   你的回复**必须且只能是**一个符合JSON规范的数组，例如 `["翻译1", "翻译2", ...]`。
--   **绝对禁止**在回复的JSON数组前后添加任何解释性文字、注释、代码块标记 (```json ... ```) 或任何其他字符。你的回复必须以 `[` 开始，以 `]` 结束。
+最终要求:
+你的回复必须是、且只能是一个JSON对象, 例如 `{"0": "译文1", "1": "译文2"}`。
+禁止在 `[` 和 `]` 或 `{` 和 `}` 的前后添加任何多余的文字或代码标记。
 
-**示例:**
--   **输入:** `["Hello, %s!", "Lava Bucket"]`
--   **你的输出:** `["你好, %s!", "熔岩桶"]`
-
-**输入:** {input_texts}
+输入: {input_data_json}
 """
 
 DEFAULT_CONFIG = {
@@ -67,6 +64,12 @@ def load_config() -> dict:
         if "github_proxies" in config:
             del config["github_proxies"]
             config_updated = True
+            
+        # 检查并更新Prompt的逻辑
+        if '数字键' not in config.get("prompt", ""):
+            logging.warning("检测到旧版AI提示词，已自动更新为最稳健的键值对模式。")
+            config["prompt"] = DEFAULT_PROMPT.strip()
+            config_updated = True
 
         if config_updated:
             logging.info("配置文件已自动更新和补充，正在保存...")
@@ -85,3 +88,23 @@ def save_config(config_data: dict):
             json.dump(config_data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         logging.error(f"保存配置文件时出错: {e}")
+
+def load_user_dict() -> dict:
+    if not USER_DICT_PATH.exists():
+        return {"by_key": {}, "by_origin_name": {}}
+    try:
+        with open(USER_DICT_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if "by_key" not in data: data["by_key"] = {}
+            if "by_origin_name" not in data: data["by_origin_name"] = {}
+            return data
+    except (json.JSONDecodeError, TypeError):
+        logging.error(f"用户个人词典 ({USER_DICT_PATH}) 格式错误或损坏，已创建新的空词典。")
+        return {"by_key": {}, "by_origin_name": {}}
+
+def save_user_dict(dict_data: dict):
+    try:
+        with open(USER_DICT_PATH, 'w', encoding='utf-8') as f:
+            json.dump(dict_data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"保存用户个人词典时出错: {e}")

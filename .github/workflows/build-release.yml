@@ -1,3 +1,5 @@
+# .github/workflows/build-release.yml (Corrected Version)
+
 name: Build and Release Executable
 
 on:
@@ -16,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # 或者您希望使用的Python版本
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
@@ -29,22 +31,18 @@ jobs:
           pip install psutil
 
           # 步骤 2: 首先，单独构建 updater.py 为 updater.exe
-          # --noconsole 确保它在后台运行，没有黑窗口
-          # --name updater 指定输出文件名
           pyinstaller --noconfirm --onefile --noconsole --name updater updater.py
           
           # 步骤 3: 接着，构建主程序 main.py
-          # 使用 --add-data 将上一步生成的 updater.exe (位于 dist/updater.exe) 作为一个资源文件嵌入到主程序中
-          # `.` 表示将 updater.exe 放在解压后的根目录
-          pyinstaller --noconfirm --onefile --windowed \
-            --add-data="dist/updater.exe;." \
-            --icon="icon.ico" \
-            --name="Modpack-Localizer-Pro" \
+          # 注意：这里我们将所有换行符 \ 替换为了 PowerShell 的换行符 `
+          pyinstaller --noconfirm --onefile --windowed `
+            --add-data="dist/updater.exe;." `
+            --icon="icon.ico" `
+            --name="Modpack-Localizer-Pro" `
             main.py
 
       - name: Get Release Notes
         id: get_release_notes
-        # 从git标签的注释中提取发布日志
         run: |
           $notes = git tag -l --format='%(contents)' ${{ github.ref_name }}
           $notes = $notes -replace "`r`n", "%0A" # 替换换行符以适应 Actions 输出

@@ -1,5 +1,3 @@
-# .github/workflows/build-release.yml
-
 name: Build and Release
 
 on:
@@ -18,17 +16,25 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11' # Or your preferred Python version
+        python-version: '3.11'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt  # <-- 关键新增步骤：安装所有依赖
-        pip install pyinstaller          # <-- 单独安装 PyInstaller
+        # 安装 PyInstaller，后续两个步骤都需要它
+        pip install pyinstaller
+        # 根据 requirements.txt 安装主程序的所有依赖
+        pip install -r requirements.txt
 
-    - name: Build executable with PyInstaller
+    - name: Build updater.exe
+      # 这是关键的第一步：先独立编译 updater
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "updater.exe;." main.py
+        pyinstaller --noconfirm --onefile --name "updater" updater.py
+
+    - name: Build Main Executable (Modpack-Localizer-Pro.exe)
+      # 这是关键的第二步：编译主程序，并从 dist 目录添加 updater.exe
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." main.py
 
     - name: Get release notes from tag
       id: get_release_notes

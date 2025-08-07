@@ -1,41 +1,60 @@
-# .github/workflows/build-release.yml
-
 name: Build and Release Executable
 
 on:
   push:
     tags:
-      - 'v*'
-
-permissions:
-  contents: write
+      - 'v*' # 触发工作流的标签格式，例如 v1.0, v20.1.2
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.11' # 或者您希望使用的Python版本
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
 
-      - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --name "Modpack-Localizer-Pro" main.py
+      - name: Build with PyInstaller
+        run: |
+          # 步骤 1: 安装 psutil，这是 updater.py 的一个依赖项
+          pip install psutil
 
-      - name: Create Release and Upload Asset
-        uses: ncipollo/release-action@v1
+          # 步骤 2: 首先，单独构建 updater.py 为 updater.exe
+          # --noconsole 确保它在后台运行，没有黑窗口
+          # --name updater 指定输出文件名
+          pyinstaller --noconfirm --onefile --noconsole --name updater updater.py
+          
+          # 步骤 3: 接着，构建主程序 main.py
+          # 使用 --add-data 将上一步生成的 updater.exe (位于 dist/updater.exe) 作为一个资源文件嵌入到主程序中
+          # `.` 表示将 updater.exe 放在解压后的根目录
+          pyinstaller --noconfirm --onefile --windowed \
+            --add-data="dist/updater.exe;." \
+            --icon="icon.ico" \
+            --name="Modpack-Localizer-Pro" \
+            main.py
+
+      - name: Get Release Notes
+        id: get_release_notes
+        # 从git标签的注释中提取发布日志
+        run: |
+          $notes = git tag -l --format='%(contents)' ${{ github.ref_name }}
+          $notes = $notes -replace "`r`n", "%0A" # 替换换行符以适应 Actions 输出
+          echo "notes=$notes" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create Release and Upload Artifact
+        uses: softprops/action-gh-release@v1
         with:
-          # 直接上传 dist 目录下的 .exe 文件
-          artifacts: "dist/Modpack-Localizer-Pro.exe"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
+          files: dist/Modpack-Localizer-Pro.exe
+          body: ${{ steps.get_release_notes.outputs.notes }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

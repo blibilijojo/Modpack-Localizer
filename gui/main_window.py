@@ -117,6 +117,7 @@ class MainWindow:
         new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new")
         old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
 
+        # 1. 下载新版本，这部分不变
         download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path,
                                                      lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
         if not download_ok:
@@ -124,36 +125,33 @@ class MainWindow:
             self.root.after(0, self.later_btn.master.master.destroy)
             return
 
-        batch_script_path = exe_dir / "update.bat"
-        exe_name = current_exe_path.name
-        script_content = f"""
-@echo off
-echo.
-echo 更新程序已启动，请勿关闭此窗口...
-echo.
+        # 2. 定位并释放内置的 updater.exe
+        # 在 PyInstaller 打包的 "frozen" 环境中，sys._MEIPASS 指向程序解压资源的临时文件夹
+        try:
+            # sys._MEIPASS 只有在打包后的exe中才存在
+            updater_path = Path(sys._MEIPASS) / "updater.exe"
+            if not updater_path.exists():
+                 raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
+        except AttributeError:
+            # 如果是直接运行 .py 文件进行开发调试，则无法使用此功能
+            self.root.after(0, lambda: messagebox.showerror("开发模式", "更新功能只能在打包后的 .exe 程序中使用。"))
+            return
+        except FileNotFoundError as e:
+            self.root.after(0, lambda: messagebox.showerror("更新错误", str(e)))
+            return
 
-REM 等待主程序启动这个脚本后自行退出 (ping -n 3 等待2秒)
-ping 127.0.0.1 -n 3 > nul
+        # 3. 准备启动更新器所需的所有命令行参数
+        pid = os.getpid()
+        command = [
+            str(updater_path),
+            str(pid),                # 参数1: 主程序的进程ID
+            str(current_exe_path),   # 参数2: 当前(旧版)exe的完整路径
+            str(new_exe_temp_path),  # 参数3: 已下载的新版exe的完整路径
+            str(old_exe_backup_path) # 参数4: 用于备份旧版的路径
+        ]
 
-REM 强制终止任何可能仍在运行的旧版本进程，这是最关键的一步，可防止文件占用
-echo 正在关闭旧版程序...
-taskkill /F /IM "{exe_name}" > nul
-ping 127.0.0.1 -n 2 > nul
+        # 4. 启动 updater.exe 作为一个完全分离的、独立的进程
+        subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
 
-echo 正在备份当前版本: "{current_exe_path}"
-move /Y "{current_exe_path}" "{old_exe_backup_path}"
-
-echo 正在应用新版本...
-move /Y "{new_exe_temp_path}" "{current_exe_path}"
-
-echo 更新完成，正在重启应用程序...
-start "" "{current_exe_path}"
-
-REM 自删除脚本
-del "%~f0"
-"""
-        with open(batch_script_path, "w", encoding="utf-8") as f:
-            f.write(script_content)
-
-        subprocess.Popen(f'"{batch_script_path}"', shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+        # 5. 主程序安排自己退出，将控制权完全交给更新器
         self.root.after(100, self.root.destroy)

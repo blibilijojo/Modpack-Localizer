@@ -1,11 +1,11 @@
-# .github/workflows/build-release.yml (Final Corrected Version)
+# .github/workflows/build-release.yml (Final Version without Icon)
 
 name: Build and Release Executable
 
 on:
   push:
     tags:
-      - 'v*' # 触发工作流的标签格式，例如 v1.0, v20.1.2
+      - 'v*'
 
 jobs:
   build:
@@ -30,14 +30,12 @@ jobs:
           # 步骤 1: 安装所有构建时需要的依赖 (psutil 和 pyinstaller)
           pip install psutil pyinstaller
 
-          # 步骤 2: 首先，单独构建 updater.py 为 updater.exe
+          # 步骤 2: 构建 updater.exe，它不需要图标
           pyinstaller --noconfirm --onefile --noconsole --name updater updater.py
           
-          # 步骤 3: 接着，构建主程序 main.py
-          # 使用 PowerShell 的倒引号 ` 作为换行符
+          # 步骤 3: 构建主程序，移除图标参数，使用默认图标
           pyinstaller --noconfirm --onefile --windowed `
             --add-data="dist/updater.exe;." `
-            --icon="icon.ico" `
             --name="Modpack-Localizer-Pro" `
             main.py
 
@@ -45,7 +43,7 @@ jobs:
         id: get_release_notes
         run: |
           $notes = git tag -l --format='%(contents)' ${{ github.ref_name }}
-          $notes = $notes -replace "`r`n", "%0A" # 替换换行符以适应 Actions 输出
+          $notes = $notes -replace "`r`n", "%0A"
           echo "notes=$notes" >> $env:GITHUB_OUTPUT
         shell: pwsh
 

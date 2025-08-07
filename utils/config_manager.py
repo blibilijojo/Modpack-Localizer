@@ -1,5 +1,3 @@
-# utils/config_manager.py
-
 import json
 from pathlib import Path
 import logging

@@ -20,6 +20,8 @@ build/
 # 程序运行时生成的日志文件 (不上传)
 ModpackLocalizer.log
 ai_error_logs
+.__ModpackLocalizer.lock
+
 # 包含您私人API密钥的配置文件 (绝对不能上传!)
 config.json
 

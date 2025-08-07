@@ -1,5 +1,3 @@
-# core/data_aggregator.py
-
 import zipfile
 import io
 import json

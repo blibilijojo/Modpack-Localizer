@@ -14,17 +14,14 @@ class TabAiParameters:
         self.frame = ttk.Frame(parent, padding="10")
         self.root = parent.winfo_toplevel()
         
-        # --- Variable Initialization ---
         self.config = config_manager.load_config()
         self.model_var = tk.StringVar()
         self.use_grounding_var = tk.BooleanVar()
         self.current_model_list = []
 
-        # === AI Parameter Settings Frame ===
         param_frame = ttk.LabelFrame(self.frame, text="AI 参数设置 (调整翻译行为)", padding=10)
         param_frame.pack(fill="both", expand=True)
 
-        # Model Frame
         model_frame = ttk.Frame(param_frame)
         model_frame.pack(fill='x', pady=5)
         model_label = ttk.Label(model_frame, text="AI 模型:")
@@ -35,38 +32,35 @@ class TabAiParameters:
         self.fetch_models_button = ttk.Button(model_frame, text="获取模型列表", command=self._fetch_models_async, bootstyle="info-outline")
         self.fetch_models_button.pack(side='left')
         
-        # Grounding Frame
-        grounding_frame = ttk.Frame(param_frame)
-        grounding_frame.pack(fill='x', pady=5)
-        grounding_check = ttk.Checkbutton(grounding_frame, text="启用接地翻译模式 (联网搜索，提高对新术语的准确性)", variable=self.use_grounding_var, bootstyle="primary")
-        grounding_check.pack(side="left")
-        ToolTip(grounding_check, "开启后，AI在翻译前会先使用Google搜索相关信息\n这能极大提高对新模组、特殊物品名的翻译质量，但可能会稍稍增加翻译时间")
+        adv_modes_frame = ttk.Frame(param_frame)
+        adv_modes_frame.pack(fill='x', pady=5)
 
-        # Performance Frame
+        grounding_check = ttk.Checkbutton(adv_modes_frame, text="启用接地翻译模式 (联网搜索，提高对新术语的准确性)", variable=self.use_grounding_var, bootstyle="primary")
+        grounding_check.pack(side="left", anchor='w')
+        ToolTip(grounding_check, "开启后，AI在翻译前会先使用Google搜索相关信息\n这能极大提高对新模组、特殊物品名的翻译质量，但可能会稍稍增加翻译时间")
+        
         perf_frame = ttk.LabelFrame(param_frame, text="性能与重试设置", padding="10")
         perf_frame.pack(fill='x', expand=True, pady=10)
         perf_frame.columnconfigure(1, weight=1)
         perf_frame.columnconfigure(3, weight=1)
-        self._create_perf_spinbox(perf_frame, "翻译批处理大小:", "ai_batch_size", 50, (1, 1000), "单次API请求包含的文本数量...").grid(row=0, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
-        self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", 4, (1, 16), "同时发送API请求的最大数量...").grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
+        self._create_perf_spinbox(perf_frame, "翻译批处理大小:", "ai_batch_size", 50, (1, 1000), "单次API请求包含的文本数量").grid(row=0, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
+        self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", 4, (1, 16), "同时发送API请求的最大数量").grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
         self._create_perf_spinbox(perf_frame, "最大重试次数:", "ai_max_retries", 3, (0, 100), "单个翻译批次失败后的最大重试次数").grid(row=1, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
         self._create_perf_spinbox(perf_frame, "重试间隔(秒):", "ai_retry_interval", 2, (0, 60), "每次重试之间的等待时间（秒）").grid(row=1, column=2, columnspan=2, sticky="ew", pady=2)
         
-        # Prompt Frame
-        prompt_frame = ttk.LabelFrame(param_frame, text="AI 翻译提示词 (Prompt)", padding="10")
+        prompt_frame = ttk.LabelFrame(param_frame, text="AI 翻译提示词 (Prompt) - 当前为 JSON 输出模式", padding="10")
         prompt_frame.pack(fill='both', expand=True, pady=5)
         self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=8, wrap="word")
         self.prompt_text.pack(fill='both', expand=True, side='left', pady=2)
+        
         restore_button = ttk.Button(prompt_frame, text="恢复默认", command=self._restore_default_prompt, bootstyle="warning-outline")
         restore_button.pack(side='top', padx=(5,0), anchor='ne')
         ToolTip(restore_button, "将提示词恢复到程序内置的默认值")
 
-        # --- Load settings and bind events ---
         self._load_settings_to_ui()
         self._bind_events()
 
     def _load_settings_to_ui(self):
-        """Loads all settings from config into the UI without triggering save events."""
         self.config = config_manager.load_config()
         self.use_grounding_var.set(self.config.get("use_grounding", False))
         self.prompt_text.delete("1.0", tk.END)
@@ -79,7 +73,6 @@ class TabAiParameters:
         self._update_model_options(self.config.get("model_list", []))
 
     def _bind_events(self):
-        """Binds all auto-save events after initial loading."""
         self.use_grounding_var.trace_add("write", self._auto_save)
         self.model_option_menu.bind('<<ComboboxSelected>>', lambda e: (self._auto_save(), self.model_option_menu.selection_clear()))
         self.model_option_menu.bind('<MouseWheel>', lambda e: "break")
@@ -130,7 +123,6 @@ class TabAiParameters:
         return container
 
     def _fetch_models_async(self):
-        # We need service settings to fetch models, so we load them directly
         service_config = config_manager.load_config()
         api_keys = service_config.get('api_keys', [])
         if not api_keys or not any(api_keys):
@@ -141,7 +133,6 @@ class TabAiParameters:
 
     def _fetch_worker(self):
         try:
-            # Load fresh service config for the worker thread
             service_config = config_manager.load_config()
             translator = GeminiTranslator(service_config['api_keys'], service_config.get('api_endpoint'))
             model_list = translator.fetch_models()
@@ -152,13 +143,12 @@ class TabAiParameters:
     def _update_ui_after_fetch(self, model_list):
         if model_list:
             self._update_model_options(model_list)
-            self.get_and_save_settings() # Save the new list and selection
+            self.get_and_save_settings()
             ui_utils.show_info("成功", f"成功获取 {len(model_list)} 个模型！列表已保存")
         else:
             ui_utils.show_error("失败", "未能获取到任何可用模型\n请检查密钥、网络或服务器地址")
 
     def _update_model_options(self, model_list: list[str]):
-        """Safely updates the model combobox and its selection."""
         self.current_model_list = model_list if model_list else []
         self.model_option_menu.config(values=self.current_model_list)
         if not self.current_model_list:

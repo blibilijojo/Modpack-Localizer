@@ -1,5 +1,3 @@
-# gui/main_window.py
-
 import tkinter as tk
 from tkinter import messagebox, Toplevel
 import ttkbootstrap as ttk
@@ -47,7 +45,27 @@ class MainWindow:
 
         from utils.logger_setup import setup_logging
         setup_logging(self.main_control_tab.log_message)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
         self.start_update_check()
+
+    def _on_closing(self):
+        """
+        处理窗口关闭事件，确保资源被正确释放，并强制退出整个应用程序进程。
+        这是解决进程残留和文件锁问题的关键。
+        """
+        try:
+            logging.info("应用程序正在关闭，开始清理资源...")
+            # 1. 优雅地关闭日志系统，释放文件和锁
+            logging.shutdown()
+        except Exception as e:
+            # 如果日志系统本身出问题，打印到控制台
+            print(f"关闭日志系统时发生错误: {e}")
+        finally:
+            # 2. 强制终止整个Python进程，确保所有线程（包括守护线程）都被清理
+            # 这是防止后台进程残留的最终手段。
+            sys.exit(0)
 
     def _create_menu(self):
         menu_bar = tk.Menu(self.root)
@@ -117,7 +135,6 @@ class MainWindow:
         new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new")
         old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
 
-        # 1. 下载新版本，这部分不变
         download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path,
                                                      lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
         if not download_ok:
@@ -125,33 +142,26 @@ class MainWindow:
             self.root.after(0, self.later_btn.master.master.destroy)
             return
 
-        # 2. 定位并释放内置的 updater.exe
-        # 在 PyInstaller 打包的 "frozen" 环境中，sys._MEIPASS 指向程序解压资源的临时文件夹
         try:
-            # sys._MEIPASS 只有在打包后的exe中才存在
             updater_path = Path(sys._MEIPASS) / "updater.exe"
             if not updater_path.exists():
                  raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
         except AttributeError:
-            # 如果是直接运行 .py 文件进行开发调试，则无法使用此功能
             self.root.after(0, lambda: messagebox.showerror("开发模式", "更新功能只能在打包后的 .exe 程序中使用。"))
             return
         except FileNotFoundError as e:
             self.root.after(0, lambda: messagebox.showerror("更新错误", str(e)))
             return
 
-        # 3. 准备启动更新器所需的所有命令行参数
         pid = os.getpid()
         command = [
             str(updater_path),
-            str(pid),                # 参数1: 主程序的进程ID
-            str(current_exe_path),   # 参数2: 当前(旧版)exe的完整路径
-            str(new_exe_temp_path),  # 参数3: 已下载的新版exe的完整路径
-            str(old_exe_backup_path) # 参数4: 用于备份旧版的路径
+            str(pid),
+            str(current_exe_path),
+            str(new_exe_temp_path),
+            str(old_exe_backup_path)
         ]
 
-        # 4. 启动 updater.exe 作为一个完全分离的、独立的进程
         subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
 
-        # 5. 主程序安排自己退出，将控制权完全交给更新器
-        self.root.after(100, self.root.destroy)
+        self.root.after(100, self._on_closing)

@@ -1,5 +1,3 @@
-# services/gemini_translator.py
-
 import openai
 import logging
 import json

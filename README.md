@@ -10,12 +10,22 @@
 
 ## 🌎 简介
 
-**Modpack Localizer Pro** 是一款专业的 Minecraft 整合包汉化工具，旨在通过 AI 翻译、社区资源和手动校对工作台，为整合包作者和玩家提供从一键式自动化到精细化手动翻译的全流程本地化解决方案。它能够智能处理模组中的 `.json` 和 `.lang` 语言文件，并允许用户深度自定义工作流的每一个环节。
+**一款专业的 Minecraft 整合包汉化工作台。它将强大的 AI 翻译、社区资源整合与精细的手动校对、项目存读档功能深度结合，为整合包作者和玩家提供从一键自动化到完整项目管理的全流程本地化体验。**
 
 <p align="center">
-  <!-- 这里是您的应用截图 -->
-  <img src="https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1" alt="应用截图" width="700"/>
+  <img width="852" alt="应用主界面" src="https://github.com/user-attachments/assets/dc267e88-7e56-4242-b750-babfca545a2a" />
 </p>
+
+## 📸 功能展示 (Feature Showcase)
+
+<div align="center">
+
+| 手动翻译工作台 (Manual Translation Workbench) | 社区词典查询 (Community Dictionary Search) |
+| :----------------------------------------------------------: | :----------------------------------------------------------: |
+| *专业的三栏式布局，方便您按模组对上千条文本进行高效的审查、编辑和校对。* | *强大的原文/译文双向模糊搜索，快速找到您需要的参考翻译。* |
+| <img width="1102" alt="手动翻译工作台" src="https://github.com/user-attachments/assets/81e8a99e-cdd3-4442-8bd8-649da76b7675" /> | <img width="802" alt="社区词典查询" src="https://github.com/user-attachments/assets/e78dee9a-92d8-44c2-b3f3-20cc744e81da" /> |
+
+</div>
 
 ## ✨ 功能特性
 
@@ -47,16 +57,26 @@
 ---
 ---
 
-## English Version
+# English Version
 
 ## 🌎 Introduction
 
-**Modpack Localizer Pro** is a professional localization tool for Minecraft modpacks, designed to provide a full-fledged localization workflow for modpack creators and players. It combines AI translation, community resource overlays, and a manual proofreading workbench, offering everything from a one-click solution to fine-grained manual control. It intelligently handles both `.json` and `.lang` language files and allows users to deeply customize every aspect of the workflow.
+**A professional workbench for Minecraft modpack localization. It deeply integrates powerful AI translation and community resources with fine-grained manual proofreading and project management (save/load), providing a full-circle localization experience for both modpack creators and players.**
 
 <p align="center">
-  <!-- Here is your application screenshot -->
-  <img src="https://github.com/user-attachments/assets/70b5f5d1-1773-405d-aa87-18459b23fce1" alt="Application Screenshot" width="700"/>
+  <img width="852" alt="Main Application UI" src="https://github.com/user-attachments/assets/dc267e88-7e56-4242-b750-babfca545a2a" />
 </p>
+
+## 📸 Feature Showcase
+
+<div align="center">
+
+| Manual Translation Workbench                                 | Community Dictionary Search                                    |
+| :----------------------------------------------------------: | :----------------------------------------------------------: |
+| *A professional three-pane layout for efficiently reviewing, editing, and proofreading thousands of entries, sorted by mod.* | *Powerful, fuzzy, bidirectional search to quickly find the reference translations you need.* |
+| <img width="1102" alt="Manual Translation Workbench" src="https://github.com/user-attachments/assets/81e8a99e-cdd3-4442-8bd8-649da76b7675" /> | <img width="802" alt="Community Dictionary Search" src="https://github.com/user-attachments/assets/e78dee9a-92d8-44c2-b3f3-20cc744e81da" /> |
+
+</div>
 
 ## ✨ Features
 

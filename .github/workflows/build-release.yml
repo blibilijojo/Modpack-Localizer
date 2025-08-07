@@ -1,6 +1,6 @@
-# .github/workflows/build-release.yml (Final Version without Icon)
+# .github/workflows/build-release.yml
 
-name: Build and Release Executable
+name: Build and Release
 
 on:
   push:
@@ -12,45 +12,35 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11' # Or your preferred Python version
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt  # <-- 关键新增步骤：安装所有依赖
+        pip install pyinstaller          # <-- 单独安装 PyInstaller
 
-      - name: Build with PyInstaller
-        run: |
-          # 步骤 1: 安装所有构建时需要的依赖 (psutil 和 pyinstaller)
-          pip install psutil pyinstaller
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "updater.exe;." main.py
 
-          # 步骤 2: 构建 updater.exe，它不需要图标
-          pyinstaller --noconfirm --onefile --noconsole --name updater updater.py
-          
-          # 步骤 3: 构建主程序，移除图标参数，使用默认图标
-          pyinstaller --noconfirm --onefile --windowed `
-            --add-data="dist/updater.exe;." `
-            --name="Modpack-Localizer-Pro" `
-            main.py
+    - name: Get release notes from tag
+      id: get_release_notes
+      run: |
+        $TAG_MESSAGE = git tag -l --format='%(contents)' ${{ github.ref_name }}
+        $TAG_MESSAGE -replace "`r`n", "%0A" | Out-File -FilePath release_notes.txt -Encoding utf8
+        $RELEASE_NOTES = Get-Content -Path release_notes.txt -Raw
+        echo "body=$RELEASE_NOTES" >> $env:GITHUB_OUTPUT
+      shell: pwsh
 
-      - name: Get Release Notes
-        id: get_release_notes
-        run: |
-          $notes = git tag -l --format='%(contents)' ${{ github.ref_name }}
-          $notes = $notes -replace "`r`n", "%0A"
-          echo "notes=$notes" >> $env:GITHUB_OUTPUT
-        shell: pwsh
-
-      - name: Create Release and Upload Artifact
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/Modpack-Localizer-Pro.exe
-          body: ${{ steps.get_release_notes.outputs.notes }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body: ${{ steps.get_release_notes.outputs.body }}
+        files: dist/Modpack-Localizer-Pro.exe

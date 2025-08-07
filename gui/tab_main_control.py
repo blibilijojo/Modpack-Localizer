@@ -13,10 +13,12 @@ import os
 import sys
 import subprocess
 import time
+import json
 from gui.custom_widgets import ToolTip
 from utils import config_manager
 import logging
 
+# ... DownloadProgressDialog 和 PackSettingsDialog 类的代码保持不变 ...
 class DownloadProgressDialog(Toplevel):
     def __init__(self, parent, title="下载中"):
         super().__init__(parent)
@@ -73,67 +75,24 @@ class TabMainControl:
         self.community_dict_var.trace_add("write", lambda *args: self._save_config())
         browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline"); browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新词典", command=self._check_and_update_dict_async, bootstyle="info"); self.download_dict_button.pack(side="left", padx=(5, 0)); ToolTip(self.download_dict_button, "检查云端是否有新版本的社区词典，并按需下载。")
-        
-        options_frame_container = ttk.Frame(path_frame)
-        options_frame_container.pack(fill="x", padx=5, pady=(0, 5))
-        options_frame = ttk.Frame(options_frame_container)
-        options_frame.pack(padx=(105, 0))
-
-        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
-        origin_check = ttk.Checkbutton(options_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
-        origin_check.pack(side="left", padx=(0, 20))
-        ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文(Origin Name)进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
-        self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_config())
-
-        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
-        proxy_check = ttk.Checkbutton(options_frame, text="使用代理加速词典下载", variable=self.use_proxy_var, bootstyle="primary"); proxy_check.pack(side="left"); ToolTip(proxy_check, "开启后，在下载社区词典时会自动使用内置的代理服务，解决国内访问GitHub困难的问题。")
-        self.use_proxy_var.trace_add("write", lambda *args: self._save_config())
-        
-        packs_frame = ttk.LabelFrame(path_frame, text="第三方汉化包列表 (优先级由上至下)", padding="10"); packs_frame.pack(fill="both", expand=True, pady=(10, 0))
-        list_container = ttk.Frame(packs_frame); list_container.pack(fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(list_container, orient="vertical")
-        self.packs_listbox = tk.Listbox(list_container, yscrollcommand=scrollbar.set, selectmode="extended", height=6); scrollbar.config(command=self.packs_listbox.yview); scrollbar.pack(side="right", fill="y"); self.packs_listbox.pack(side="left", fill="both", expand=True)
+        options_frame_container = ttk.Frame(path_frame); options_frame_container.pack(fill="x", padx=5, pady=(0, 5)); options_frame = ttk.Frame(options_frame_container); options_frame.pack(padx=(105, 0))
+        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True)); origin_check = ttk.Checkbutton(options_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary"); origin_check.pack(side="left", padx=(0, 20)); ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文(Origin Name)进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。"); self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_config())
+        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True)); proxy_check = ttk.Checkbutton(options_frame, text="使用代理加速词典下载", variable=self.use_proxy_var, bootstyle="primary"); proxy_check.pack(side="left"); ToolTip(proxy_check, "开启后，在下载社区词典时会自动使用内置的代理服务，解决国内访问GitHub困难的问题。"); self.use_proxy_var.trace_add("write", lambda *args: self._save_config())
+        packs_frame = ttk.LabelFrame(path_frame, text="第三方汉化包列表 (优先级由上至下)", padding="10"); packs_frame.pack(fill="both", expand=True, pady=(10, 0)); list_container = ttk.Frame(packs_frame); list_container.pack(fill="both", expand=True); scrollbar = ttk.Scrollbar(list_container, orient="vertical"); self.packs_listbox = tk.Listbox(list_container, yscrollcommand=scrollbar.set, selectmode="extended", height=6); scrollbar.config(command=self.packs_listbox.yview); scrollbar.pack(side="right", fill="y"); self.packs_listbox.pack(side="left", fill="both", expand=True)
         for path in self.config.get("community_pack_paths", []): self.packs_listbox.insert(tk.END, path)
-        list_btn_frame = ttk.Frame(packs_frame); list_btn_frame.pack(fill="x", pady=(5,0))
-        add_btn = ttk.Button(list_btn_frame, text="✚ 添加", command=self._add_packs, bootstyle="success-outline", width=8); ToolTip(add_btn, "添加一个或多个第三方汉化资源包(.zip)"); add_btn.pack(side="left", padx=2)
-        remove_btn = ttk.Button(list_btn_frame, text="✖ 移除", command=self._remove_packs, bootstyle="danger-outline", width=8); remove_btn.pack(side="left", padx=2)
-        spacer = ttk.Frame(list_btn_frame); spacer.pack(side="left", fill="x", expand=True)
-        up_btn = ttk.Button(list_btn_frame, text="▲ 上移", command=lambda: self._move_pack(-1), bootstyle="info-outline", width=8); up_btn.pack(side="left", padx=2)
-        down_btn = ttk.Button(list_btn_frame, text="▼ 下移", command=lambda: self._move_pack(1), bootstyle="info-outline", width=8); down_btn.pack(side="left", padx=2)
+        list_btn_frame = ttk.Frame(packs_frame); list_btn_frame.pack(fill="x", pady=(5,0)); add_btn = ttk.Button(list_btn_frame, text="✚ 添加", command=self._add_packs, bootstyle="success-outline", width=8); ToolTip(add_btn, "添加一个或多个第三方汉化资源包(.zip)"); add_btn.pack(side="left", padx=2); remove_btn = ttk.Button(list_btn_frame, text="✖ 移除", command=self._remove_packs, bootstyle="danger-outline", width=8); remove_btn.pack(side="left", padx=2); spacer = ttk.Frame(list_btn_frame); spacer.pack(side="left", fill="x", expand=True); up_btn = ttk.Button(list_btn_frame, text="▲ 上移", command=lambda: self._move_pack(-1), bootstyle="info-outline", width=8); up_btn.pack(side="left", padx=2); down_btn = ttk.Button(list_btn_frame, text="▼ 下移", command=lambda: self._move_pack(1), bootstyle="info-outline", width=8); down_btn.pack(side="left", padx=2)
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", "")); self._create_path_entry(path_frame, "输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
+        mode_frame = ttk.LabelFrame(self.frame, text="工作模式", padding="10"); mode_frame.pack(fill="x", pady=(10,0)); self.translation_mode_var = tk.StringVar(value=self.config.get("translation_mode", "ai")); self.translation_mode_var.trace_add("write", lambda *args: self._save_config()); ai_radio = ttk.Radiobutton(mode_frame, text="AI 自动翻译", variable=self.translation_mode_var, value="ai", bootstyle="primary-toolbutton"); ai_radio.pack(side="left", padx=5, expand=True); ToolTip(ai_radio, "全自动模式：程序将自动使用AI翻译所有未找到本地翻译的文本。"); manual_radio = ttk.Radiobutton(mode_frame, text="手动校对和翻译", variable=self.translation_mode_var, value="manual", bootstyle="primary-toolbutton"); manual_radio.pack(side="left", padx=5, expand=True); ToolTip(manual_radio, "工作台模式：程序将弹出一个新窗口，\n让您手动审查、编辑和填写所有需要翻译的文本。")
         
-        # --- NEW: Workflow Mode Selection ---
-        mode_frame = ttk.LabelFrame(self.frame, text="工作模式", padding="10")
-        mode_frame.pack(fill="x", pady=(10,0))
-        self.translation_mode_var = tk.StringVar(value=self.config.get("translation_mode", "ai"))
-        self.translation_mode_var.trace_add("write", lambda *args: self._save_config())
+        # REMOVED: Project Management Frame
         
-        ai_radio = ttk.Radiobutton(mode_frame, text="AI 自动翻译", variable=self.translation_mode_var, value="ai", bootstyle="primary-toolbutton")
-        ai_radio.pack(side="left", padx=5, expand=True)
-        ToolTip(ai_radio, "全自动模式：程序将自动使用AI翻译所有未找到本地翻译的文本。")
-        
-        manual_radio = ttk.Radiobutton(mode_frame, text="手动校对和翻译", variable=self.translation_mode_var, value="manual", bootstyle="primary-toolbutton")
-        manual_radio.pack(side="left", padx=5, expand=True)
-        ToolTip(manual_radio, "工作台模式：程序将弹出一个新窗口，\n让您手动审查、编辑和填写所有需要翻译的文本。")
-        
-        self.start_button = ttk.Button(self.frame, text="--- 开始汉化流程 ---", command=self.start_workflow_prompt, bootstyle="success"); self.start_button.pack(fill="x", pady=20, ipady=10)
+        self.start_button = ttk.Button(self.frame, text="--- 从头扫描并开始汉化 ---", command=self.start_workflow_prompt, bootstyle="success"); self.start_button.pack(fill="x", pady=20, ipady=10)
         self._create_log_frame()
     
     def _save_config(self):
-        self.config["mods_dir"] = self.mods_dir_var.get()
-        self.config["output_dir"] = self.output_dir_var.get()
-        self.config["community_dict_path"] = self.community_dict_var.get()
-        self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
-        self.config["use_github_proxy"] = self.use_proxy_var.get()
-        self.config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
-        self.config["translation_mode"] = self.translation_mode_var.get()
-        config_manager.save_config(self.config)
-
+        self.config["mods_dir"] = self.mods_dir_var.get(); self.config["output_dir"] = self.output_dir_var.get(); self.config["community_dict_path"] = self.community_dict_var.get(); self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END)); self.config["use_github_proxy"] = self.use_proxy_var.get(); self.config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get(); self.config["translation_mode"] = self.translation_mode_var.get(); config_manager.save_config(self.config)
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
-        row_frame = ttk.Frame(parent); row_frame.pack(fill="x", pady=5)
-        label = ttk.Label(row_frame, text=label_text, width=15); label.pack(side="left"); ToolTip(label, tooltip)
-        entry = ttk.Entry(row_frame, textvariable=var); entry.pack(side="left", fill="x", expand=True, padx=5)
-        var.trace_add("write", lambda *args: self._save_config())
+        row_frame = ttk.Frame(parent); row_frame.pack(fill="x", pady=5); label = ttk.Label(row_frame, text=label_text, width=15); label.pack(side="left"); ToolTip(label, tooltip); entry = ttk.Entry(row_frame, textvariable=var); entry.pack(side="left", fill="x", expand=True, padx=5); var.trace_add("write", lambda *args: self._save_config())
         def browse():
             if browse_type == "directory": ui_utils.browse_directory(var)
             elif browse_type == "file": ui_utils.browse_file(var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")])
@@ -141,53 +100,39 @@ class TabMainControl:
         ttk.Button(row_frame, text="浏览...", command=browse, bootstyle="primary-outline").pack(side="left")
     
     def start_workflow_prompt(self):
-        self.config = config_manager.load_config(); presets = self.config.get("pack_settings_presets", {})
-        dialog = PackSettingsDialog(self.root, presets); choice = dialog.result
+        self.config = config_manager.load_config(); presets = self.config.get("pack_settings_presets", {}); dialog = PackSettingsDialog(self.root, presets); choice = dialog.result
         if choice is None: self.log_message("操作已取消", "INFO"); return
         pack_settings = self.pack_settings_tab.get_current_settings() if choice["source"] == "current" else choice["data"]
         if choice["source"] != "current": self.log_message(f"已选择预案 '{choice['name']}' 的资源包设置", "INFO")
         self.start_workflow(pack_settings)
-
     def start_workflow(self, pack_settings: dict):
         self._prepare_ui_for_workflow()
         try:
             self._save_config(); settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
-            settings.update({
-                'mods_dir': self.config.get("mods_dir", ""), 
-                'output_dir': self.config.get("output_dir", ""), 
-                'community_dict_path': self.config.get("community_dict_path", ""), 
-                'zip_paths': self.config.get("community_pack_paths", []), 
-                'pack_settings': pack_settings, 
-                'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True),
-                'translation_mode': self.config.get("translation_mode", "ai")
-            })
+            settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings, 'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True), 'translation_mode': self.config.get("translation_mode", "ai")})
             if not all([settings['mods_dir'], settings['output_dir']]): raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
-            
             orchestrator = Orchestrator(settings, self.update_progress, self.root)
             threading.Thread(target=orchestrator.run_workflow, daemon=True).start()
         except Exception as e: self.update_progress(f"启动失败: {e}", -1)
-
     def _add_packs(self):
-        paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")])
+        paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")]); 
         for path in paths:
             if path not in self.packs_listbox.get(0, tk.END): self.packs_listbox.insert(tk.END, path)
         self._save_config()
     def _remove_packs(self):
-        selected_indices = self.packs_listbox.curselection()
+        selected_indices = self.packs_listbox.curselection(); 
         for i in reversed(selected_indices): self.packs_listbox.delete(i)
         self._save_config()
     def _move_pack(self, direction):
-        indices = self.packs_listbox.curselection()
+        indices = self.packs_listbox.curselection(); 
         if not indices: return
         for i in sorted(list(indices), reverse=(direction < 0)):
             if 0 <= i + direction < self.packs_listbox.size():
-                text = self.packs_listbox.get(i)
-                self.packs_listbox.delete(i); self.packs_listbox.insert(i + direction, text)
-                self.packs_listbox.selection_set(i + direction)
+                text = self.packs_listbox.get(i); self.packs_listbox.delete(i); self.packs_listbox.insert(i + direction, text); self.packs_listbox.selection_set(i + direction)
         self._save_config()
-    def _prepare_ui_for_workflow(self): self.start_button.config(state="disabled"); self.open_output_button.config(state="disabled"); self.log_text.config(state="normal"); self.log_text.delete("1.0", tk.END); self.log_text.config(state="disabled"); self.progress_bar.config(bootstyle="success-striped"); self.status_var.set("准备开始..."); self.progress_var.set(0)
+    def _prepare_ui_for_workflow(self): self.start_button.config(state="disabled"); self.root.nametowidget('.!menu.!menu').entryconfig("加载项目...", state="disabled"); self.open_output_button.config(state="disabled"); self.log_text.config(state="normal"); self.log_text.delete("1.0", tk.END); self.log_text.config(state="disabled"); self.progress_bar.config(bootstyle="success-striped"); self.status_var.set("准备开始..."); self.progress_var.set(0)
     def _reset_ui_after_workflow(self, success=True):
-        self.start_button.config(state="normal")
+        self.start_button.config(state="normal"); self.root.nametowidget('.!menu.!menu').entryconfig("加载项目...", state="normal")
         if success: self.open_output_button.config(state="normal"); self.log_message("流程执行完毕！资源包已生成", "SUCCESS")
         else: self.log_message("流程因错误中断", "CRITICAL"); self.progress_bar.config(bootstyle="danger-striped")
     def update_progress(self, message, percentage):
@@ -201,14 +146,8 @@ class TabMainControl:
         except RuntimeError: pass
     def get_log_frame(self): return self.log_frame_container
     def _create_log_frame(self):
-        self.log_frame_container = ttk.Frame(self.root)
-        log_frame = ttk.LabelFrame(self.log_frame_container, text="状态与日志", padding="10"); log_frame.pack(fill="both", expand=True)
-        progress_frame = ttk.Frame(log_frame); progress_frame.pack(fill="x", pady=(0, 5)); progress_frame.columnconfigure(0, weight=1)
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100, bootstyle="success-striped"); self.progress_bar.grid(row=0, column=0, sticky="ew")
-        self.open_output_button = ttk.Button(progress_frame, text="📂 打开", command=self._open_output_dir, state="disabled", bootstyle="info-outline", width=6); self.open_output_button.grid(row=0, column=1, padx=(10, 0)); ToolTip(self.open_output_button, "打开输出文件夹")
-        self.status_var = tk.StringVar(value="准备就绪"); status_label = ttk.Label(log_frame, textvariable=self.status_var, anchor="center"); status_label.pack(fill="x", anchor="center", pady=(5, 0))
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", wrap="word", font=("Consolas", 9), relief="flat"); self.log_text.pack(fill="both", expand=True, pady=5)
+        # ... 此方法及后续方法保持不变 ...
+        self.log_frame_container = ttk.Frame(self.root); log_frame = ttk.LabelFrame(self.log_frame_container, text="状态与日志", padding="10"); log_frame.pack(fill="both", expand=True); progress_frame = ttk.Frame(log_frame); progress_frame.pack(fill="x", pady=(0, 5)); progress_frame.columnconfigure(0, weight=1); self.progress_var = tk.DoubleVar(); self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100, bootstyle="success-striped"); self.progress_bar.grid(row=0, column=0, sticky="ew"); self.open_output_button = ttk.Button(progress_frame, text="📂 打开", command=self._open_output_dir, state="disabled", bootstyle="info-outline", width=6); self.open_output_button.grid(row=0, column=1, padx=(10, 0)); ToolTip(self.open_output_button, "打开输出文件夹"); self.status_var = tk.StringVar(value="准备就绪"); status_label = ttk.Label(log_frame, textvariable=self.status_var, anchor="center"); status_label.pack(fill="x", anchor="center", pady=(5, 0)); self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", wrap="word", font=("Consolas", 9), relief="flat"); self.log_text.pack(fill="both", expand=True, pady=5)
         for level, color in [("INFO", "gray"), ("WARNING", "#ff8c00"), ("ERROR", "red"), ("SUCCESS", "green"), ("NORMAL", "black")]: self.log_text.tag_config(level, foreground=color)
         self.log_text.tag_config("CRITICAL", foreground="red", font=("Consolas", 9, "bold"))
     def log_message(self, message, level="NORMAL"):
@@ -217,94 +156,38 @@ class TabMainControl:
             if self.frame.winfo_exists(): self.root.after(0, _log)
         except RuntimeError: pass
     def _open_output_dir(self):
-        output_path = self.output_dir_var.get()
+        output_path = self.output_dir_var.get(); 
         if not (output_path and os.path.isdir(output_path)): ui_utils.show_error("路径无效", "输出文件夹路径不存在或无效"); return
         try:
             if sys.platform == "win32": os.startfile(output_path)
             elif sys.platform == "darwin": subprocess.Popen(["open", output_path])
             else: subprocess.Popen(["xdg-open", output_path])
         except Exception as e: ui_utils.show_error("打开失败", f"无法打开文件夹：{e}")
-    
-    def _check_and_update_dict_async(self):
-        self.download_dict_button.config(state="disabled", text="检查中...")
-        threading.Thread(target=self._dict_update_worker, daemon=True).start()
-
+    def _check_and_update_dict_async(self): self.download_dict_button.config(state="disabled", text="检查中..."); threading.Thread(target=self._dict_update_worker, daemon=True).start()
     def _get_remote_dict_info(self) -> dict | None:
         api_url = "https://api.github.com/repos/blibilijojo/i18n-Dict-Extender/releases/latest"
         logging.info(f"正在直接请求GitHub API获取词典信息: {api_url}")
         try:
-            response = requests.get(api_url, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            version = data.get("tag_name")
-            url = next((asset.get("browser_download_url") for asset in data.get("assets", []) if asset.get("name") == "Dict-Sqlite.db"), None)
+            response = requests.get(api_url, timeout=15); response.raise_for_status(); data = response.json(); version = data.get("tag_name"); url = next((asset.get("browser_download_url") for asset in data.get("assets", []) if asset.get("name") == "Dict-Sqlite.db"), None)
             if version and url: return {"version": version, "url": url}
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
-
     def _dict_update_worker(self):
         try:
             remote_info = self._get_remote_dict_info()
-            if not remote_info:
-                self.root.after(0, lambda: ui_utils.show_error("检查失败", "无法获取远程词典版本信息，请检查网络连接。"))
-                return
-
-            local_version = self.config.get("last_dict_version", "0.0.0")
-            remote_version = remote_info["version"]
-            
-            logging.info(f"本地词典版本: {local_version}, 远程词典版本: {remote_version}")
-
-            if local_version == remote_version:
-                self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。"))
-                return
-            
-            msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"
-            
-            user_wants_to_update = tk.BooleanVar(value=False)
-            
+            if not remote_info: self.root.after(0, lambda: ui_utils.show_error("检查失败", "无法获取远程词典版本信息，请检查网络连接。")); return
+            local_version = self.config.get("last_dict_version", "0.0.0"); remote_version = remote_info["version"]; logging.info(f"本地词典版本: {local_version}, 远程词典版本: {remote_version}")
+            if local_version == remote_version: self.root.after(0, lambda: ui_utils.show_info("检查完成", f"您的社区词典已是最新版本 ({local_version})。")); return
+            msg = f"发现新的社区词典版本: {remote_version}\n(您当前的版本: {local_version})\n\n是否立即下载更新？"; user_wants_to_update = tk.BooleanVar(value=False)
             def create_and_show_dialog():
-                dialog = Toplevel(self.root)
-                dialog.title("发现新版本")
-                dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
-                main_frame = ttk.Frame(dialog, padding=20); main_frame.pack(fill="both", expand=True)
-                ttk.Label(main_frame, text=msg, justify="left").pack(pady=(0, 20))
-                btn_frame = ttk.Frame(main_frame); btn_frame.pack(fill="x")
+                dialog = Toplevel(self.root); dialog.title("发现新版本"); dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False); main_frame = ttk.Frame(dialog, padding=20); main_frame.pack(fill="both", expand=True); ttk.Label(main_frame, text=msg, justify="left").pack(pady=(0, 20)); btn_frame = ttk.Frame(main_frame); btn_frame.pack(fill="x")
                 def on_yes(): user_wants_to_update.set(True); dialog.destroy()
                 def on_no(): user_wants_to_update.set(False); dialog.destroy()
-                ttk.Button(btn_frame, text="立即更新", command=on_yes, bootstyle="success").pack(side="right", padx=5)
-                ttk.Button(btn_frame, text="稍后提醒", command=on_no).pack(side="right")
-                dialog.protocol("WM_DELETE_WINDOW", on_no)
-
-            self.root.after(0, create_and_show_dialog)
-            self.root.wait_variable(user_wants_to_update)
-
-            if not user_wants_to_update.get():
-                logging.info("用户选择不更新社区词典。")
-                return
-
-            progress_dialog = DownloadProgressDialog(self.root, title="下载社区词典")
-            
-            STABLE_PROXY_URL = "https://lucky-moth-20.deno.dev/"
-            DEST_FILE = Path("Dict-Sqlite.db").resolve()
-            
-            final_download_url = remote_info["url"]
-            if self.use_proxy_var.get():
-                final_download_url = f"{STABLE_PROXY_URL}{remote_info['url']}"
-            
-            from utils import update_checker
-            download_ok = update_checker.download_update(final_download_url, DEST_FILE, 
-                lambda s, p, sp: progress_dialog.update_progress(s, p, sp))
-
-            progress_dialog.close_dialog()
-
-            if download_ok:
-                self.config["last_dict_version"] = remote_version
-                self.config["community_dict_path"] = str(DEST_FILE)
-                config_manager.save_config(self.config)
-                self.root.after(0, lambda: self.community_dict_var.set(str(DEST_FILE)))
-                self.root.after(0, lambda: ui_utils.show_info("更新成功", f"社区词典已成功更新到版本 {remote_version}！"))
-            else:
-                self.root.after(0, lambda: ui_utils.show_error("下载失败", "下载新版词典时发生错误，请检查网络或代理后重试。"))
-
-        finally:
-            self.root.after(0, lambda: self.download_dict_button.config(state="normal", text="检查/更新词典"))
+                ttk.Button(btn_frame, text="立即更新", command=on_yes, bootstyle="success").pack(side="right", padx=5); ttk.Button(btn_frame, text="稍后提醒", command=on_no).pack(side="right"); dialog.protocol("WM_DELETE_WINDOW", on_no)
+            self.root.after(0, create_and_show_dialog); self.root.wait_variable(user_wants_to_update)
+            if not user_wants_to_update.get(): logging.info("用户选择不更新社区词典。"); return
+            progress_dialog = DownloadProgressDialog(self.root, title="下载社区词典"); STABLE_PROXY_URL = "https://lucky-moth-20.deno.dev/"; DEST_FILE = Path("Dict-Sqlite.db").resolve(); final_download_url = f"{STABLE_PROXY_URL}{remote_info['url']}" if self.use_proxy_var.get() else remote_info["url"]
+            from utils import update_checker; download_ok = update_checker.download_update(final_download_url, DEST_FILE, lambda s, p, sp: progress_dialog.update_progress(s, p, sp)); progress_dialog.close_dialog()
+            if download_ok: self.config["last_dict_version"] = remote_version; self.config["community_dict_path"] = str(DEST_FILE); config_manager.save_config(self.config); self.root.after(0, lambda: self.community_dict_var.set(str(DEST_FILE))); self.root.after(0, lambda: ui_utils.show_info("更新成功", f"社区词典已成功更新到版本 {remote_version}！"))
+            else: self.root.after(0, lambda: ui_utils.show_error("下载失败", "下载新版词典时发生错误，请检查网络或代理后重试。"))
+        finally: self.root.after(0, lambda: self.download_dict_button.config(state="normal", text="检查/更新词典"))

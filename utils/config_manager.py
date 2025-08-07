@@ -38,7 +38,8 @@ DEFAULT_CONFIG = {
         "pack_format_key": "1.20 - 1.20.1 (Format 15)", "pack_format": 15, "pack_description": "一个由Modpack Localizer生成的汉化包", "pack_icon_path": ""},
     "use_github_proxy": True,
     "last_dict_version": "0.0.0",
-    "use_origin_name_lookup": True
+    "use_origin_name_lookup": True,
+    "translation_mode": "ai" # 'ai' or 'manual'
 }
 
 def load_config() -> dict:

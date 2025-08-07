@@ -70,11 +70,21 @@ class MainWindow:
     def _create_menu(self):
         menu_bar = tk.Menu(self.root)
         self.root.config(menu=menu_bar)
+
+        # --- NEW: Tools Menu ---
+        tools_menu = tk.Menu(menu_bar, tearoff=0)
+        menu_bar.add_cascade(label="工具", menu=tools_menu)
+        tools_menu.add_command(label="词典查询...", command=self.open_dictionary_search)
+
         help_menu = tk.Menu(menu_bar, tearoff=0)
         menu_bar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="检查更新", command=lambda: self.start_update_check(user_initiated=True))
         help_menu.add_separator()
         help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
+
+    def open_dictionary_search(self):
+        from gui.dictionary_search_window import DictionarySearchWindow
+        DictionarySearchWindow(self.root)
 
     def start_update_check(self, user_initiated=False):
         if not getattr(sys, 'frozen', False):

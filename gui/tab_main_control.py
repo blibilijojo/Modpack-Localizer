@@ -101,7 +101,22 @@ class TabMainControl:
         up_btn = ttk.Button(list_btn_frame, text="▲ 上移", command=lambda: self._move_pack(-1), bootstyle="info-outline", width=8); up_btn.pack(side="left", padx=2)
         down_btn = ttk.Button(list_btn_frame, text="▼ 下移", command=lambda: self._move_pack(1), bootstyle="info-outline", width=8); down_btn.pack(side="left", padx=2)
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", "")); self._create_path_entry(path_frame, "输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
-        self.start_button = ttk.Button(self.frame, text="--- 开始智能汉化更新 ---", command=self.start_workflow_prompt, bootstyle="success"); self.start_button.pack(fill="x", pady=20, ipady=10)
+        
+        # --- NEW: Workflow Mode Selection ---
+        mode_frame = ttk.LabelFrame(self.frame, text="工作模式", padding="10")
+        mode_frame.pack(fill="x", pady=(10,0))
+        self.translation_mode_var = tk.StringVar(value=self.config.get("translation_mode", "ai"))
+        self.translation_mode_var.trace_add("write", lambda *args: self._save_config())
+        
+        ai_radio = ttk.Radiobutton(mode_frame, text="AI 自动翻译", variable=self.translation_mode_var, value="ai", bootstyle="primary-toolbutton")
+        ai_radio.pack(side="left", padx=5, expand=True)
+        ToolTip(ai_radio, "全自动模式：程序将自动使用AI翻译所有未找到本地翻译的文本。")
+        
+        manual_radio = ttk.Radiobutton(mode_frame, text="手动校对和翻译", variable=self.translation_mode_var, value="manual", bootstyle="primary-toolbutton")
+        manual_radio.pack(side="left", padx=5, expand=True)
+        ToolTip(manual_radio, "工作台模式：程序将弹出一个新窗口，\n让您手动审查、编辑和填写所有需要翻译的文本。")
+        
+        self.start_button = ttk.Button(self.frame, text="--- 开始汉化流程 ---", command=self.start_workflow_prompt, bootstyle="success"); self.start_button.pack(fill="x", pady=20, ipady=10)
         self._create_log_frame()
     
     def _save_config(self):
@@ -111,6 +126,7 @@ class TabMainControl:
         self.config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
         self.config["use_github_proxy"] = self.use_proxy_var.get()
         self.config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
+        self.config["translation_mode"] = self.translation_mode_var.get()
         config_manager.save_config(self.config)
 
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
@@ -131,16 +147,26 @@ class TabMainControl:
         pack_settings = self.pack_settings_tab.get_current_settings() if choice["source"] == "current" else choice["data"]
         if choice["source"] != "current": self.log_message(f"已选择预案 '{choice['name']}' 的资源包设置", "INFO")
         self.start_workflow(pack_settings)
+
     def start_workflow(self, pack_settings: dict):
         self._prepare_ui_for_workflow()
         try:
             self._save_config(); settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
-            settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings, 'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True)})
+            settings.update({
+                'mods_dir': self.config.get("mods_dir", ""), 
+                'output_dir': self.config.get("output_dir", ""), 
+                'community_dict_path': self.config.get("community_dict_path", ""), 
+                'zip_paths': self.config.get("community_pack_paths", []), 
+                'pack_settings': pack_settings, 
+                'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True),
+                'translation_mode': self.config.get("translation_mode", "ai")
+            })
             if not all([settings['mods_dir'], settings['output_dir']]): raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
-            from core.orchestrator import Orchestrator
-            orchestrator = Orchestrator(settings, self.update_progress)
+            
+            orchestrator = Orchestrator(settings, self.update_progress, self.root)
             threading.Thread(target=orchestrator.run_workflow, daemon=True).start()
         except Exception as e: self.update_progress(f"启动失败: {e}", -1)
+
     def _add_packs(self):
         paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")])
         for path in paths:

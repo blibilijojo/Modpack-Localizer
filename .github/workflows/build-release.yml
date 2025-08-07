@@ -1,3 +1,5 @@
+# .github/workflows/build-release.yml
+
 name: Build and Release
 
 on:
@@ -34,7 +36,7 @@ jobs:
 
     - name: Get release notes from tag
       id: get_release_notes
-      # 终极修复：使用 GitHub Actions 推荐的、健壮的多行文本输出方法
+      # 采用健壮的多行文本输出方法，以处理包含特殊字符的 Release Notes
       run: |
         $RELEASE_NOTES = git tag -l --format='%(contents)' ${{ github.ref_name }}
         $DELIMITER = "ghadelimiter_$(Get-Random)"

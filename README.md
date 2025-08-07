@@ -50,6 +50,15 @@
 6.  在 **`工作模式`** 中，选择“AI 自动翻译”（全自动）或“手动校对和翻译”（启动工作台）。
 7.  点击主界面的 **“--- 从头扫描并开始汉化 ---”** 按钮，开始您的工作流！
 
+## ❤️ 鸣谢
+
+本项目的实现离不开以下优秀开源项目和社区提供的宝贵数据资源，在此表示衷心的感谢！
+
+- **[Minecraft-Mod-Language-Package by CFPAOrg](https://github.com/CFPAOrg/Minecraft-Mod-Language-Package)**
+  - 该项目是社区词典数据的核心数据来源。它收集并维护了海量高质量的模组汉化文件，为本工具的词典功能提供了坚实的数据基础。
+- **[i18n-Dict-Extender by VM-Chinese-translate-group](https://github.com/VM-Chinese-translate-group/i18n-Dict-Extender)**
+  - 该项目是一个强大的词典聚合应用。它将来自多个社区（如 CFPA）的翻译成果，高效地编译成本项目所使用的 Dict-Sqlite.db 数据库格式。
+
 ## 📄 许可证
 
 本项目采用 [MIT 许可证](./LICENSE) 授权。
@@ -100,6 +109,15 @@
 5.  (Optional) Add any existing community translation packs and adjust their priority using the "Move Up/Down" buttons.
 6.  In the **`Work Mode`** section, choose "AI Auto-Translate" for a fully automated process or "Manual Proofreading" to launch the workbench.
 7.  Click the main **"--- Start Scan & Localize ---"** button and let the magic happen!
+
+## ❤️ Acknowledgements
+
+This project would not be possible without the valuable data resources provided by the following excellent open-source projects and communities. We express our sincere gratitude!
+
+- **[Minecraft-Mod-Language-Package by CFPAOrg](https://github.com/CFPAOrg/Minecraft-Mod-Language-Package)**
+  - This project is the core data source for the community dictionary. It collects and maintains a massive number of high-quality mod translation files, providing a solid data foundation for this tool's dictionary features.
+- **[i18n-Dict-Extender by VM-Chinese-translate-group](https://github.com/VM-Chinese-translate-group/i18n-Dict-Extender)**
+  - This project is a powerful dictionary aggregation application. It efficiently compiles translation contributions from multiple communities (like CFPA) into the Dict-Sqlite.db database format used by this project.
 
 ## 📄 License
 

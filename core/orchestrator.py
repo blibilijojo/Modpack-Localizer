@@ -1,3 +1,5 @@
+# core/orchestrator.py
+
 import logging 
 from pathlib import Path
 import json
@@ -8,7 +10,6 @@ from core.data_aggregator import DataAggregator
 from core.decision_engine import DecisionEngine
 from core.pack_builder import PackBuilder
 from services.gemini_translator import GeminiTranslator
-from gui.manual_translation_window import ManualTranslationWindow
 
 class Orchestrator:
     def __init__(self, settings: dict, progress_callback, root_for_dialog=None, save_data: dict | None = None):
@@ -60,14 +61,11 @@ class Orchestrator:
                 self.progress_callback("阶段 2/4: 应用翻译优先级...", p_dec_base)
                 engine = DecisionEngine()
                 
-                final_translations_lookup, items_for_ai, key_contribution, origin_name_contribution = engine.run(
+                final_translations_lookup, items_for_ai = engine.run(
                     user_dictionary, community_dict_by_key, community_dict_by_origin, 
                     master_english_dicts, internal_chinese, pack_chinese,
                     self.settings.get('use_origin_name_lookup', True)
                 )
-                
-                if key_contribution > 0: logging.info(f"分析完成：社区词典通过 [精准 Key] 匹配贡献了 {key_contribution} 条翻译。")
-                if origin_name_contribution > 0: logging.info(f"分析完成：社区词典通过 [原文 Origin Name] 匹配贡献了 {origin_name_contribution} 条翻译。")
                 
                 self.progress_callback("阶段 2/4: 决策完成", p_dec_base + p_dec_range)
                 items_to_process_manual = items_for_ai
@@ -80,9 +78,7 @@ class Orchestrator:
                 if use_ai:
                     translator = GeminiTranslator(self.settings['api_keys'], self.settings.get('api_endpoint'))
                     
-                    # --- 已修改：只提取纯文本列表，不再包含key ---
                     texts_to_translate = [val for _, _, val in items_for_ai]
-                    logging.info("已构建纯文本列表用于AI翻译，上下文功能已移除。")
 
                     batch_size = self.settings.get('ai_batch_size', 50)
                     max_threads = self.settings.get('ai_max_threads', 4)
@@ -133,6 +129,8 @@ class Orchestrator:
                 if items_to_process_manual:
                     if not self.root_for_dialog: raise ValueError("手动翻译模式需要一个有效的GUI根窗口。")
                     
+                    from gui.manual_translation_window import ManualTranslationWindow
+
                     stage_prefix = "阶段 2/2" if is_from_save else "阶段 3/4"
                     self.progress_callback(f"{stage_prefix}: 准备手动翻译工作台...", p_translate_base)
                     
@@ -164,8 +162,10 @@ class Orchestrator:
                 namespace_formats
             )
             
-            if success: self.progress_callback("流程执行完毕！", 100)
-            else: raise RuntimeError(f"构建资源包失败: {msg}")
+            if success: 
+                self.progress_callback("流程执行完毕！", 100)
+            else: 
+                raise RuntimeError(f"构建资源包失败: {msg}")
 
         except InterruptedError as e:
             logging.warning(f"工作流被用户主动中断: {e}")

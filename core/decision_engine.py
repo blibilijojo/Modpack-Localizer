@@ -1,9 +1,10 @@
+# core/decision_engine.py
+
 import logging
 from collections import defaultdict, Counter
 from packaging.version import parse as parse_version
 
 class DecisionEngine:
-
     def _resolve_origin_name_conflict(self, candidates: list[dict]) -> str | None:
         """
         智能仲裁机制，用于解决 ORIGIN_NAME 匹配到的多个翻译冲突。
@@ -41,13 +42,11 @@ class DecisionEngine:
         final_translations_lookup = defaultdict(dict)
         items_for_ai = []
         
-        # 核心修改：为个人词典增加贡献计数器
         user_dict_key_contribution = 0
         user_dict_origin_contribution = 0
-        key_contribution_count = 0
-        origin_name_contribution_count = 0
+        community_key_contribution = 0
+        community_origin_contribution = 0
 
-        # 从用户词典中解包，提供默认空字典以避免错误
         user_dict_by_key = user_dictionary.get('by_key', {})
         user_dict_by_origin = user_dictionary.get('by_origin_name', {})
 
@@ -55,47 +54,46 @@ class DecisionEngine:
             internal_chinese = internal_chinese_dicts.get(namespace, {})
             
             for key, english_value in english_dict.items():
-                # --- 核心修改：个人词典具有最高优先级 ---
                 if key in user_dict_by_key:
                     final_translations_lookup[namespace][key] = user_dict_by_key[key]
                     user_dict_key_contribution += 1
-
                 elif use_origin_name_lookup and english_value in user_dict_by_origin:
                     final_translations_lookup[namespace][key] = user_dict_by_origin[english_value]
                     user_dict_origin_contribution += 1
-
-                # --- 原有逻辑，优先级依次降低 ---
                 elif key in internal_chinese:
                     final_translations_lookup[namespace][key] = internal_chinese[key]
-                
                 elif key in pack_chinese_dict:
                     final_translations_lookup[namespace][key] = pack_chinese_dict[key]
-                
                 elif key in community_dict_by_key:
                     final_translations_lookup[namespace][key] = community_dict_by_key[key]
-                    key_contribution_count += 1
-                
+                    community_key_contribution += 1
                 elif use_origin_name_lookup and english_value in community_dict_by_origin:
                     candidates = community_dict_by_origin[english_value]
                     best_translation = self._resolve_origin_name_conflict(candidates)
                     if best_translation:
                         final_translations_lookup[namespace][key] = best_translation
-                        origin_name_contribution_count += 1
+                        community_origin_contribution += 1
                     else:
                         if english_value and not english_value.isspace():
                             items_for_ai.append((namespace, key, english_value))
                         final_translations_lookup[namespace][key] = english_value
-                
                 else:
                     if english_value and not english_value.isspace():
                         items_for_ai.append((namespace, key, english_value))
                     final_translations_lookup[namespace][key] = english_value
         
-        # 核心修改：更新日志输出
-        if user_dict_key_contribution > 0: logging.info(f"决策引擎: 个人词典通过 [精准 Key] 贡献了 {user_dict_key_contribution} 条翻译 (最高优先级)。")
-        if user_dict_origin_contribution > 0: logging.info(f"决策引擎: 个人词典通过 [原文 Origin Name] 贡献了 {user_dict_origin_contribution} 条翻译 (最高优先级)。")
-
-        total_final_entries = sum(len(d) for d in final_translations_lookup.values())
-        logging.info(f"决策完成。最终条目: {total_final_entries}, 待AI翻译: {len(items_for_ai)}")
+        contributions = []
+        if user_dict_key_contribution > 0: contributions.append(f"个人词典[精准Key]贡献 {user_dict_key_contribution} 条")
+        if user_dict_origin_contribution > 0: contributions.append(f"个人词典[原文]贡献 {user_dict_origin_contribution} 条")
+        if community_key_contribution > 0: contributions.append(f"社区词典[精准Key]贡献 {community_key_contribution} 条")
+        if community_origin_contribution > 0: contributions.append(f"社区词典[原文]贡献 {community_origin_contribution} 条")
         
-        return final_translations_lookup, items_for_ai, key_contribution_count, origin_name_contribution_count
+        if contributions:
+            logging.info(f"  - 翻译源分析: " + ", ".join(contributions))
+        
+        total_final_entries = sum(len(d) for d in final_translations_lookup.values())
+        
+        # --- 【修改】优化日志消息的措辞 ---
+        logging.info(f"决策完成。共聚合 {total_final_entries} 条文本，其中 {len(items_for_ai)} 条需新翻译 (AI或手动)。")
+        
+        return final_translations_lookup, items_for_ai

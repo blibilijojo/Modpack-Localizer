@@ -9,7 +9,7 @@ import webbrowser
 import sys
 import subprocess
 from pathlib import Path
-import os # <-- 【关键】导入 os 模块
+import os
 import json
 from gui.custom_widgets import ToolTip
 from gui import ui_utils
@@ -56,12 +56,9 @@ class MainWindow:
         self.start_update_check()
 
     def _on_closing(self):
-        # 【最终修复】使用 os._exit(0) 进行强制退出。
-        # 这会直接终止进程，无法被IDLE等环境捕获，从而保证程序彻底关闭。
         try:
             logging.info("应用程序即将强制关闭。")
         except:
-            # 在极少数情况下，日志系统也可能出问题，但我们必须保证退出。
             pass
         finally:
             os._exit(0)
@@ -72,8 +69,9 @@ class MainWindow:
 
         tools_menu = tk.Menu(menu_bar, tearoff=0)
         menu_bar.add_cascade(label="工具", menu=tools_menu)
-        tools_menu.add_command(label="加载项目...", command=self.load_project)
-        tools_menu.add_command(label="词典查询...", command=self.open_dictionary_search)
+        # --- 【修复】移除菜单项标签末尾的 "..." ---
+        tools_menu.add_command(label="加载项目", command=self.load_project)
+        tools_menu.add_command(label="词典查询", command=self.open_dictionary_search)
 
         help_menu = tk.Menu(menu_bar, tearoff=0)
         menu_bar.add_cascade(label="帮助", menu=help_menu)

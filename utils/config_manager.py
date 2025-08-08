@@ -1,3 +1,5 @@
+# utils/config_manager.py
+
 import json
 from pathlib import Path
 import logging
@@ -5,7 +7,6 @@ import logging
 CONFIG_FILE_PATH = Path("config.json")
 USER_DICT_PATH = Path("user_dict.json")
 
-# --- 最终修复：使用基于键值对的、最稳健的提示词 ---
 DEFAULT_PROMPT = """
 你是一个只输出JSON的翻译AI。
 任务：将输入JSON对象中，每个数字键对应的字符串值翻译为简体中文。
@@ -36,7 +37,8 @@ DEFAULT_CONFIG = {
     "use_github_proxy": True,
     "last_dict_version": "0.0.0",
     "use_origin_name_lookup": True,
-    "translation_mode": "ai" # 'ai' or 'manual'
+    "translation_mode": "ai",
+    "log_level": "INFO"  # <-- 【新增】日志级别设置，默认为 INFO
 }
 
 def load_config() -> dict:
@@ -65,7 +67,6 @@ def load_config() -> dict:
             del config["github_proxies"]
             config_updated = True
             
-        # 检查并更新Prompt的逻辑
         if '数字键' not in config.get("prompt", ""):
             logging.warning("检测到旧版AI提示词，已自动更新为最稳健的键值对模式。")
             config["prompt"] = DEFAULT_PROMPT.strip()

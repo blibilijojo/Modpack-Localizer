@@ -1,3 +1,5 @@
+# services/gemini_translator.py
+
 import openai
 import logging
 import json
@@ -50,7 +52,6 @@ class GeminiTranslator:
             )
 
     def fetch_models(self) -> list[str]:
-        # ... (此函数无需修改) ...
         logging.info(f"正在获取模型列表...")
         initial_key = self.current_api_key
         for _ in range(len(self.api_keys_iterable) * 2):
@@ -82,13 +83,11 @@ class GeminiTranslator:
             (batch_index_inner, batch_inner, model_name, prompt_template, 
              _, _, use_grounding) = batch_info_tuple
             
-            thread_id = threading.get_ident()
-            logging.info(f"线程 {thread_id} 开始翻译批次 {batch_index_inner + 1}...")
+            logging.debug(f"线程 {threading.get_ident()} 开始翻译批次 {batch_index_inner + 1}...")
             
             effective_model_name = f"models/{model_name}" if not self.api_endpoint else model_name
             client = self._get_client()
             
-            # --- 核心修复：将列表转换为带编号的JSON对象 ---
             input_dict = dict(enumerate(batch_inner))
             prompt_content = prompt_template.replace(
                 '{input_data_json}', 
@@ -100,20 +99,21 @@ class GeminiTranslator:
             if use_grounding:
                 request_params["tools"] = [{"type": "google_search_retrieval"}]
                 request_params["tool_choice"] = "auto"
-                logging.info(f"批次 {batch_index_inner + 1} 已启用接地翻译模式")
+                logging.debug(f"批次 {batch_index_inner + 1} 已启用接地翻译模式")
 
             response = client.chat.completions.create(**request_params)
             response_text = response.choices[0].message.content
             
-            # --- 核心修复：使用新的解析函数，传入原始批次用于回填 ---
+            # --- 【修改】如果解析结果不完美，translated_batch 将为 None ---
             translated_batch = self._parse_response(response_text, batch_inner)
             
+            # --- 【修改】如果 translated_batch 为 None，则视为失败并触发重试 ---
             if translated_batch:
-                logging.info(f"线程 {thread_id} 成功完成批次 {batch_index_inner + 1}")
+                logging.debug(f"线程 {threading.get_ident()} 成功完成批次 {batch_index_inner + 1}")
                 return translated_batch
             else:
                 log_ai_error(prompt_content, response_text)
-                raise ValueError("AI响应解析或验证失败，将触发立即重试")
+                raise ValueError("AI响应解析或验证失败（如数量不匹配），将触发重试")
 
         return _do_translation(batch_info)
 
@@ -123,30 +123,27 @@ class GeminiTranslator:
             return None
         
         expected_length = len(original_batch)
-        text_to_parse = response_text.strip()
-        
-        if text_to_parse.startswith("```json"):
-            text_to_parse = text_to_parse[7:]
-            if text_to_parse.endswith("```"):
-                text_to_parse = text_to_parse[:-3].strip()
         
         try:
-            # --- 核心修复：解析逻辑现在处理对象{}，而非数组[] ---
-            start_index = text_to_parse.find('{')
-            end_index = text_to_parse.rfind('}')
+            start_index = response_text.find('{')
+            end_index = response_text.rfind('}')
             
             if start_index == -1 or end_index == -1 or start_index >= end_index:
-                logging.error(f"AI响应中找不到有效的JSON对象。")
+                logging.error(f"AI响应中找不到有效的JSON对象。响应: {response_text}")
                 return None
             
-            json_str = text_to_parse[start_index : end_index + 1]
+            json_str = response_text[start_index : end_index + 1]
             data = json.loads(json_str)
             
             if not isinstance(data, dict):
-                logging.warning(f"AI响应解析出的内容不是一个字典对象。")
+                logging.warning(f"AI响应解析出的内容不是一个字典对象。内容: {data}")
                 return None
-            
-            # --- 核心修复：根据编号重建结果列表，并自动填补缺失项 ---
+
+            # --- 【修复】严格验证返回条目数量 ---
+            if len(data) != expected_length:
+                logging.warning(f"AI响应条目数量不匹配！预期: {expected_length}, 实际: {len(data)}。将触发重试。")
+                return None
+
             reconstructed_list = [None] * expected_length
             for key, value in data.items():
                 try:
@@ -156,20 +153,21 @@ class GeminiTranslator:
                             reconstructed_list[index] = value
                         else:
                              logging.warning(f"AI为键'{key}'返回了非字符串类型的值，将使用原文回填。")
+                             # 如果类型错误，也视为失败
+                             return None
                 except (ValueError, TypeError):
                     logging.warning(f"AI返回了无效的键'{key}'，已忽略。")
             
-            missing_count = 0
-            for i in range(expected_length):
-                if reconstructed_list[i] is None:
-                    reconstructed_list[i] = original_batch[i] # 使用原文回填
-                    missing_count += 1
-            
-            if missing_count > 0:
-                logging.warning(f"AI返回结果缺失 {missing_count} 项，已使用原文自动回填。")
+            # --- 【修复】二次验证，确保所有位置都被正确填充 ---
+            if any(item is None for item in reconstructed_list):
+                logging.warning(f"AI响应解析后存在未填充项（可能由无效或重复的键导致）。将触发重试。")
+                return None
 
             return reconstructed_list
 
-        except (json.JSONDecodeError, AttributeError) as e:
-            logging.error(f"解析AI的JSON响应失败: {e}")
+        except json.JSONDecodeError as e:
+            logging.error(f"解析AI的JSON响应失败: {e}. 尝试解析的字符串是: '{json_str}'")
+            return None
+        except Exception as e:
+            logging.error(f"解析AI响应时发生未知错误: {e}")
             return None

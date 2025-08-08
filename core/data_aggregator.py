@@ -1,3 +1,5 @@
+# core/data_aggregator.py
+
 import zipfile
 import io
 import json
@@ -21,23 +23,24 @@ class DataAggregator:
 
     def run(self, progress_update_callback=None):
         logging.info("开始聚合数据...")
-        # 核心修改：增加了用户词典的加载
         user_dictionary = self._load_user_dictionary()
         community_dict_by_key, community_dict_by_origin = self._load_community_dictionary()
         master_english_dicts, internal_chinese_dicts, namespace_formats = self._aggregate_from_mods(progress_update_callback)
         pack_chinese_dict = self._aggregate_from_zips()
         
-        # 核心修改：返回签名增加了用户词典
+        total_en = sum(len(d) for d in master_english_dicts.values())
+        total_zh = sum(len(d) for d in internal_chinese_dicts.values())
+        logging.info(f"数据聚合完成。共 {len(master_english_dicts)} 个命名空间, 英文条目: {total_en}, 中文条目: {total_zh}")
+        
         return user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats
 
     def _load_user_dictionary(self) -> dict:
-        """加载用户个人词典。"""
-        logging.info("正在加载用户个人词典...")
+        logging.info("  - 正在加载用户个人词典...")
         user_dict = config_manager.load_user_dict()
         key_count = len(user_dict.get('by_key', {}))
         origin_count = len(user_dict.get('by_origin_name', {}))
         if key_count > 0 or origin_count > 0:
-            logging.info(f"成功从个人词典加载 {key_count} 条Key匹配和 {origin_count} 条原文匹配。")
+            logging.info(f"  - 成功从个人词典加载 {key_count} 条Key匹配和 {origin_count} 条原文匹配。")
         return user_dict
 
     def _load_community_dictionary(self) -> tuple[dict, dict]:
@@ -45,12 +48,12 @@ class DataAggregator:
         community_dict_by_origin = defaultdict(list)
         
         if not self.community_dict_path or not self.community_dict_path.is_file():
-            logging.info("未提供或未找到社区词典文件，跳过加载。")
+            logging.info("  - 未提供社区词典文件，跳过加载。")
             return community_dict_by_key, dict(community_dict_by_origin)
             
-        logging.info(f"正在从社区词典加载: {self.community_dict_path.name}")
+        logging.info(f"  - 正在从社区词典加载: {self.community_dict_path.name}")
         try:
-            con = sqlite3.connect(self.community_dict_path)
+            con = sqlite3.connect(f"file:{self.community_dict_path}?mode=ro", uri=True)
             cur = con.cursor()
             cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
             rows = cur.fetchall()
@@ -65,9 +68,9 @@ class DataAggregator:
                     )
             
             total_entries = len(community_dict_by_key) + sum(len(v) for v in community_dict_by_origin.values())
-            logging.info(f"成功从社区词典加载 {total_entries} 条数据。")
+            logging.info(f"  - 成功从社区词典加载 {total_entries} 条数据。")
         except sqlite3.Error as e:
-            logging.error(f"读取社区词典数据库时发生错误: {e}")
+            logging.error(f"  - 读取社区词典数据库时发生错误: {e}")
         finally:
             if 'con' in locals() and con:
                 con.close()
@@ -85,7 +88,7 @@ class DataAggregator:
         return 'minecraft'
 
     def _aggregate_from_mods(self, progress_update_callback=None):
-        logging.info(f"正在扫描Mods文件夹: {self.mods_dir}")
+        logging.info(f"  - 正在扫描Mods文件夹: {self.mods_dir}")
         master_english_dicts = defaultdict(dict)
         internal_chinese_dicts = defaultdict(dict)
         namespace_formats = {}
@@ -104,7 +107,7 @@ class DataAggregator:
                         if 'lang/en_us.json' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
                             if namespace in namespace_formats: continue
-                            logging.info(f"在 {jar_file.name} 中检测到 '{namespace}' 的 .json 语言文件。")
+                            logging.debug(f"在 {jar_file.name} 中检测到 '{namespace}' 的 .json 语言文件。")
                             namespace_formats[namespace] = 'json'
                             with zf.open(file_info) as f:
                                 try:
@@ -116,7 +119,7 @@ class DataAggregator:
                         elif 'lang/en_us.lang' in path_str_lower:
                             namespace = self._get_namespace_from_path(file_info.filename)
                             if namespace in namespace_formats: continue
-                            logging.info(f"在 {jar_file.name} 中检测到 '{namespace}' 的 .lang 语言文件。")
+                            logging.debug(f"在 {jar_file.name} 中检测到 '{namespace}' 的 .lang 语言文件。")
                             namespace_formats[namespace] = 'lang'
                             with zf.open(file_info) as f:
                                 try:
@@ -150,15 +153,16 @@ class DataAggregator:
                                     
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取JAR文件: {jar_file.name} - 错误: {e}")
-        total_en = sum(len(d) for d in master_english_dicts.values())
-        total_zh = sum(len(d) for d in internal_chinese_dicts.values())
-        logging.info(f"从Mods聚合完成。共 {len(master_english_dicts)} 个命名空间, 英文条目: {total_en}, 中文条目: {total_zh}")
         return master_english_dicts, internal_chinese_dicts, namespace_formats
 
     def _aggregate_from_zips(self):
         final_pack_chinese_dict = {}
+        if not self.zip_paths:
+            return final_pack_chinese_dict
+            
+        logging.info(f"  - 正在读取第三方汉化包...")
         for zip_path in reversed(self.zip_paths):
-            logging.info(f"正在读取第三方汉化包 (优先级高): {zip_path.name}")
+            logging.debug(f"  - 处理汉化包 (优先级高): {zip_path.name}")
             if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
                 logging.warning(f"第三方汉化包路径无效或文件不存在，已跳过: {zip_path}")
                 continue
@@ -177,6 +181,6 @@ class DataAggregator:
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取第三方汉化包: {zip_path.name} - 错误: {e}")
             final_pack_chinese_dict.update(current_zip_dict)
-            logging.info(f"从 {zip_path.name} 加载了 {len(current_zip_dict)} 条汉化。")
-        logging.info(f"从所有第三方汉化包中聚合完成，共 {len(final_pack_chinese_dict)} 条独立汉化。")
+            logging.debug(f"从 {zip_path.name} 加载了 {len(current_zip_dict)} 条汉化。")
+        logging.info(f"  - 从所有第三方汉化包中聚合完成，共 {len(final_pack_chinese_dict)} 条独立汉化。")
         return final_pack_chinese_dict

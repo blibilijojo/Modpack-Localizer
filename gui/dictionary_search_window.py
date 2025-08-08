@@ -67,6 +67,8 @@ class DictionarySearchWindow(tk.Toplevel):
                                        state="readonly", width=12)
         self.mode_combo.grid(row=0, column=1, padx=(0,5))
         self.mode_combo.bind('<MouseWheel>', lambda e: "break")
+        # --- 【修复】绑定事件，当用户选择新模式后，清除旧的视觉选择状态 ---
+        self.mode_combo.bind('<<ComboboxSelected>>', lambda e: self.mode_combo.after_idle(self.mode_combo.selection_clear))
 
         self.search_button = ttk.Button(search_frame, text="搜索", command=self._perform_search, bootstyle="primary")
         self.search_button.grid(row=0, column=2)
@@ -126,7 +128,6 @@ class DictionarySearchWindow(tk.Toplevel):
         else:
             logging.info(f"正在向表格中填充 {len(results)} 条结果...")
             for item in results:
-                # FIX: Use the correct, case-sensitive keys from the database schema
                 self.tree.insert("", "end", values=(
                     item.get('KEY', ''),
                     item.get('ORIGIN_NAME', ''),

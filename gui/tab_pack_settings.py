@@ -7,13 +7,18 @@ from gui import ui_utils
 from utils import config_manager
 from gui.custom_widgets import ToolTip
 
+# --- 【修改】添加了从1.7.10到1.12.2的资源包格式 ---
 PACK_FORMATS = {
     "1.21 (Format 34)": 34, "1.20.5 - 1.20.6 (Format 32)": 32, "1.20.3 - 1.20.4 (Format 22)": 22,
     "1.20.2 (Format 18)": 18, "1.20 - 1.20.1 (Format 15)": 15, "1.19.4 (Format 13)": 13,
     "1.19.3 (Format 12)": 12, "1.19 - 1.19.2 (Format 9)": 9, "1.18 - 1.18.2 (Format 8)": 8,
     "1.17 - 1.17.1 (Format 7)": 7, "1.16.2 - 1.16.5 (Format 6)": 6, "1.15 - 1.16.1 (Format 5)": 5,
     "1.13 - 1.14.4 (Format 4)": 4,
+    "1.11 - 1.12.2 (Format 3)": 3,
+    "1.9 - 1.10.2 (Format 2)": 2,
+    "1.6.1 - 1.8.9 (Format 1)": 1,
 }
+# --- 修改结束 ---
 
 class TabPackSettings:
     def __init__(self, parent):
@@ -172,7 +177,7 @@ class TabPackSettings:
         pack_format_key = self.pack_format_var.get()
         current_settings = {
             "pack_format_key": pack_format_key,
-            "pack_format": PACK_FORMATS.get(pack_format_key, 15),
+            "pack_format": PACK_FORMATS.get(pack_format_key, 3), # 默认值为3 (1.12.2)
             "pack_description": self.pack_desc_var.get(),
             "pack_icon_path": self.pack_icon_var.get()
         }

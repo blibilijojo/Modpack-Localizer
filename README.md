@@ -57,18 +57,19 @@ English | 简体中文
 6.  在 **工作模式** 中，选择“AI 自动翻译”（全自动）或“手动校对和翻译”（启动工作台）。
 7.  点击主界面的 **“--- 从头扫描并开始汉化 ---”** 按钮，开始您的工作流！
 
-❤️ 鸣谢
+❤️ 鸣谢与版权
 
 本项目的实现离不开以下优秀开源项目和社区提供的宝贵数据资源，在此表示衷心的感谢！
 
 *   **[Minecraft-Mod-Language-Package](https://github.com/CFPAOrg/Minecraft-Mod-Language-Package)** by CFPAOrg
     *   该项目是社区词典数据的核心数据来源。它收集并维护了海量高质量的模组汉化文件，为本工具的词典功能提供了坚实的数据基础。
 *   **[i18n-Dict-Extender](https://github.com/VM-Chinese-translate-group/i18n-Dict-Extender)** by VM-Chinese-translate-group
-    *   该项目是一个强大的词典聚合应用。它将来自多个社区（如 CFPA）的翻译成果，高效地编译成本项目所使用的 `Dict-Sqlite.db` 数据库格式。
+    *   该项目是一个强大的词典聚合应用，它将来自多个社区（如 CFPA）的翻译成果高效地编译成本项目所使用的 `Dict-Sqlite.db` 数据库格式。
+    *   **版权声明**: 本项目使用的社区词典数据 `Dict-Sqlite.db` 源自于 `i18n-Dict-Extender` 项目的构建产物。根据其上游声明，该数据遵循 **[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)** 协议。
 
 📄 许可证
 
-本项目采用 **[MIT 许可证](LICENSE)** 授权。
+本项目自身的源代码采用 **[MIT 许可证](LICENSE)** 授权。
 
 ---
 
@@ -126,7 +127,7 @@ A professional workbench for Minecraft modpack localization. It deeply integrate
 6.  In the **Work Mode** section, choose "AI Auto-Translate" for a fully automated process or "Manual Proofreading" to launch the workbench.
 7.  Click the main **"--- Start Scan & Localize ---"** button and let the magic happen!
 
-❤️ Acknowledgements
+❤️ Acknowledgements & Copyright
 
 This project would not be possible without the valuable data resources provided by the following excellent open-source projects and communities. We express our sincere gratitude!
 
@@ -134,7 +135,8 @@ This project would not be possible without the valuable data resources provided 
     *   This project is the core data source for the community dictionary. It collects and maintains a massive number of high-quality mod translation files, providing a solid data foundation for this tool's dictionary features.
 *   **[i18n-Dict-Extender](https://github.com/VM-Chinese-translate-group/i18n-Dict-Extender)** by VM-Chinese-translate-group
     *   This project is a powerful dictionary aggregation application. It efficiently compiles translation contributions from multiple communities (like CFPA) into the `Dict-Sqlite.db` database format used by this project.
+    *   **Copyright Notice**: The community dictionary data `Dict-Sqlite.db` used in this project is derived from the build artifacts of the `i18n-Dict-Extender` project. According to its upstream declarations, this data is licensed under **[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)**.
 
 📄 License
 
-This project is licensed under the **[MIT License](LICENSE)**.
+The source code of this project itself is licensed under the **[MIT License](LICENSE)**.

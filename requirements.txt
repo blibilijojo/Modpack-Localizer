@@ -1,0 +1,8 @@
+# requirements.txt
+
+requests
+packaging
+openai
+psutil
+ttkbootstrap
+concurrent-log-handler

@@ -1,0 +1,81 @@
+# core/pack_builder.py
+
+import json
+import logging
+from pathlib import Path
+
+class PackBuilder:
+    def run(self, output_dir: Path, final_translations_lookup_by_ns: dict, pack_settings: dict, namespace_formats: dict, progress_update_callback=None):
+        logging.info(f"开始构建最终资源包到: {output_dir}")
+        
+        # --- Language File Writing ---
+        namespaces_to_write = list(final_translations_lookup_by_ns.keys())
+        total_namespaces = len(namespaces_to_write)
+        
+        for i, namespace in enumerate(namespaces_to_write):
+            if progress_update_callback:
+                progress_update_callback(i + 1, total_namespaces)
+            
+            final_dict = final_translations_lookup_by_ns[namespace]
+            if not final_dict:
+                logging.warning(f"命名空间 '{namespace}' 中没有内容可写入，跳过。")
+                continue
+            
+            try:
+                # 根据检测到的格式决定写入方式
+                file_format = namespace_formats.get(namespace, 'json')
+                
+                lang_dir = output_dir / "assets" / namespace / "lang"
+                lang_dir.mkdir(parents=True, exist_ok=True)
+                
+                if file_format == 'json':
+                    target_path = lang_dir / "zh_cn.json"
+                    with open(target_path, 'w', encoding='utf-8') as f:
+                        json.dump(final_dict, f, indent=4, ensure_ascii=False)
+                    logging.debug(f"已为 '{namespace}' 生成 .json 格式的汉化文件。")
+                
+                elif file_format == 'lang':
+                    target_path = lang_dir / "zh_cn.lang"
+                    with open(target_path, 'w', encoding='utf-8') as f:
+                        for key, value in final_dict.items():
+                            value_escaped = str(value).replace('\n', '\\n')
+                            f.write(f"{key}={value_escaped}\n")
+                    logging.debug(f"已为 '{namespace}' 生成 .lang 格式的汉化文件。")
+
+            except Exception as e:
+                logging.error(f"为命名空间 '{namespace}' 构建文件时发生严重错误: {e}")
+                return False, f"构建 {namespace} 的文件时出错: {e}"
+
+        # --- Metadata File Writing (pack.mcmeta & pack.png) ---
+        try:
+            pack_format = pack_settings.get('pack_format', 15)
+            pack_description = pack_settings.get('pack_description', 'A Modpack Localization Pack by Localizer')
+            
+            pack_mcmeta_content = json.dumps({
+                "pack": { "pack_format": pack_format, "description": pack_description }
+            }, indent=4, ensure_ascii=False)
+            
+            with open(output_dir / "pack.mcmeta", 'w', encoding='utf-8') as f:
+                f.write(pack_mcmeta_content)
+            logging.info("  - 已成功写入 pack.mcmeta 文件。")
+
+            pack_icon_path_str = pack_settings.get('pack_icon_path', '').strip()
+            if pack_icon_path_str:
+                icon_path = Path(pack_icon_path_str)
+                if icon_path.is_file():
+                    try:
+                        (output_dir / "pack.png").write_bytes(icon_path.read_bytes())
+                        logging.info("  - 已成功复制图标文件为 pack.png。")
+                    except Exception as e:
+                        logging.error(f"处理图标文件时发生错误: {e}")
+                else:
+                    logging.error(f"指定的资源包图标文件不存在: {icon_path}")
+            else:
+                logging.info("  - 未提供资源包图标路径，跳过 pack.png 的生成。")
+
+        except Exception as e:
+            logging.error(f"写入元数据文件时发生未知错误: {e}")
+            return False, f"写入元数据文件时出错: {e}"
+
+        logging.info("资源包格式化构建成功！")
+        return True, "资源包格式化构建成功！"

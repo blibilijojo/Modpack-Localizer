@@ -1,0 +1,54 @@
+# .github/workflows/build-release.yml
+
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Build updater.exe
+      run: |
+        pyinstaller --noconfirm --onefile --name "updater" --hidden-import "psutil" updater.py
+
+    - name: Build Main Executable (Modpack-Localizer-Pro.exe)
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." main.py
+
+    - name: Get release notes from tag
+      id: get_release_notes
+      # 采用健壮的多行文本输出方法，以处理包含特殊字符的 Release Notes
+      run: |
+        $RELEASE_NOTES = git tag -l --format='%(contents)' ${{ github.ref_name }}
+        $DELIMITER = "ghadelimiter_$(Get-Random)"
+        Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append -InputObject @"
+        body<<$DELIMITER
+        $RELEASE_NOTES
+        $DELIMITER
+        "@
+      shell: pwsh
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body: ${{ steps.get_release_notes.outputs.body }}
+        files: dist/Modpack-Localizer-Pro.exe

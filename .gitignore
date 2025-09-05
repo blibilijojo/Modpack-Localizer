@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-selfcheck.json
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific - DO NOT UPLOAD USER DATA!
+config.json
+user_dict.json
+Dict-Sqlite.db
+ModpackLocalizer.log
+updater_error.log
+ai_error_logs/

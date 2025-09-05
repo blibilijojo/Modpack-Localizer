@@ -29,6 +29,7 @@ class DecisionEngine:
 
         total_entries = 0
         untranslated_count = 0
+        source_stats = Counter()
 
         for namespace, english_dict in master_english_dicts.items():
             workbench_data[namespace]['jar_name'] = namespace_to_jar.get(namespace, 'Unknown')
@@ -68,11 +69,15 @@ class DecisionEngine:
                     'source': source if source is not None else '待翻译'
                 }
                 
+                if source:
+                    source_stats[source] += 1
+
                 if translation is None:
                     untranslated_count += 1
 
                 workbench_data[namespace]['items'].append(item_entry)
-
-        logging.info(f"决策完成。共处理 {total_entries} 条文本，其中 {untranslated_count} 条需要翻译。")
+        
+        logging.info(f"  - 翻译源分析: " + ", ".join([f"{k}贡献 {v} 条" for k, v in source_stats.items()]))
+        logging.info(f"决策完成。共聚合 {total_entries} 条文本，其中 {untranslated_count} 条需新翻译 (AI或手动)。")
         
         return dict(workbench_data)

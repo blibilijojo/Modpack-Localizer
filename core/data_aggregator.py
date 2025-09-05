@@ -1,183 +1,143 @@
 import zipfile
-import io
 import json
 import logging
-import sqlite3
-import re
 from pathlib import Path
-from utils import file_utils, config_manager
 from collections import defaultdict
+import re
 
-def _remove_comments_from_json(json_str: str) -> str:
-    json_str = re.sub(r"//.*$", "", json_str, flags=re.MULTILINE)
-    json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)
-    return json_str
+from utils.file_utils import load_json
+from utils.config_manager import load_user_dict
+from utils.dictionary_searcher import DictionarySearcher
 
 class DataAggregator:
     def __init__(self, mods_dir: Path, zip_paths: list[Path], community_dict_path: str):
         self.mods_dir = mods_dir
         self.zip_paths = zip_paths
-        self.community_dict_path = Path(community_dict_path) if community_dict_path else None
+        self.community_dict_path = community_dict_path
 
-    def run(self, progress_update_callback=None):
-        logging.info("开始聚合数据...")
-        user_dictionary = self._load_user_dictionary()
-        community_dict_by_key, community_dict_by_origin = self._load_community_dictionary()
-        master_english_dicts, internal_chinese_dicts, namespace_formats, namespace_to_jar = self._aggregate_from_mods(progress_update_callback)
-        pack_chinese_dict = self._aggregate_from_zips()
-        
-        total_en = sum(len(d) for d in master_english_dicts.values())
-        total_zh = sum(len(d) for d in internal_chinese_dicts.values())
-        logging.info(f"数据聚合完成。共 {len(master_english_dicts)} 个命名空间, 英文条目: {total_en}, 中文条目: {total_zh}")
-        
-        return user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats, namespace_to_jar
+    def _is_actually_translated(self, text: str) -> bool:
+        if not text or not text.strip():
+            return False
+        if re.search(r'[\u4e00-\u9fa5]', text):
+            return True
+        if re.search(r'[a-zA-Z]', text):
+            return False
+        return True
 
-    def _load_user_dictionary(self) -> dict:
-        logging.info("  - 正在加载用户个人词典...")
-        user_dict = config_manager.load_user_dict()
-        key_count = len(user_dict.get('by_key', {}))
-        origin_count = len(user_dict.get('by_origin_name', {}))
-        if key_count > 0 or origin_count > 0:
-            logging.info(f"  - 成功从个人词典加载 {key_count} 条Key匹配和 {origin_count} 条原文匹配。")
-        return user_dict
-
-    def _load_community_dictionary(self) -> tuple[dict, dict]:
-        community_dict_by_key = {}
-        community_dict_by_origin = defaultdict(list)
-        
-        if not self.community_dict_path or not self.community_dict_path.is_file():
-            logging.info("  - 未提供社区词典文件，跳过加载。")
-            return community_dict_by_key, dict(community_dict_by_origin)
-            
-        logging.info(f"  - 正在从社区词典加载: {self.community_dict_path.name}")
-        try:
-            con = sqlite3.connect(f"file:{self.community_dict_path}?mode=ro", uri=True)
-            cur = con.cursor()
-            cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
-            rows = cur.fetchall()
-            
-            for row in rows:
-                key, origin_name, trans_name, version = row
-                if key:
-                    community_dict_by_key[key] = trans_name
-                if origin_name and trans_name:
-                    community_dict_by_origin[origin_name].append(
-                        {"trans": trans_name, "version": version or "0.0.0"}
-                    )
-            
-            total_entries = len(community_dict_by_key) + sum(len(v) for v in community_dict_by_origin.values())
-            logging.info(f"  - 成功从社区词典加载 {total_entries} 条数据。")
-        except sqlite3.Error as e:
-            logging.error(f"  - 读取社区词典数据库时发生错误: {e}")
-        finally:
-            if 'con' in locals() and con:
-                con.close()
-        
-        return community_dict_by_key, dict(community_dict_by_origin)
-
-    def _get_namespace_from_path(self, path_str: str) -> str:
-        try:
-            parts = Path(path_str).parts
-            if 'assets' in parts:
-                assets_index = parts.index('assets')
-                if len(parts) > assets_index + 1:
-                    return parts[assets_index + 1]
-        except Exception: pass
-        return 'minecraft'
-
-    def _aggregate_from_mods(self, progress_update_callback=None):
-        logging.info(f"  - 正在扫描Mods文件夹: {self.mods_dir}")
+    def run(self, progress_callback=None):
         master_english_dicts = defaultdict(dict)
         internal_chinese_dicts = defaultdict(dict)
+        pack_chinese_dict = {}
         namespace_formats = {}
         namespace_to_jar = {}
-        jar_files = file_utils.find_files_in_dir(self.mods_dir, "*.jar")
-        total_jars = len(jar_files)
         
-        for i, jar_file in enumerate(jar_files):
-            if progress_update_callback: progress_update_callback(i + 1, total_jars)
-            try:
-                with zipfile.ZipFile(jar_file, 'r') as zf:
-                    file_list = sorted(zf.infolist(), key=lambda f: f.filename.lower().endswith('.lang'))
-                    for file_info in file_list:
-                        if file_info.is_dir(): continue
-                        path_str_lower = file_info.filename.lower()
-                        
-                        if 'lang/en_us.json' in path_str_lower:
-                            namespace = self._get_namespace_from_path(file_info.filename)
-                            if namespace not in namespace_to_jar: namespace_to_jar[namespace] = jar_file.name
-                            if namespace in namespace_formats: continue
-                            namespace_formats[namespace] = 'json'
-                            with zf.open(file_info) as f:
-                                try:
-                                    content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    data = json.loads(_remove_comments_from_json(content), strict=False)
-                                    master_english_dicts[namespace].update(data)
-                                except Exception as e: logging.warning(f"解析 en_us.json 失败: {file_info.filename} - {e}")
-                        
-                        elif 'lang/en_us.lang' in path_str_lower:
-                            namespace = self._get_namespace_from_path(file_info.filename)
-                            if namespace not in namespace_to_jar: namespace_to_jar[namespace] = jar_file.name
-                            if namespace in namespace_formats: continue
-                            namespace_formats[namespace] = 'lang'
-                            with zf.open(file_info) as f:
-                                try:
-                                    lines = [line.decode('utf-8-sig').strip() for line in f.readlines()]
-                                    for line in lines:
-                                        if line and not line.startswith('#'):
-                                            parts = line.split('=', 1)
-                                            if len(parts) == 2: master_english_dicts[namespace][parts[0]] = parts[1]
-                                except Exception as e: logging.warning(f"解析 en_us.lang 失败: {file_info.filename} - {e}")
+        jar_files = sorted([p for p in self.mods_dir.glob("*.jar") if p.is_file()])
+        total_jars = len(jar_files)
 
-                        elif 'lang/zh_cn.json' in path_str_lower:
-                            namespace = self._get_namespace_from_path(file_info.filename)
-                            with zf.open(file_info) as f:
-                                try:
-                                    content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    data = json.loads(_remove_comments_from_json(content), strict=False)
-                                    internal_chinese_dicts[namespace].update(data)
-                                except Exception as e: logging.warning(f"解析 zh_cn.json 失败: {file_info.filename} - {e}")
-                        
-                        elif 'lang/zh_cn.lang' in path_str_lower:
-                            namespace = self._get_namespace_from_path(file_info.filename)
-                            if namespace in namespace_formats and namespace_formats[namespace] == 'json': continue
-                            with zf.open(file_info) as f:
-                                try:
-                                    lines = [line.decode('utf-8-sig').strip() for line in f.readlines()]
-                                    for line in lines:
-                                        if line and not line.startswith('#'):
-                                            parts = line.split('=', 1)
-                                            if len(parts) == 2: internal_chinese_dicts[namespace][parts[0]] = parts[1]
-                                except Exception as e: logging.warning(f"解析 zh_cn.lang 失败: {file_info.filename} - {e}")
-                                    
-            except (zipfile.BadZipFile, OSError) as e:
-                logging.error(f"无法读取JAR文件: {jar_file.name} - 错误: {e}")
-        return master_english_dicts, internal_chinese_dicts, namespace_formats, namespace_to_jar
-
-    def _aggregate_from_zips(self):
-        final_pack_chinese_dict = {}
-        if not self.zip_paths:
-            return final_pack_chinese_dict
+        for i, jar_path in enumerate(jar_files):
+            if progress_callback:
+                progress_callback(i + 1, total_jars)
             
-        logging.info(f"  - 正在读取第三方汉化包...")
-        for zip_path in reversed(self.zip_paths):
-            logging.debug(f"  - 处理汉化包 (优先级高): {zip_path.name}")
-            if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
-                logging.warning(f"第三方汉化包路径无效或文件不存在，已跳过: {zip_path}")
-                continue
-            current_zip_dict = {}
+            try:
+                with zipfile.ZipFile(jar_path, 'r') as zf:
+                    english_dict, chinese_dict, lang_format = self._process_lang_files_from_zip(zf)
+                    
+                    for namespace, content in english_dict.items():
+                        master_english_dicts[namespace].update(content)
+                        namespace_to_jar[namespace] = jar_path.name
+                        if lang_format.get(namespace):
+                            namespace_formats[namespace] = lang_format[namespace]
+                            
+                    for namespace, content in chinese_dict.items():
+                        internal_chinese_dicts[namespace].update(content)
+
+            except (zipfile.BadZipFile, FileNotFoundError) as e:
+                logging.error(f"处理文件失败 {jar_path.name}: {e}")
+
+        for zip_path in self.zip_paths:
             try:
                 with zipfile.ZipFile(zip_path, 'r') as zf:
-                    for file_info in zf.infolist():
-                        if file_info.is_dir(): continue
-                        file_path = Path(file_info.filename)
-                        if "assets" in file_path.parts and file_path.name == 'zh_cn.json':
-                            with zf.open(file_info) as f:
-                                try:
-                                    content = io.TextIOWrapper(f, encoding='utf-8-sig').read()
-                                    current_zip_dict.update(json.loads(_remove_comments_from_json(content), strict=False))
-                                except Exception as e: logging.warning(f"解析ZIP中的 {file_info.filename} 失败: {e}")
-            except (zipfile.BadZipFile, OSError) as e:
-                logging.error(f"无法读取第三方汉化包: {zip_path.name} - 错误: {e}")
-            final_pack_chinese_dict.update(current_zip_dict)
-        return final_pack_chinese_dict
+                    _, chinese_dict, _ = self._process_lang_files_from_zip(zf)
+                    for namespace, content in chinese_dict.items():
+                        pack_chinese_dict.update(content)
+            except (zipfile.BadZipFile, FileNotFoundError) as e:
+                logging.error(f"处理汉化包失败 {zip_path.name}: {e}")
+
+        user_dictionary = load_user_dict()
+        
+        community_dict_by_key = {}
+        community_dict_by_origin = defaultdict(list)
+        searcher = DictionarySearcher(self.community_dict_path)
+        if searcher.is_available():
+            logging.info("  - 正在从社区词典加载...")
+            all_entries = searcher.get_all_entries()
+            logging.info(f"  - 成功从社区词典加载 {len(all_entries)} 条数据。")
+            for entry in all_entries:
+                key = entry.get('KEY')
+                origin = entry.get('ORIGIN_NAME')
+                trans = entry.get('TRANS_NAME')
+                version = entry.get('VERSION', '0.0.0')
+
+                if key and trans:
+                    community_dict_by_key[key] = trans
+                if origin and trans:
+                    community_dict_by_origin[origin].append({'trans': trans, 'version': version})
+            searcher.close()
+
+        return (
+            user_dictionary, 
+            community_dict_by_key, 
+            dict(community_dict_by_origin), 
+            dict(master_english_dicts), 
+            dict(internal_chinese_dicts), 
+            pack_chinese_dict, 
+            namespace_formats, 
+            namespace_to_jar
+        )
+
+    def _process_lang_files_from_zip(self, zip_file: zipfile.ZipFile):
+        english_files = defaultdict(dict)
+        chinese_files = defaultdict(dict)
+        namespace_formats = {}
+        
+        for file_info in zip_file.infolist():
+            if file_info.is_dir():
+                continue
+
+            file_path = Path(file_info.filename)
+            
+            if "assets" not in file_path.parts or "lang" not in file_path.parts:
+                continue
+
+            is_en = file_path.name.lower() in ("en_us.json", "en_us.lang")
+            is_zh = file_path.name.lower() in ("zh_cn.json", "zh_cn.lang")
+            
+            if not (is_en or is_zh):
+                continue
+            
+            try:
+                namespace = file_path.parts[file_path.parts.index("assets") + 1]
+                content = zip_file.read(file_info.filename).decode('utf-8', errors='replace')
+                
+                if file_path.suffix == '.json':
+                    data = json.loads(content)
+                    lang_format = 'json'
+                elif file_path.suffix == '.lang':
+                    data = dict(line.strip().split('=', 1) for line in content.splitlines() if '=' in line and not line.startswith('#'))
+                    lang_format = 'lang'
+                else:
+                    continue
+
+                if is_en:
+                    english_files[namespace].update(data)
+                    namespace_formats[namespace] = lang_format
+                
+                if is_zh:
+                    for key, value in data.items():
+                        if self._is_actually_translated(value):
+                            chinese_files[namespace][key] = value
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.warning(f"解析语言文件失败 {file_info.filename}: {e}")
+                    
+        return english_files, chinese_files, namespace_formats

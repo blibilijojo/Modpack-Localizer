@@ -14,14 +14,15 @@ import json
 from gui.custom_widgets import ToolTip
 from gui import ui_utils
 from utils import config_manager, update_checker
-from core.orchestrator import Orchestrator
-from _version import __version__ 
+from _version import __version__
+# --- 【修复】将 TranslationWorkbench 的导入提升到模块顶部，这是唯一的导入点 ---
+from gui.translation_workbench import TranslationWorkbench
 
 class MainWindow:
     def __init__(self, root: ttk.Window):
         self.root = root
         self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
-        self.root.geometry("850x950") 
+        self.root.geometry("850x950")
         self.root.minsize(800, 850)
         
         self._create_menu()
@@ -40,7 +41,8 @@ class MainWindow:
         self.ai_service_tab = TabAiService(notebook)
         self.ai_parameters_tab = TabAiParameters(notebook)
         self.pack_settings_tab = TabPackSettings(notebook)
-        self.main_control_tab = TabMainControl(notebook, self.ai_service_tab, self.ai_parameters_tab, self.pack_settings_tab)
+        # --- 【修复】在创建 TabMainControl 时，将 TranslationWorkbench 类作为参数传入（依赖注入） ---
+        self.main_control_tab = TabMainControl(notebook, self.ai_service_tab, self.ai_parameters_tab, self.pack_settings_tab, TranslationWorkbench)
 
         notebook.add(self.main_control_tab.frame, text=" 一键汉化 ")
         notebook.add(self.ai_service_tab.frame, text=" AI 服务 ")
@@ -69,7 +71,6 @@ class MainWindow:
 
         tools_menu = tk.Menu(menu_bar, tearoff=0)
         menu_bar.add_cascade(label="工具", menu=tools_menu)
-        # --- 【修复】移除菜单项标签末尾的 "..." ---
         tools_menu.add_command(label="加载项目", command=self.load_project)
         tools_menu.add_command(label="词典查询", command=self.open_dictionary_search)
 
@@ -91,9 +92,10 @@ class MainWindow:
         if not path: return
 
         try:
-            with open(path, 'r', encoding='utf-8') as f: save_data = json.load(f)
-            if not all(k in save_data for k in ['existing_translations', 'manual_translation_data', 'namespace_formats']):
-                raise ValueError("存档文件格式不正确或已损坏。")
+            with open(path, 'r', encoding='utf-8') as f: 
+                save_data = json.load(f)
+            if not all(k in save_data for k in ['workbench_data', 'namespace_formats', 'pack_settings']):
+                raise ValueError("存档文件格式不正确或缺少关键数据。")
         except Exception as e:
             ui_utils.show_error("加载失败", f"无法加载或解析项目文件：\n{e}")
             return
@@ -104,13 +106,31 @@ class MainWindow:
         snapshot_settings = save_data.get('settings_snapshot', {})
         self.main_control_tab.mods_dir_var.set(snapshot_settings.get('mods_dir', '从存档加载'))
         self.main_control_tab.output_dir_var.set(snapshot_settings.get('output_dir', self.main_control_tab.config.get('output_dir', '')))
+        
+        all_settings = {
+            **self.ai_service_tab.get_and_save_settings(),
+            **self.ai_parameters_tab.get_and_save_settings(),
+            'mods_dir': snapshot_settings.get('mods_dir', ''),
+            'output_dir': snapshot_settings.get('output_dir', ''),
+            'pack_settings': save_data.get('pack_settings', self.pack_settings_tab.get_current_settings())
+        }
+        self.main_control_tab.current_pack_settings = all_settings['pack_settings']
+        
+        # --- 【修复】移除此处的局部导入，直接使用已在顶部导入的 TranslationWorkbench 类 ---
+        workbench = TranslationWorkbench(
+            parent=self.root,
+            initial_data=save_data['workbench_data'],
+            namespace_formats=save_data['namespace_formats'],
+            current_settings=all_settings,
+            log_callback=self.main_control_tab.log_message
+        )
+        self.root.wait_window(workbench)
 
-        settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
-        settings.update(config_manager.load_config())
-        settings['pack_settings'] = save_data.get('pack_settings', self.pack_settings_tab.get_current_settings())
-
-        orchestrator = Orchestrator(settings, self.main_control_tab.update_progress, self.root, save_data=save_data)
-        threading.Thread(target=orchestrator.run_workflow, daemon=True).start()
+        if workbench.final_translations is not None:
+            self.main_control_tab._run_pack_builder(workbench.final_translations, save_data['namespace_formats'])
+        else:
+            self.main_control_tab.log_message("用户已从加载的项目中取消了翻译流程。", "WARNING")
+            self.main_control_tab._reset_ui_after_workflow(success=False)
 
     def start_update_check(self, user_initiated=False):
         if not getattr(sys, 'frozen', False):

@@ -1,0 +1,4 @@
+{
+    "config.modnametooltip.formatting.modNameFormat": "Mod 名称格式",
+    "config.modnametooltip.formatting.modNameFormat.comment": "模组名称在工具提示中的格式。留空则禁用。"
+}

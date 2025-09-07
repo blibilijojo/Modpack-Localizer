@@ -1,0 +1,10 @@
+{
+    "item.betterportals.portal_fluid_bucket": "维度浆液",
+    "block.betterportals.reclaimer_block": "撤离信标",
+    "block.betterportals.portal_fluid": "维度等离子体",
+    "betterportals.portal_fluid_bucket.jei_description": "一桶来自地底深处的闪耀液体。你能听到其中传来的遥远国度的声音……",
+    "betterportals.reclaimer_block.jei_description": "一种能够超越维度的特殊方块。",
+    "itemGroup.betterportals": "YUNG's Better Portals - 更好的传送门",
+    "betterportals.portal_fluid_bucket.altitude_error": "维度等离子体只能放置在地下深处！",
+    "betterportals.portal_fluid_bucket.cannot_place_fluid": "无法在该维度使用！"
+}

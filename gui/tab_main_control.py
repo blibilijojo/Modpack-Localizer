@@ -1,12 +1,9 @@
-# gui/tab_main_control.py
-
 import tkinter as tk
 from tkinter import filedialog, Toplevel
 import ttkbootstrap as ttk
 from tkinter import scrolledtext
 from gui import ui_utils
 from core.orchestrator import Orchestrator
-from core.pack_builder import PackBuilder
 import threading
 import requests
 from pathlib import Path
@@ -15,7 +12,6 @@ import sys
 import subprocess
 import time
 import json
-import queue
 from gui.custom_widgets import ToolTip
 from utils import config_manager
 import logging
@@ -64,13 +60,9 @@ class PackSettingsDialog(Toplevel):
     def on_cancel(self): self.result = None; self.destroy()
 
 class TabMainControl:
-    # --- 【修复】修改构造函数，接收一个 workbench_class 参数 ---
-    def __init__(self, parent, ai_service_tab, ai_parameters_tab, pack_settings_tab, workbench_class):
+    def __init__(self, parent, ai_service_tab, ai_parameters_tab, pack_settings_tab):
         self.frame = ttk.Frame(parent, padding="10"); self.ai_service_tab = ai_service_tab; self.ai_parameters_tab = ai_parameters_tab; self.pack_settings_tab = pack_settings_tab
         self.root = parent.winfo_toplevel(); self.config = config_manager.load_config()
-        self.ui_queue = None
-        # --- 【修复】保存传入的 workbench_class，以便后续使用 ---
-        self.workbench_class = workbench_class
         path_frame = ttk.LabelFrame(self.frame, text="路径设置", padding="10"); path_frame.pack(fill="x", expand=False)
         self.mods_dir_var = tk.StringVar(value=self.config.get("mods_dir", "")); self._create_path_entry(path_frame, "Mods 文件夹:", self.mods_dir_var, "directory", "包含所有.jar模组文件的文件夹")
         self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
@@ -111,125 +103,13 @@ class TabMainControl:
     def start_workflow(self, pack_settings: dict):
         self._prepare_ui_for_workflow()
         try:
-            self._save_config()
-            self.current_pack_settings = pack_settings
-            
-            settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
-            settings.update({
-                'mods_dir': self.config.get("mods_dir", ""), 
-                'output_dir': self.config.get("output_dir", ""), 
-                'community_dict_path': self.config.get("community_dict_path", ""), 
-                'zip_paths': self.config.get("community_pack_paths", []), 
-                'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True)
-            })
-            if not all([settings['mods_dir'], settings['output_dir']]): 
-                raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
-
-            self.ui_queue = queue.Queue()
-            orchestrator = Orchestrator(settings, self.ui_queue)
-            
-            threading.Thread(target=orchestrator.prepare_data, daemon=True).start()
-            self.root.after(100, self._process_queue)
-            
-        except Exception as e: 
-            self._handle_error(str(e))
-
-    def _process_queue(self):
-        try:
-            msg = self.ui_queue.get_nowait()
-            
-            if msg['type'] == 'progress':
-                data = msg['data']
-                self.progress_var.set(data['percentage'])
-                self.status_var.set(data['message'])
-
-            elif msg['type'] == 'data_ready':
-                self._on_data_ready(msg['data'])
-                return 
-
-            elif msg['type'] == 'build_complete':
-                self._on_build_complete(msg['data'])
-                return
-
-            elif msg['type'] == 'error':
-                self._handle_error(msg['data']['error'])
-                return
-
-        except queue.Empty:
-            pass
-        
-        self.root.after(100, self._process_queue)
-
-    def _on_data_ready(self, data):
-        # --- 【修复】移除此处的局部导入 ---
-        
-        if not data['workbench_data']:
-            self.log_message("未发现任何可处理的文本条目。", "WARNING")
-            self._reset_ui_after_workflow(success=True)
-            return
-
-        all_settings = {
-            **self.ai_service_tab.get_and_save_settings(),
-            **self.ai_parameters_tab.get_and_save_settings(),
-            'mods_dir': self.config.get("mods_dir", ""),
-            'output_dir': self.config.get("output_dir", "")
-        }
-
-        # --- 【修复】使用从构造函数传入的 self.workbench_class 来创建实例 ---
-        workbench = self.workbench_class(
-            parent=self.root,
-            initial_data=data['workbench_data'],
-            namespace_formats=data['namespace_formats'],
-            current_settings=all_settings,
-            log_callback=self.log_message
-        )
-        self.root.wait_window(workbench)
-        
-        if workbench.final_translations is not None:
-            self._run_pack_builder(workbench.final_translations, data['namespace_formats'])
-        else:
-            self.log_message("用户已取消翻译流程。", "WARNING")
-            self._reset_ui_after_workflow(success=False)
-            
-    def _run_pack_builder(self, final_translations, namespace_formats):
-        self.status_var.set("最后阶段: 准备生成资源包...")
-        self.progress_var.set(95)
-        
-        builder_thread = threading.Thread(
-            target=self._pack_builder_worker,
-            args=(final_translations, namespace_formats),
-            daemon=True
-        )
-        builder_thread.start()
-        self.root.after(100, self._process_queue)
-
-    def _pack_builder_worker(self, final_translations, namespace_formats):
-        try:
-            builder = PackBuilder()
-            success, msg = builder.run(
-                Path(self.config['output_dir']), 
-                final_translations, 
-                self.current_pack_settings,
-                namespace_formats
-            )
-            self.ui_queue.put({'type': 'build_complete', 'data': {'success': success, 'message': msg}})
-        except Exception as e:
-            self.ui_queue.put({'type': 'build_complete', 'data': {'success': False, 'message': str(e)}})
-
-    def _on_build_complete(self, data):
-        if data['success']:
-            self.status_var.set("流程执行完毕！")
-            self.progress_var.set(100)
-            self._reset_ui_after_workflow(success=True)
-        else:
-            self._handle_error(f"构建资源包失败: {data['message']}")
-
-    def _handle_error(self, error_message):
-        self.status_var.set(f"错误: {error_message}")
-        self.progress_var.set(0)
-        self.log_message(f"错误: {error_message}", "CRITICAL")
-        self._reset_ui_after_workflow(success=False)
-        
+            self._save_config(); settings = {**self.ai_service_tab.get_and_save_settings(), **self.ai_parameters_tab.get_and_save_settings()}
+            settings.update({'mods_dir': self.config.get("mods_dir", ""), 'output_dir': self.config.get("output_dir", ""), 'community_dict_path': self.config.get("community_dict_path", ""), 'zip_paths': self.config.get("community_pack_paths", []), 'pack_settings': pack_settings, 'use_origin_name_lookup': self.config.get("use_origin_name_lookup", True)})
+            if not all([settings['mods_dir'], settings['output_dir']]): raise ValueError("Mods文件夹和输出文件夹路径不能为空！")
+            orchestrator = Orchestrator(settings, self.update_progress, self.root, log_callback=self.log_message)
+            threading.Thread(target=orchestrator.run_workflow, daemon=True).start()
+        except Exception as e: self.update_progress(f"启动失败: {e}", -1)
+    
     def _add_packs(self):
         paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")]); 
         for path in paths:
@@ -260,7 +140,7 @@ class TabMainControl:
         self.log_text.config(state="normal")
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state="disabled")
-        self.progress_bar.config(bootstyle="info-striped")
+        self.progress_bar.config(bootstyle="success-striped")
         self.status_var.set("准备开始...")
         self.progress_var.set(0)
 
@@ -275,10 +155,19 @@ class TabMainControl:
         if success: 
             self.open_output_button.config(state="normal")
             self.log_message("流程执行完毕！资源包已生成", "SUCCESS")
-            self.progress_bar.config(bootstyle="success-striped")
         else: 
-            self.log_message("流程因错误或取消而中断", "CRITICAL")
+            self.log_message("流程因错误中断", "CRITICAL")
             self.progress_bar.config(bootstyle="danger-striped")
+
+    def update_progress(self, message, percentage):
+        def _update():
+            self.status_var.set(message)
+            if percentage >= 0: self.progress_var.set(percentage)
+            if percentage == 100: self._reset_ui_after_workflow(success=True)
+            elif percentage == -1: self._reset_ui_after_workflow(success=False)
+        try:
+            if self.frame.winfo_exists(): self.root.after(0, _update)
+        except RuntimeError: pass
 
     def get_log_frame(self): return self.log_frame_container
 

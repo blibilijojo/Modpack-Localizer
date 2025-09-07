@@ -14,7 +14,6 @@ class TabAiParameters:
         
         self.config = config_manager.load_config()
         self.model_var = tk.StringVar()
-        self.use_grounding_var = tk.BooleanVar()
         self.current_model_list = []
 
         param_frame = ttk.LabelFrame(self.frame, text="AI 参数设置 (调整翻译行为)", padding=10)
@@ -29,13 +28,6 @@ class TabAiParameters:
         self.model_option_menu.pack(side='left', fill='x', expand=True, padx=5)
         self.fetch_models_button = ttk.Button(model_frame, text="获取模型列表", command=self._fetch_models_async, bootstyle="info-outline")
         self.fetch_models_button.pack(side='left')
-        
-        adv_modes_frame = ttk.Frame(param_frame)
-        adv_modes_frame.pack(fill='x', pady=5)
-
-        grounding_check = ttk.Checkbutton(adv_modes_frame, text="启用接地翻译模式 (联网搜索，提高对新术语的准确性)", variable=self.use_grounding_var, bootstyle="primary")
-        grounding_check.pack(side="left", anchor='w')
-        ToolTip(grounding_check, "开启后，AI在翻译前会先使用Google搜索相关信息\n这能极大提高对新模组、特殊物品名的翻译质量，但可能会稍稍增加翻译时间")
         
         perf_frame = ttk.LabelFrame(param_frame, text="性能与重试设置", padding="10")
         perf_frame.pack(fill='x', expand=True, pady=10)
@@ -60,7 +52,6 @@ class TabAiParameters:
 
     def _load_settings_to_ui(self):
         self.config = config_manager.load_config()
-        self.use_grounding_var.set(self.config.get("use_grounding", False))
         self.prompt_text.delete("1.0", tk.END)
         self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
         self.prompt_text.edit_modified(False)
@@ -71,7 +62,6 @@ class TabAiParameters:
         self._update_model_options(self.config.get("model_list", []))
 
     def _bind_events(self):
-        self.use_grounding_var.trace_add("write", self._auto_save)
         self.model_option_menu.bind('<<ComboboxSelected>>', lambda e: (self._auto_save(), self.model_option_menu.selection_clear()))
         self.model_option_menu.bind('<MouseWheel>', lambda e: "break")
         self.prompt_text.bind("<<Modified>>", self._on_prompt_text_change)
@@ -106,7 +96,6 @@ class TabAiParameters:
             "model": self.model_var.get(),
             "model_list": self.current_model_list,
             "prompt": self.prompt_text.get("1.0", tk.END).strip(),
-            "use_grounding": self.use_grounding_var.get(),
             "ai_batch_size": get_spinbox_val('ai_batch_size_var', 'ai_batch_size'),
             "ai_max_threads": get_spinbox_val('ai_max_threads_var', 'ai_max_threads'),
             "ai_max_retries": get_spinbox_val('ai_max_retries_var', 'ai_max_retries'),

@@ -1,0 +1,18 @@
+{
+    "abnormals_core.config.smooth_sky_color": "平滑天空颜色",
+    "abnormals_core.config.screen_shake_scale": "屏幕抖动程度",
+    "abnormals_core.config.max_screen_shakers": "最大屏幕抖动来源数量",
+    "abnormals_core.config.slabfish_hat.enabled": "测试",
+    "abnormals_core.config.slabfish_hat.enabled.tooltip": "切换Slabfish帽子。Tier 2+赞助者可用。",
+    "abnormals_core.config.slabfish_hat.sweater": "毛衣",
+    "abnormals_core.config.slabfish_hat.sweater.tooltip": "切换Slabfish帽子的毛衣。Tier 2+赞助者可用。",
+    "abnormals_core.config.slabfish_hat.backpack": "背包",
+    "abnormals_core.config.slabfish_hat.backpack.tooltip": "切换Slabfish帽子的背包。Tier 3+赞助者可用。",
+    "abnormals_core.config.slabfish_hat.type": "种类",
+    "abnormals_core.config.slabfish_hat.type.tooltip": "切换Slabfish帽子的类型。Tier 4+赞助者可用。",
+    "abnormals_core.screen.slabfish_settings": "板鱼帽子设置……",
+    "abnormals_core.screen.slabfish_settings.title": "板鱼帽子设置",
+    "abnormals_core.screen.slabfish_settings.tooltip": "赞助者Slabfish帽子的队伍异常设置。请访问%s成为赞助者。",
+    "abnormals_core.message.redirect": "正在重定向",
+    "entity.abnormals_core.boat": "船"
+}

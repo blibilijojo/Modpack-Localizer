@@ -1,0 +1,5 @@
+{
+    "commands.armiger.reset": "您的已解锁槽位数量已重置为1",
+    "keybind.armiger.category": "Armiger",
+    "keybind.armiger.openArmigerGui": "打开Armiger GUI"
+}

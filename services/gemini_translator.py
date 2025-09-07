@@ -5,7 +5,6 @@ import time
 import threading
 import queue
 from itertools import cycle
-
 from utils.error_logger import log_ai_error
 
 class KeyManager:
@@ -49,7 +48,6 @@ class KeyManager:
             self.cooldown_keys[key] = cooldown_end_time
             logging.warning(f"密钥 ...{key[-4:]} 调用失败，将被冷却 {cooldown_seconds} 秒。")
 
-
 class GeminiTranslator:
     def __init__(self, api_keys: list[str], api_endpoint: str | None = None):
         self.api_endpoint = api_endpoint.strip() if api_endpoint else None
@@ -69,7 +67,7 @@ class GeminiTranslator:
             )
 
     def fetch_models(self) -> list[str]:
-        logging.info("正在获取模型列表...")
+        logging.info(f"正在获取模型列表...")
         for key in cycle(self.all_keys):
             try:
                 client = self._get_client(key)
@@ -92,33 +90,29 @@ class GeminiTranslator:
         return []
 
     def translate_batch(self, batch_info: tuple) -> list[str]:
-        (batch_index, batch_originals, model_name, prompt_template, 
-         max_retries, retry_interval, use_grounding) = batch_info
+        (batch_index_inner, batch_inner, model_name, prompt_template) = batch_info
         
         attempt = 0
         while True:
             api_key = self.key_manager.get_key()
-            logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
+            logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
             
             try:
                 effective_model_name = f"models/{model_name}" if not self.api_endpoint else model_name
                 client = self._get_client(api_key)
                 
-                input_dict = dict(enumerate(batch_originals))
+                input_dict = dict(enumerate(batch_inner))
                 prompt_content = prompt_template.replace('{input_data_json}', json.dumps(input_dict, ensure_ascii=False))
                 
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
-                if use_grounding:
-                    request_params["tools"] = [{"type": "google_search_retrieval"}]
-                    request_params["tool_choice"] = "auto"
 
                 response = client.chat.completions.create(**request_params)
                 response_text = response.choices[0].message.content
                 
-                translated_batch = self._parse_response(response_text, batch_originals)
+                translated_batch = self._parse_response(response_text, batch_inner)
                 
                 if translated_batch:
-                    logging.info(f"线程 {threading.get_ident()} 成功完成批次 {batch_index + 1}")
+                    logging.info(f"线程 {threading.get_ident()} 成功完成批次 {batch_index_inner + 1}")
                     self.key_manager.release_key(api_key)
                     return translated_batch
                 else:
@@ -128,19 +122,19 @@ class GeminiTranslator:
             except Exception as e:
                 attempt += 1
                 error_str = str(e).lower()
-                cooldown_duration = retry_interval * (2 ** min(attempt, 8))
+                cooldown_duration = 2.0 * (2 ** min(attempt, 8))
                 
                 if any(phrase in error_str for phrase in ["rate limit", "too many requests", "429", "quota exceeded"]):
-                    logging.warning(f"批次 {batch_index + 1} 遭遇速率限制。")
+                    logging.warning(f"批次 {batch_index_inner + 1} 遭遇速率限制。")
                     cooldown_duration = 60
                 elif isinstance(e, ValueError):
-                     logging.warning(f"批次 {batch_index + 1} 遭遇内容格式错误。")
+                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇内容格式错误。")
                      cooldown_duration = 10
                 else:
-                    logging.warning(f"批次 {batch_index + 1} 遭遇临时错误: {e}")
+                    logging.warning(f"批次 {batch_index_inner + 1} 遭遇临时错误: {e}")
 
                 self.key_manager.penalize_key(api_key, cooldown_duration)
-                logging.info(f"批次 {batch_index + 1} 将在获取到新密钥后重试。")
+                logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试。")
 
     def _parse_response(self, response_text: str | None, original_batch: list[str]) -> list[str] | None:
         if not response_text: 

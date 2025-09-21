@@ -8,7 +8,7 @@
 一款专业的 Minecraft 整合包汉化工作台。它将强大的 AI 翻译、社区资源整合与精细的手动校对、项目存读档功能深度结合，为整合包作者和汉化者提供从一键自动化到完整项目管理的全流程本地化体验。
 
 <p align="center">
-  <img width="814" alt="应用主界面" src="https://github.com/user-attachments/assets/068ee4e3-270e-45d7-9936-14f22b6ebe11" />
+  <img width="814" alt="应用主界面" src="https://github.com/user-attachments/assets/b8d7bcdb-e7c4-4115-a75f-3292037a5754" />
 </p>
 
 📸 **核心功能展示 (Feature Showcase)**

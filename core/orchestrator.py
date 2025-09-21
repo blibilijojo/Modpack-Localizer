@@ -1,112 +1,172 @@
-import logging 
+import logging
 from pathlib import Path
-import json
-import itertools
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from tkinter import messagebox
+from datetime import datetime
 from core.data_aggregator import DataAggregator
 from core.decision_engine import DecisionEngine
 from core.pack_builder import PackBuilder
-from services.gemini_translator import GeminiTranslator
-
+from gui.translation_workbench import TranslationWorkbench
+DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
+DEFAULT_DESC_TEMPLATE = (
+    "整合包汉化数据分析 (共 {total} 条):\n"
+    "▷ AI 翻译贡献: {ai_count} 条 ({ai_percent})\n"
+    "▷ 人工及社区贡献: {human_count} 条 ({human_percent})"
+)
 class Orchestrator:
-    def __init__(self, settings: dict, progress_callback, root_for_dialog=None, save_data: dict | None = None, log_callback=None):
+    def __init__(self, settings, update_progress, root_window, log_callback=None, save_data=None, project_path=None):
         self.settings = settings
-        self.progress_callback = progress_callback
-        self.root_for_dialog = root_for_dialog
+        self.update_progress = update_progress
+        self.root = root_window
+        self.log = log_callback or (lambda msg, lvl: logging.info(f"[{lvl}] {msg}"))
         self.save_data = save_data
-        self.log_callback = log_callback
-
-    def run_workflow(self):
+        self.project_path = project_path
+        self.final_translations = None
+        self.final_workbench_data = None
+        self.raw_english_files = {}
+        self.namespace_formats = {}
+    def run_translation_phase(self):
         try:
-            workbench_data = {}
-            namespace_formats = {}
-            final_translations_lookup = {}
-            is_from_save = bool(self.save_data)
-            
-            if is_from_save:
-                self.progress_callback("阶段 1/2: 从项目文件加载...", 50)
-                logging.info(f"从项目存档文件加载数据...")
-                
-                workbench_data = self.save_data['workbench_data']
-                namespace_formats = self.save_data['namespace_formats']
-                
-                self.settings['pack_settings'] = self.save_data.get('pack_settings', self.settings['pack_settings'])
-                logging.info("项目数据加载完成。")
-                p_translate_base = 50
-                
-            else:
-                p_agg_base, p_agg_range = 0, 25
-                self.progress_callback(f"阶段 1/3: 准备聚合文件...", p_agg_base)
-                
-                aggregator = DataAggregator(
-                    Path(self.settings['mods_dir']), 
-                    [Path(p) for p in self.settings.get('zip_paths', [])],
-                    self.settings.get('community_dict_path', '')
-                )
-                # FIX: Unpack all 8 return values from aggregator.run
-                user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese, pack_chinese, namespace_formats, namespace_to_jar = aggregator.run(lambda current, total: self.progress_callback(f"阶段 1/3: 正在扫描Mod... ({current}/{total})", p_agg_base + (current / total) * p_agg_range))
-                
-                if not master_english_dicts:
-                    raise ValueError("未能从Mods文件夹提取任何有效原文。请确保Mods文件夹内有.jar模组文件。")
-
-                p_dec_base, p_dec_range = 25, 25
-                self.progress_callback("阶段 2/3: 应用翻译优先级...", p_dec_base)
-                engine = DecisionEngine()
-                
-                # FIX: Pass the new namespace_to_jar dictionary to the engine
-                workbench_data = engine.run(
-                    user_dictionary, community_dict_by_key, community_dict_by_origin, 
-                    master_english_dicts, internal_chinese, pack_chinese,
-                    self.settings.get('use_origin_name_lookup', True),
-                    namespace_to_jar
-                )
-                
-                self.progress_callback("阶段 2/3: 决策完成", p_dec_base + p_dec_range)
-                p_translate_base = 50
-
-            if not workbench_data:
-                self.progress_callback("未发现任何可处理的文本条目。", 95)
-            else:
-                if not self.root_for_dialog: raise ValueError("翻译工作台模式需要一个有效的GUI根窗口。")
-                
-                from gui.translation_workbench import TranslationWorkbench
-
-                stage_prefix = "阶段 2/2" if is_from_save else "阶段 3/3"
-                self.progress_callback(f"{stage_prefix}: 准备翻译工作台...", p_translate_base)
-                
-                workbench = TranslationWorkbench(
-                    parent=self.root_for_dialog,
-                    initial_data=workbench_data,
-                    namespace_formats=namespace_formats,
-                    current_settings=self.settings,
-                    log_callback=self.log_callback
-                )
-                self.root_for_dialog.wait_window(workbench)
-                
-                if workbench.final_translations is not None:
-                    final_translations_lookup = workbench.final_translations
-                else:
-                    raise InterruptedError("用户已取消翻译流程。")
-            
-            p_build_base = 95
-            self.progress_callback("最后阶段: 准备生成资源包...", p_build_base)
-            builder = PackBuilder()
-            success, msg = builder.run(
-                Path(self.settings['output_dir']), 
-                final_translations_lookup, 
-                self.settings['pack_settings'],
-                namespace_formats
+            self.log("阶段 1/3: 开始聚合语言数据...", "INFO")
+            self.update_progress("正在聚合数据...", 10)
+            aggregator = DataAggregator(
+                mods_dir=Path(self.settings['mods_dir']),
+                zip_paths=[Path(p) for p in self.settings.get('zip_paths', [])],
+                community_dict_path=self.settings['community_dict_path']
             )
-            
-            if success: 
-                self.progress_callback("流程执行完毕！", 100)
-            else: 
-                raise RuntimeError(f"构建资源包失败: {msg}")
-
-        except InterruptedError as e:
-            logging.warning(f"工作流被用户主动中断: {e}")
-            self.progress_callback(f"已取消: {e}", -1)
+            (user_dict, comm_dict_key, comm_dict_origin, 
+             en_dicts, internal_zh, pack_zh, 
+             ns_formats, ns_to_jar, raw_en_files) = aggregator.run(
+                lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
+            )
+            self.update_progress("数据聚合完成", 50)
+            self.raw_english_files = raw_en_files
+            self.namespace_formats = ns_formats
+            self.log("阶段 2/3: 执行翻译决策...", "INFO")
+            self.update_progress("正在应用翻译规则...", 60)
+            engine = DecisionEngine()
+            workbench_data = engine.run(
+                user_dictionary=user_dict,
+                community_dict_by_key=comm_dict_key,
+                community_dict_by_origin=comm_dict_origin,
+                master_english_dicts=en_dicts,
+                internal_chinese_dicts=internal_zh,
+                pack_chinese_dict=pack_zh,
+                use_origin_name_lookup=self.settings.get('use_origin_name_lookup', True),
+                namespace_to_jar=ns_to_jar,
+                raw_english_files=raw_en_files,
+                namespace_formats=ns_formats
+            )
+            self.update_progress("决策完成，准备打开工作台", 90)
+            self.log("阶段 3/3: 启动翻译工作台...", "INFO")
+            self.root.after(0, self._launch_workbench, workbench_data)
         except Exception as e:
-            logging.critical(f"工作流执行出错: {e}", exc_info=True)
-            self.progress_callback(f"错误: {e}", -1)
+            logging.error(f"翻译处理阶段失败: {e}", exc_info=True)
+            self.root.after(0, lambda: messagebox.showerror("处理失败", f"在第一阶段处理文件时发生严重错误:\n{e}"))
+            self.update_progress(f"错误: {e}", -1)
+    def _launch_workbench(self, workbench_data):
+        workbench = TranslationWorkbench(
+            parent=self.root,
+            initial_data=workbench_data,
+            namespace_formats=self.namespace_formats,
+            raw_english_files=self.raw_english_files,
+            current_settings=self.settings,
+            log_callback=self.log,
+            project_path=self.project_path,
+            finish_button_text="完成并生成资源包"
+        )
+        self.root.wait_window(workbench)
+        if workbench.final_translations is not None:
+            self.final_translations = workbench.final_translations
+            self.final_workbench_data = workbench.translation_data
+            self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+            self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+        else:
+            self.log("翻译工作台已取消，操作中止。", "WARNING")
+            self.update_progress("操作已取消", -2)
+    def _generate_pack_metadata_values(self) -> dict:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if not self.final_workbench_data:
+            return {"timestamp": timestamp, "total": 0, "ai_count": 0, "ai_percent": "0.0%", "human_count": 0, "human_percent": "0.0%"}
+        ai_count = 0
+        human_count = 0
+        total_translated = 0
+        ai_sources = {"AI翻译"}
+        for ns_data in self.final_workbench_data.values():
+            for item in ns_data.get('items', []):
+                if item.get('zh', '').strip():
+                    total_translated += 1
+                    source = item.get('source', '')
+                    if source in ai_sources:
+                        ai_count += 1
+                    else:
+                        human_count += 1
+        ai_percent = (ai_count / total_translated * 100) if total_translated > 0 else 0
+        human_percent = (human_count / total_translated * 100) if total_translated > 0 else 0
+        logging.info("--- 最终资源包元数据统计 ---")
+        logging.info(f"总翻译条目: {total_translated}")
+        logging.info(f"  ▷ AI 翻译贡献: {ai_count} 条 ({ai_percent:.1f}%)")
+        logging.info(f"  ▷ 人工及社区贡献: {human_count} 条 ({human_percent:.1f}%)")
+        logging.info("-------------------------------")
+        return {
+            "timestamp": timestamp,
+            "total": total_translated,
+            "ai_count": ai_count,
+            "ai_percent": f"{ai_percent:.1f}%",
+            "human_count": human_count,
+            "human_percent": f"{human_percent:.1f}%"
+        }
+    def _replace_placeholders(self, template_str: str, data: dict) -> str:
+        for key, value in data.items():
+            template_str = template_str.replace(f"{{{key}}}", str(value))
+        return template_str
+    def run_build_phase(self, pack_settings: dict):
+        try:
+            if self.final_translations is None:
+                raise ValueError("没有可用于构建的翻译数据。请先完成翻译阶段。")
+            self.log("开始生成资源包...", "INFO")
+            self.update_progress("正在构建资源包...", 10)
+            metadata_values = self._generate_pack_metadata_values()
+            user_preset_name = pack_settings.get('preset_name', '')
+            user_description = pack_settings.get('pack_description', '')
+            desc_template = user_description.strip() or DEFAULT_DESC_TEMPLATE
+            final_description = self._replace_placeholders(desc_template, metadata_values)
+            name_template = ""
+            if user_preset_name.strip() and user_preset_name != "默认预案":
+                name_template = user_preset_name
+            else:
+                name_template = DEFAULT_NAME_TEMPLATE
+            final_name = self._replace_placeholders(name_template, metadata_values)
+            pack_settings['pack_description'] = final_description
+            pack_settings['pack_base_name'] = final_name
+            builder = PackBuilder()
+            success, message = builder.run(
+                output_dir=Path(self.settings['output_dir']),
+                final_translations_lookup_by_ns=self.final_translations,
+                pack_settings=pack_settings,
+                namespace_formats=self.namespace_formats,
+                raw_english_files=self.raw_english_files
+            )
+            if success:
+                self.log(f"资源包生成成功！", "SUCCESS")
+                self.update_progress("资源包生成成功！", 100)
+            else:
+                raise RuntimeError(message)
+        except Exception as e:
+            logging.error(f"构建资源包阶段失败: {e}", exc_info=True)
+            self.root.after(0, lambda: messagebox.showerror("构建失败", f"构建资源包时发生错误:\n{e}"))
+            self.update_progress(f"错误: {e}", -1)
+    def run_workflow(self):
+        if not self.save_data:
+            self.log("项目数据未加载，无法直接运行完整工作流。", "ERROR")
+            self.update_progress("错误: 项目数据未加载", -1)
+            return
+        self.log("从存档文件加载数据并启动工作台...", "INFO")
+        self.update_progress("正在加载项目...", 10)
+        self.raw_english_files = self.save_data.get('raw_english_files', {})
+        self.namespace_formats = self.save_data.get('namespace_formats', {})
+        workbench_data = self.save_data.get('workbench_data', {})
+        if not all([self.raw_english_files, self.namespace_formats, workbench_data]):
+            self.log("存档文件不完整，缺少核心数据。", "ERROR")
+            self.update_progress("错误: 存档文件不完整", -1)
+            return
+        self.root.after(0, self._launch_workbench, workbench_data)

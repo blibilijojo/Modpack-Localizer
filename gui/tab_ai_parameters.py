@@ -6,19 +6,15 @@ from gui import ui_utils
 from services.gemini_translator import GeminiTranslator
 from utils import config_manager
 from gui.custom_widgets import ToolTip
-
 class TabAiParameters:
     def __init__(self, parent):
         self.frame = ttk.Frame(parent, padding="10")
         self.root = parent.winfo_toplevel()
-        
         self.config = config_manager.load_config()
         self.model_var = tk.StringVar()
         self.current_model_list = []
-
         param_frame = ttk.LabelFrame(self.frame, text="AI 参数设置 (调整翻译行为)", padding=10)
         param_frame.pack(fill="both", expand=True)
-
         model_frame = ttk.Frame(param_frame)
         model_frame.pack(fill='x', pady=5)
         model_label = ttk.Label(model_frame, text="AI 模型:")
@@ -28,7 +24,6 @@ class TabAiParameters:
         self.model_option_menu.pack(side='left', fill='x', expand=True, padx=5)
         self.fetch_models_button = ttk.Button(model_frame, text="获取模型列表", command=self._fetch_models_async, bootstyle="info-outline")
         self.fetch_models_button.pack(side='left')
-        
         perf_frame = ttk.LabelFrame(param_frame, text="性能与重试设置", padding="10")
         perf_frame.pack(fill='x', expand=True, pady=10)
         perf_frame.columnconfigure(1, weight=1)
@@ -37,30 +32,29 @@ class TabAiParameters:
         self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", 4, (1, 16), "同时发送API请求的最大数量").grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
         self._create_perf_spinbox(perf_frame, "最大重试次数:", "ai_max_retries", 3, (0, 100), "单个翻译批次失败后的最大重试次数").grid(row=1, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
         self._create_perf_spinbox(perf_frame, "重试间隔(秒):", "ai_retry_interval", 2, (0, 60), "每次重试之间的等待时间（秒）").grid(row=1, column=2, columnspan=2, sticky="ew", pady=2)
-        
         prompt_frame = ttk.LabelFrame(param_frame, text="AI 翻译提示词 (Prompt) - 当前为 JSON 输出模式", padding="10")
         prompt_frame.pack(fill='both', expand=True, pady=5)
         self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=8, wrap="word")
         self.prompt_text.pack(fill='both', expand=True, side='left', pady=2)
-        
         restore_button = ttk.Button(prompt_frame, text="恢复默认", command=self._restore_default_prompt, bootstyle="warning-outline")
         restore_button.pack(side='top', padx=(0,5), anchor='ne')
         ToolTip(restore_button, "将提示词恢复到程序内置的默认值")
-
         self._load_settings_to_ui()
         self._bind_events()
-
-    def _load_settings_to_ui(self):
-        self.config = config_manager.load_config()
+    def apply_settings(self, settings: dict):
+        self._update_model_options(settings.get("model_list", []))
+        self.model_var.set(settings.get("model", "请先获取模型"))
         self.prompt_text.delete("1.0", tk.END)
-        self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
+        self.prompt_text.insert(tk.END, settings.get("prompt", config_manager.DEFAULT_PROMPT))
         self.prompt_text.edit_modified(False)
-        for key, default_val in [("ai_batch_size", 50), ("ai_max_threads", 4), ("ai_max_retries", 3), ("ai_retry_interval", 2)]:
+        spinbox_keys = ["ai_batch_size", "ai_max_threads", "ai_max_retries", "ai_retry_interval"]
+        for key in spinbox_keys:
             var = getattr(self, f"{key}_var", None)
             if var:
-                var.set(self.config.get(key, default_val))
-        self._update_model_options(self.config.get("model_list", []))
-
+                var.set(settings.get(key, config_manager.DEFAULT_CONFIG.get(key)))
+    def _load_settings_to_ui(self):
+        self.config = config_manager.load_config()
+        self.apply_settings(self.config)
     def _bind_events(self):
         self.model_option_menu.bind('<<ComboboxSelected>>', lambda e: (self._auto_save(), self.model_option_menu.selection_clear()))
         self.model_option_menu.bind('<MouseWheel>', lambda e: "break")
@@ -69,19 +63,15 @@ class TabAiParameters:
             var = getattr(self, f"{key}_var", None)
             if var:
                 var.trace_add("write", self._auto_save)
-
     def _auto_save(self, *args):
         self.get_and_save_settings()
-
     def _on_prompt_text_change(self, event=None):
         if self.prompt_text.edit_modified():
             self.get_and_save_settings()
             self.prompt_text.edit_modified(False)
-
     def _restore_default_prompt(self):
         self.prompt_text.delete("1.0", tk.END)
         self.prompt_text.insert(tk.END, config_manager.DEFAULT_PROMPT)
-
     def get_and_save_settings(self) -> dict:
         def get_spinbox_val(var_name, default_key):
             try:
@@ -91,7 +81,6 @@ class TabAiParameters:
                 default_val = config_manager.DEFAULT_CONFIG.get(default_key)
                 getattr(self, var_name).set(default_val)
                 return default_val
-
         param_settings = {
             "model": self.model_var.get(),
             "model_list": self.current_model_list,
@@ -101,13 +90,11 @@ class TabAiParameters:
             "ai_max_retries": get_spinbox_val('ai_max_retries_var', 'ai_max_retries'),
             "ai_retry_interval": get_spinbox_val('ai_retry_interval_var', 'ai_retry_interval'),
         }
-        
         full_config = config_manager.load_config()
         full_config.update(param_settings)
         config_manager.save_config(full_config)
         self.config = full_config
         return param_settings
-
     def _create_perf_spinbox(self, parent, label_text, config_key, default_val, range_val, tooltip):
         container = ttk.Frame(parent)
         label = ttk.Label(container, text=label_text, width=15); label.pack(side='left')
@@ -118,7 +105,6 @@ class TabAiParameters:
         spinbox.pack(side='left', fill='x', expand=True, padx=5)
         spinbox.bind('<MouseWheel>', lambda e: "break")
         return container
-
     def _fetch_models_async(self):
         service_config = config_manager.load_config()
         api_keys = service_config.get('api_keys', [])
@@ -127,16 +113,17 @@ class TabAiParameters:
             return
         self.fetch_models_button.config(state="disabled", text="获取中...")
         threading.Thread(target=self._fetch_worker, daemon=True).start()
-
     def _fetch_worker(self):
         try:
             service_config = config_manager.load_config()
-            translator = GeminiTranslator(service_config['api_keys'], service_config.get('api_endpoint'))
+            translator = GeminiTranslator(
+                service_config['api_keys'], 
+                service_config.get('api_endpoint')
+            )
             model_list = translator.fetch_models()
             self.frame.after(0, self._update_ui_after_fetch, model_list)
         finally:
             self.frame.after(0, lambda: self.fetch_models_button.config(state="normal", text="获取模型列表"))
-
     def _update_ui_after_fetch(self, model_list):
         if model_list:
             self._update_model_options(model_list)
@@ -144,7 +131,6 @@ class TabAiParameters:
             ui_utils.show_info("成功", f"成功获取 {len(model_list)} 个模型！列表已保存")
         else:
             ui_utils.show_error("失败", "未能获取到任何可用模型\n请检查密钥、网络或服务器地址")
-
     def _update_model_options(self, model_list: list[str]):
         self.current_model_list = model_list if model_list else []
         self.model_option_menu.config(values=self.current_model_list)
@@ -152,9 +138,8 @@ class TabAiParameters:
             self.model_option_menu.config(state="disabled")
         else:
             self.model_option_menu.config(state="readonly")
-            
         saved_model = self.config.get("model")
-        if saved_model:
+        if saved_model in self.current_model_list:
             self.model_var.set(saved_model)
         elif self.current_model_list:
             self.model_var.set(self.current_model_list[0])

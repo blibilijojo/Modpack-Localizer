@@ -31,12 +31,20 @@ jobs:
         pyinstaller --noconfirm --onefile --name "updater" --hidden-import "psutil" updater.py
 
     - name: Build Main Executable (Modpack-Localizer-Pro.exe)
+      # --- 主要改动区域 ---
+      # 移除了 --icon 参数，但保留了必要的 hidden-import
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." main.py
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" `
+          --hidden-import "packaging.version" `
+          --hidden-import "ftb_snbt_lib" `
+          --hidden-import "concurrent_log_handler" `
+          --add-data "dist/updater.exe;." `
+          main.py
+      # --- 改动结束 ---
+      shell: pwsh # 使用 pwsh 以支持 ` (反引号) 换行符
 
     - name: Get release notes from tag
       id: get_release_notes
-      # 采用健壮的多行文本输出方法，以处理包含特殊字符的 Release Notes
       run: |
         $RELEASE_NOTES = git tag -l --format='%(contents)' ${{ github.ref_name }}
         $DELIMITER = "ghadelimiter_$(Get-Random)"

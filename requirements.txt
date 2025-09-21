@@ -1,8 +1,9 @@
 # requirements.txt
 
+ttkbootstrap
 requests
 packaging
-openai
 psutil
-ttkbootstrap
+openai
 concurrent-log-handler
+ftb-snbt-lib

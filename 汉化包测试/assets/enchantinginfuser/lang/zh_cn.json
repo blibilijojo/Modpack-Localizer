@@ -1,9 +1,0 @@
-{
-    "block.enchantinginfuser.enchanting_infuser": "高级附魔台",
-    "block.enchantinginfuser.advanced_enchanting_infuser": "进阶高级附魔台",
-    "gui.enchantinginfuser.tooltip.enchanting_power": "%s 书架",
-    "gui.enchantinginfuser.tooltip.required_enchanting_power": "当前书架：%s / %s",
-    "gui.enchantinginfuser.tooltip.unknown_enchantment": "这个附魔对于附魔能力如此之弱的注入器来说太强大了。",
-    "gui.enchantinginfuser.tooltip.low_power": "进一步提高此附魔的等级需要一个具有更多附魔能力的注入器。",
-    "gui.enchantinginfuser.tooltip.incompatible": "该魔咒与%s不兼容"
-}

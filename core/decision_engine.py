@@ -12,8 +12,17 @@ class DecisionEngine:
         max_freq = max(trans_counts.values())
         top_candidates = [c for c in candidates if trans_counts[c["trans"]] == max_freq]
         if len(top_candidates) == 1: return top_candidates[0]["trans"]
+        
+        # 优化版本解析，处理无效版本号
+        def get_version_key(candidate):
+            try:
+                return parse_version(candidate["version"])
+            except Exception:
+                # 对于无效版本号，返回一个最低优先级的版本对象
+                return parse_version("0.0.0")
+                
         try:
-            sorted_by_version = sorted(top_candidates, key=lambda c: parse_version(c["version"]), reverse=True)
+            sorted_by_version = sorted(top_candidates, key=get_version_key, reverse=True)
             return sorted_by_version[0]["trans"]
         except Exception:
             return top_candidates[0]["trans"]

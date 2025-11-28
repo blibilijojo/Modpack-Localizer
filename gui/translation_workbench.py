@@ -47,6 +47,14 @@ class TranslationWorkbench(ttk.Frame):
         
         self.finish_button_text = finish_button_text
 
+        # 新增UI优化相关状态
+        self._is_navigating = False
+        self._last_navigation_time = 0
+        self._keyboard_shortcuts_enabled = True
+        self._double_click_to_approve = self.current_settings.get('double_click_to_approve', True)
+        self._enter_to_navigate = self.current_settings.get('enter_to_navigate', True)
+        self._focus_on_translate = self.current_settings.get('focus_on_translate', True)
+
         self._create_widgets()
         self.after_idle(self._set_initial_sash_position)
         
@@ -193,7 +201,13 @@ class TranslationWorkbench(ttk.Frame):
         direction = 1 if params["direction"] == "down" else -1
         
         all_items = self._get_searchable_items(params["scope"])
-        if not all_items: return
+        if not all_items:
+            # 检查当前项目是否选中但无条目，或无项目
+            if params["scope"] == 'current' and self.ns_tree.selection():
+                messagebox.showinfo("搜索提示", "当前项目中没有可搜索的条目。", parent=self)
+            elif params["scope"] == 'all':
+                messagebox.showinfo("搜索提示", "没有可搜索的项目或条目。", parent=self)
+            return
 
         try:
             current_selection_iid = self.trans_tree.selection()[0]
@@ -232,8 +246,10 @@ class TranslationWorkbench(ttk.Frame):
                         self.after(10, lambda iid=iid: self._safe_select_item(iid))
                     else:
                         self._safe_select_item(iid)
+                    # 聚焦到翻译输入框
+                    self.zh_text_input.focus_set()
                     return
-        
+    
         messagebox.showinfo("查找", f"未能找到 \"{find_text}\"", parent=self)
 
     def replace_current_and_find_next(self, params):

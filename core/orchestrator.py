@@ -28,40 +28,70 @@ class Orchestrator:
         try:
             self.log("阶段 1/3: 开始聚合语言数据...", "INFO")
             self.update_progress("正在聚合数据...", 10)
+            
+            # 验证配置
+            if not self.settings.get('mods_dir'):
+                raise ValueError("未配置Mods目录，请先在设置中配置")
+            
+            mods_path = Path(self.settings['mods_dir'])
+            if not mods_path.exists() or not mods_path.is_dir():
+                raise ValueError(f"配置的Mods目录不存在或不是目录: {mods_path}")
+            
             aggregator = DataAggregator(
-                mods_dir=Path(self.settings['mods_dir']),
-                zip_paths=[Path(p) for p in self.settings.get('zip_paths', [])],
+                mods_dir=mods_path,
+                zip_paths=[Path(p) for p in self.settings.get('zip_paths', []) if Path(p).exists()],
                 community_dict_path=self.settings['community_dict_path']
             )
-            (user_dict, comm_dict_key, comm_dict_origin, 
-             en_dicts, internal_zh, pack_zh, 
-             ns_formats, ns_to_jar, raw_en_files) = aggregator.run(
-                lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
-            )
+            
+            try:
+                (user_dict, comm_dict_key, comm_dict_origin, 
+                 en_dicts, internal_zh, pack_zh, 
+                 ns_formats, ns_to_jar, raw_en_files) = aggregator.run(
+                    lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
+                )
+            except Exception as agg_error:
+                logging.error(f"数据聚合失败: {agg_error}", exc_info=True)
+                raise Exception(f"数据聚合失败: {agg_error}")
+            
             self.update_progress("数据聚合完成", 50)
             self.raw_english_files = raw_en_files
             self.namespace_formats = ns_formats
+            
             self.log("阶段 2/3: 执行翻译决策...", "INFO")
             self.update_progress("正在应用翻译规则...", 60)
+            
             engine = DecisionEngine()
-            workbench_data = engine.run(
-                user_dictionary=user_dict,
-                community_dict_by_key=comm_dict_key,
-                community_dict_by_origin=comm_dict_origin,
-                master_english_dicts=en_dicts,
-                internal_chinese_dicts=internal_zh,
-                pack_chinese_dict=pack_zh,
-                use_origin_name_lookup=self.settings.get('use_origin_name_lookup', True),
-                namespace_to_jar=ns_to_jar,
-                raw_english_files=raw_en_files,
-                namespace_formats=ns_formats
-            )
+            try:
+                workbench_data = engine.run(
+                    user_dictionary=user_dict,
+                    community_dict_by_key=comm_dict_key,
+                    community_dict_by_origin=comm_dict_origin,
+                    master_english_dicts=en_dicts,
+                    internal_chinese_dicts=internal_zh,
+                    pack_chinese_dict=pack_zh,
+                    use_origin_name_lookup=self.settings.get('use_origin_name_lookup', True),
+                    namespace_to_jar=ns_to_jar,
+                    raw_english_files=raw_en_files,
+                    namespace_formats=ns_formats
+                )
+            except Exception as dec_error:
+                logging.error(f"翻译决策失败: {dec_error}", exc_info=True)
+                raise Exception(f"翻译决策失败: {dec_error}")
+            
+            # 验证决策结果
+            if not workbench_data:
+                raise Exception("翻译决策未生成任何数据")
+            
             self.update_progress("决策完成，准备打开工作台", 90)
             self.log("阶段 3/3: 启动翻译工作台...", "INFO")
             self.root.after(0, self._launch_workbench, workbench_data)
+        except ValueError as ve:
+            logging.error(f"配置错误: {ve}")
+            self.root.after(0, lambda: messagebox.showerror("配置错误", f"请检查配置后重试:\n{ve}"))
+            self.update_progress(f"错误: {ve}", -1)
         except Exception as e:
             logging.error(f"翻译处理阶段失败: {e}", exc_info=True)
-            self.root.after(0, lambda: messagebox.showerror("处理失败", f"在第一阶段处理文件时发生严重错误:\n{e}"))
+            self.root.after(0, lambda: messagebox.showerror("处理失败", f"在处理文件时发生错误:\n{e}\n请查看日志获取更多详细信息。"))
             self.update_progress(f"错误: {e}", -1)
     def _launch_workbench(self, workbench_data):
         workbench = TranslationWorkbench(

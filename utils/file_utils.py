@@ -21,3 +21,23 @@ def find_files_in_dir(directory: Path, pattern: str) -> list[Path]:
     return list(directory.rglob(pattern))
 def escape_json_string(text: str) -> str:
     return text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+
+def dump_json(file_path: Path, data: dict, indent: int = 4) -> bool:
+    """
+    将数据以JSON格式写入文件
+    
+    Args:
+        file_path: 要写入的文件路径
+        data: 要写入的数据
+        indent: JSON缩进空格数
+        
+    Returns:
+        是否成功写入
+    """
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=indent)
+        return True
+    except Exception as e:
+        logging.error(f"写入JSON到文件时发生错误 ({file_path}): {e}")
+        return False

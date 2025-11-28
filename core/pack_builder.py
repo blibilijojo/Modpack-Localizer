@@ -104,16 +104,16 @@ class PackBuilder:
                     logging.error(f"为 '{namespace}' 构建文件时出错: {e}", exc_info=True)
                     return False, f"构建 '{namespace}' 文件时出错: {e}"
             try:
-                escaped_description = json.dumps(pack_description, ensure_ascii=False)[1:-1]
-                pack_mcmeta_content = (
-                    "{\n"
-                    '    "pack": {\n'
-                    f'        "pack_format": {pack_settings["pack_format"]},\n'
-                    f'        "description": "{escaped_description}"\n'
-                    '    }\n'
-                    "}"
+                pack_mcmeta_data = {
+                    "pack": {
+                        "pack_format": pack_settings["pack_format"],
+                        "description": pack_description
+                    }
+                }
+                (temp_dir / "pack.mcmeta").write_text(
+                    json.dumps(pack_mcmeta_data, indent=4, ensure_ascii=False),
+                    encoding='utf-8'
                 )
-                (temp_dir / "pack.mcmeta").write_text(pack_mcmeta_content, encoding='utf-8')
                 icon_path_str = pack_settings.get('pack_icon_path', '')
                 if icon_path_str and Path(icon_path_str).is_file():
                     shutil.copy(icon_path_str, temp_dir / "pack.png")

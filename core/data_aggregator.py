@@ -14,20 +14,15 @@ class DataAggregator:
         self.community_dict_path = Path(community_dict_path) if community_dict_path else None
         self.raw_english_files = {}
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"([^"]*)"')
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> dict:
         data = {}
         if file_format == 'json':
-            kv_pattern = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
-            matches = kv_pattern.finditer(content)
-            for match in matches:
-                try:
-                    key_raw = match.group(1)
-                    value_raw = match.group(2)
-                    key = json.loads(f'"{key_raw}"')
-                    value = json.loads(f'"{value_raw}"')
-                    data[key] = value
-                except Exception as e:
-                    logging.warning(f"在 {file_path_for_log} 中解析条目时出错: '{match.group(0)}' - 错误: {e}")
+            # 使用正则表达式解析JSON，兼容某些格式不严格的JSON文件
+            for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
+                key = match.group(1)
+                value = match.group(2)
+                data[key] = value
             return data
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
@@ -106,7 +101,11 @@ class DataAggregator:
         temp_internal_chinese_dicts = defaultdict(dict)
         namespace_formats = {}
         namespace_to_jar = {}
-        jar_files = file_utils.find_files_in_dir(self.mods_dir, "*.jar")
+        if not self.mods_dir.exists():
+            logging.warning(f"  - 配置的Mods目录不存在: {self.mods_dir}")
+            jar_files = []
+        else:
+            jar_files = file_utils.find_files_in_dir(self.mods_dir, "*.jar")
         for i, jar_file in enumerate(jar_files):
             if progress_update_callback: progress_update_callback(i + 1, len(jar_files))
             try:
@@ -135,8 +134,14 @@ class DataAggregator:
             return {}
         logging.info(f"  - 正在读取 {len(self.zip_paths)} 个第三方汉化包...")
         for zip_path in reversed(self.zip_paths):
-            if not (zip_path.is_file() and zipfile.is_zipfile(zip_path)):
-                logging.warning(f"路径无效或非ZIP文件，已跳过: {zip_path}")
+            if not zip_path.exists():
+                logging.warning(f"  - ZIP文件不存在，已跳过: {zip_path}")
+                continue
+            elif not zip_path.is_file():
+                logging.warning(f"  - ZIP路径不是文件，已跳过: {zip_path}")
+                continue
+            elif not zipfile.is_zipfile(zip_path):
+                logging.warning(f"  - 文件不是有效的ZIP格式，已跳过: {zip_path}")
                 continue
             current_zip_chinese_dict = defaultdict(dict)
             try:

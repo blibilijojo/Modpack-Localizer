@@ -17,21 +17,32 @@ class UnifiedSettingsTab(ttk.Frame):
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.general_tab_frame = ttk.Frame(self.notebook, padding=10)
+        self.resource_pack_tab_frame = ttk.Frame(self.notebook, padding=10)
         self.ai_tab_frame = ttk.Frame(self.notebook, padding=10)
         self.pack_settings_tab_frame = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.general_tab_frame, text="常规与任务")
+        self.notebook.add(self.general_tab_frame, text=" 常规设置 ")
+        self.notebook.add(self.resource_pack_tab_frame, text=" 资源包管理 ")
         self.notebook.add(self.ai_tab_frame, text=" AI 设置 ")
         self.notebook.add(self.pack_settings_tab_frame, text=" 生成预案 ")
 
         self._create_general_tab_content(self.general_tab_frame)
+        self._create_resource_pack_tab_content(self.resource_pack_tab_frame)
         self._create_ai_tab_content(self.ai_tab_frame)
         self._create_pack_settings_tab_content(self.pack_settings_tab_frame)
 
     def _create_general_tab_content(self, parent):
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True)
-        self._create_mod_settings(container)
+        self._create_general_settings(container)
+        self._create_log_settings(container)
+        self._create_import_export_settings(container)
+
+    def _create_resource_pack_tab_content(self, parent):
+        container = ttk.Frame(parent)
+        container.pack(fill="both", expand=True)
+        self._create_resource_pack_settings(container)
+        self._create_community_packs_list(container)
 
     def _create_ai_tab_content(self, parent):
         container = ttk.Frame(parent)
@@ -43,12 +54,86 @@ class UnifiedSettingsTab(ttk.Frame):
         from gui.tab_pack_settings import TabPackSettings
         self.pack_settings_manager = TabPackSettings(parent)
 
-    def _create_mod_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="常规/模组汉化设置", padding="10")
+    def _create_general_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="常规设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", ""))
         self._create_path_entry(frame, "默认输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
+
+        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
+        proxy_check = ttk.Checkbutton(frame, text="使用代理加速下载", variable=self.use_proxy_var, bootstyle="primary")
+        proxy_check.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(proxy_check, "开启后，在下载社区词典或程序更新时会自动使用内置的代理服务。")
+
+        self.pack_as_zip_var = tk.BooleanVar(value=self.config.get("pack_as_zip", False))
+        zip_check = ttk.Checkbutton(frame, text="打包为.zip压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
+        zip_check.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(zip_check, "开启后, 将直接生成一个.zip格式的资源包文件, 而不是文件夹。")
+
+        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
+        origin_check = ttk.Checkbutton(frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
+        origin_check.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+
+        self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_all_settings())
+        self.use_proxy_var.trace_add("write", lambda *args: self._save_all_settings())
+        self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
+
+    def _create_log_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="日志设置", padding="10")
+        frame.pack(fill="x", pady=(0, 5), padx=5)
+
+        self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
+        log_level_frame = ttk.Frame(frame)
+        log_level_frame.pack(fill="x", pady=5)
+        log_level_label = ttk.Label(log_level_frame, text="日志级别:", width=15)
+        log_level_label.pack(side="left")
+        custom_widgets.ToolTip(log_level_label, "设置日志记录的详细程度")
+        log_level_combobox = ttk.Combobox(log_level_frame, textvariable=self.log_level_var, 
+                                         values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], 
+                                         state="readonly")
+        log_level_combobox.pack(side="left", fill="x", expand=True, padx=5)
+        log_level_combobox.bind('<<ComboboxSelected>>', lambda e: self._save_all_settings())
+
+    def _create_import_export_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="设置管理", padding="10")
+        frame.pack(fill="x", pady=(0, 5), padx=5)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x", pady=5)
+
+        export_btn = ttk.Button(btn_frame, text="导出设置", command=self._export_settings, bootstyle="primary-outline")
+        export_btn.pack(side="left", padx=5)
+        custom_widgets.ToolTip(export_btn, "将当前设置导出为JSON文件")
+
+        import_btn = ttk.Button(btn_frame, text="导入设置", command=self._import_settings, bootstyle="primary-outline")
+        import_btn.pack(side="left", padx=5)
+        custom_widgets.ToolTip(import_btn, "从JSON文件导入设置")
+
+        reset_btn = ttk.Button(btn_frame, text="恢复默认设置", command=self._reset_settings, bootstyle="danger-outline")
+        reset_btn.pack(side="left", padx=5)
+        custom_widgets.ToolTip(reset_btn, "将所有设置恢复为默认值")
+
+    def _create_log_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="日志设置", padding="10")
+        frame.pack(fill="x", pady=(0, 5), padx=5)
+
+        self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
+        log_level_frame = ttk.Frame(frame)
+        log_level_frame.pack(fill="x", pady=5)
+        log_level_label = ttk.Label(log_level_frame, text="日志级别:", width=15)
+        log_level_label.pack(side="left")
+        custom_widgets.ToolTip(log_level_label, "设置日志记录的详细程度")
+        log_level_combobox = ttk.Combobox(log_level_frame, textvariable=self.log_level_var, 
+                                         values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], 
+                                         state="readonly")
+        log_level_combobox.pack(side="left", fill="x", expand=True, padx=5)
+        log_level_combobox.bind('<<ComboboxSelected>>', lambda e: self._save_all_settings())
+
+    def _create_resource_pack_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="资源包设置", padding="10")
+        frame.pack(fill="x", pady=(0, 5), padx=5)
 
         self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
         dict_path_frame = ttk.Frame(frame)
@@ -63,31 +148,8 @@ class UnifiedSettingsTab(ttk.Frame):
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新", command=self._check_and_update_dict_async, bootstyle="info")
         self.download_dict_button.pack(side="left", padx=(5, 0))
 
-        options_frame_container = ttk.Frame(frame)
-        options_frame_container.pack(fill="x", padx=5, pady=(5, 5))
-        options_frame = ttk.Frame(options_frame_container)
-        options_frame.pack(padx=(105, 0))
-
-        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
-        origin_check = ttk.Checkbutton(options_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
-        origin_check.pack(side="left", padx=(0, 20))
-        custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
-
-        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
-        proxy_check = ttk.Checkbutton(options_frame, text="使用代理加速下载", variable=self.use_proxy_var, bootstyle="primary")
-        proxy_check.pack(side="left", padx=(0,20))
-        custom_widgets.ToolTip(proxy_check, "开启后，在下载社区词典或程序更新时会自动使用内置的代理服务。")
-
-        self.pack_as_zip_var = tk.BooleanVar(value=self.config.get("pack_as_zip", False))
-        zip_check = ttk.Checkbutton(options_frame, text="打包为.zip压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
-        zip_check.pack(side="left")
-        custom_widgets.ToolTip(zip_check, "开启后, 将直接生成一个.zip格式的资源包文件, 而不是文件夹。")
-
-        self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_all_settings())
-        self.use_proxy_var.trace_add("write", lambda *args: self._save_all_settings())
-        self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
-        
-        packs_frame = ttk.LabelFrame(frame, text="第三方汉化包列表 (优先级由上至下)", padding="10")
+    def _create_community_packs_list(self, parent):
+        packs_frame = ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
         packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         list_container = ttk.Frame(packs_frame)
         list_container.pack(fill="both", expand=True)
@@ -172,6 +234,7 @@ class UnifiedSettingsTab(ttk.Frame):
         config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
         config["use_github_proxy"] = self.use_proxy_var.get()
         config["pack_as_zip"] = self.pack_as_zip_var.get()
+        config["log_level"] = self.log_level_var.get()
 
         raw_text = self.api_keys_text.get("1.0", "end-1c")
         text_with_newlines = raw_text.replace(',', '\n')
@@ -198,6 +261,91 @@ class UnifiedSettingsTab(ttk.Frame):
 
         config_manager.save_config(config)
         self.config = config
+
+    def _export_settings(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+            title="导出设置"
+        )
+        if file_path:
+            try:
+                config = config_manager.load_config()
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
+                messagebox.showinfo("成功", f"设置已成功导出到:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("错误", f"导出设置失败:\n{str(e)}")
+
+    def _import_settings(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+            title="导入设置"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    imported_config = json.load(f)
+                
+                # 合并导入的配置到当前配置
+                config = config_manager.load_config()
+                config.update(imported_config)
+                config_manager.save_config(config)
+                
+                # 重新加载配置并更新UI
+                self.config = config_manager.load_config()
+                self._refresh_ui_from_config()
+                messagebox.showinfo("成功", f"设置已成功从:\n{file_path}\n导入")
+            except json.JSONDecodeError:
+                messagebox.showerror("错误", "无效的JSON文件")
+            except Exception as e:
+                messagebox.showerror("错误", f"导入设置失败:\n{str(e)}")
+
+    def _reset_settings(self):
+        if messagebox.askyesno("确认", "确定要将所有设置恢复为默认值吗？"):
+            try:
+                config_manager.save_config(config_manager.DEFAULT_CONFIG.copy())
+                self.config = config_manager.DEFAULT_CONFIG.copy()
+                self._refresh_ui_from_config()
+                messagebox.showinfo("成功", "设置已成功恢复为默认值")
+            except Exception as e:
+                messagebox.showerror("错误", f"恢复默认设置失败:\n{str(e)}")
+
+    def _refresh_ui_from_config(self):
+        # 更新UI控件的值
+        self.output_dir_var.set(self.config.get("output_dir", ""))
+        self.community_dict_var.set(self.config.get("community_dict_path", ""))
+        self.use_origin_name_lookup_var.set(self.config.get("use_origin_name_lookup", True))
+        self.use_proxy_var.set(self.config.get("use_github_proxy", True))
+        self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
+        self.log_level_var.set(self.config.get("log_level", "INFO"))
+        
+        self.api_keys_text.delete("1.0", tk.END)
+        self.api_keys_text.insert(tk.END, self.config.get("api_keys_raw", ""))
+        self.api_endpoint_var.set(self.config.get("api_endpoint", ""))
+        
+        self.model_var.set(self.config.get("model", ""))
+        self.current_model_list = self.config.get("model_list", [])
+        self.model_option_menu.config(values=self.current_model_list)
+        
+        self.prompt_text.delete("1.0", tk.END)
+        self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
+        
+        # 更新社区包列表
+        self.packs_listbox.delete(0, tk.END)
+        for path in self.config.get("community_pack_paths", []):
+            self.packs_listbox.insert(tk.END, path)
+        
+        # 更新AI参数spinbox值
+        spinbox_keys = [
+            "ai_batch_size", "ai_max_threads", "ai_max_retries", 
+            "ai_retry_rate_limit_cooldown", "ai_retry_initial_delay", 
+            "ai_retry_max_delay", "ai_retry_backoff_factor"
+        ]
+        for key in spinbox_keys:
+            var = getattr(self, f"{key}_var", None)
+            if var:
+                var.set(self.config.get(key, config_manager.DEFAULT_CONFIG.get(key)))
 
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
         row_frame = ttk.Frame(parent)

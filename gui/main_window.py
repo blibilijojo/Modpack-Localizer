@@ -1,140 +1,839 @@
 import tkinter as tk
-from tkinter import messagebox, Toplevel, filedialog
+from tkinter import messagebox, filedialog, scrolledtext
 import ttkbootstrap as ttk
+from ttkbootstrap import Menu
 import logging
 import threading
-import webbrowser
-import sys
-import subprocess
 from pathlib import Path
-import os
 import json
-from gui.custom_widgets import ToolTip
+import webbrowser
+import os
+import re
+import sys
+
 from gui import ui_utils
-from utils import config_manager, update_checker
+from utils import config_manager, session_manager
 from core.orchestrator import Orchestrator
-from _version import __version__ 
-class MainWindow:
-    def __init__(self, root: ttk.Window):
-        self.root = root
-        self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
-        self.root.geometry("850x950") 
-        self.root.minsize(800, 850)
-        self._create_menu()
-        main_pane = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
-        main_pane.pack(fill="both", expand=True, padx=10, pady=10)
-        notebook_frame = ttk.Frame(main_pane)
-        main_pane.add(notebook_frame, weight=1)
-        notebook = ttk.Notebook(notebook_frame)
-        notebook.pack(fill="both", expand=True)
-        from gui.tab_main_control import TabMainControl
-        from gui.tab_quest_localization import TabQuestLocalization
-        from gui.tab_ai_service import TabAiService
-        from gui.tab_ai_parameters import TabAiParameters
-        from gui.tab_pack_settings import TabPackSettings
-        self.ai_service_tab = TabAiService(notebook)
-        self.ai_parameters_tab = TabAiParameters(notebook)
-        self.pack_settings_tab = TabPackSettings(notebook)
-        self.main_control_tab = TabMainControl(notebook, self.ai_service_tab, self.ai_parameters_tab, self.pack_settings_tab)
-        self.quest_localization_tab = TabQuestLocalization(notebook, self.ai_service_tab, self.ai_parameters_tab, self.main_control_tab)
-        notebook.add(self.main_control_tab.frame, text=" 模组汉化 ")
-        notebook.add(self.quest_localization_tab.frame, text=" 任务汉化 ")
-        notebook.add(self.ai_service_tab.frame, text=" AI 服务 ")
-        notebook.add(self.ai_parameters_tab.frame, text=" AI 参数 ")
-        notebook.add(self.pack_settings_tab.frame, text=" 资源包设置 ")
-        main_pane.add(self.main_control_tab.get_log_frame(), weight=1)
-        from utils.logger_setup import setup_logging
-        setup_logging(self.main_control_tab.log_message)
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
-        self.start_update_check()
-    def _on_closing(self):
+from _version import __version__
+from gui.tab_settings_unified import UnifiedSettingsTab
+from gui.quest_workflow_manager import QuestWorkflowManager
+from gui.translation_workbench import TranslationWorkbench
+from gui.find_replace_dialog import FindReplaceDialog
+from gui.theme_utils import set_title_bar_theme
+
+class ProjectTab:
+    def __init__(self, parent_notebook, root_window, main_window_instance):
+        self.root = root_window
+        self.main_window = main_window_instance
+        self.frame = ttk.Frame(parent_notebook)
+        self.orchestrator = None
+        self.workbench_instance = None
+        self.tab_id = None
+        self.log_pane_visible = True
+        self.project_name = "新项目"
+        self.project_type = "mod"
+        self.project_info = {}
+        self.loading_frame = None
+
+        self.project_type_var = tk.StringVar(value="mod")
+        self.mods_dir_var = tk.StringVar()
+        self.output_dir_var = tk.StringVar()
+        self.instance_dir_var = tk.StringVar()
+        self.modpack_name_var = tk.StringVar()
+
+        self._create_widgets()
+        self._show_welcome_view()
+        self._toggle_log_pane()
+
+    def get_state(self):
+        if not self.workbench_instance:
+            return None
+        
+        workbench_state = self.workbench_instance.get_state()
+        return {
+            "project_name": self.project_name,
+            "project_type": self.project_type,
+            "project_info": self.project_info,
+            "workbench_state": workbench_state,
+        }
+
+    def restore_from_state(self, state_data: dict):
+        self.project_name = state_data.get("project_name", "已恢复的项目")
+        self.project_type = state_data.get("project_type", "mod")
+        self.project_info = state_data.get("project_info", {})
+        workbench_state = state_data.get("workbench_state")
+
+        if not workbench_state:
+            self.log_message("会话状态不完整，无法恢复工作台。", "ERROR")
+            self._show_welcome_view()
+            return
+            
+        self.main_window.update_tab_title(self.tab_id, self.project_name)
+        current_settings = config_manager.load_config()
+        finish_text = ""
+
+        if self.project_type == "mod":
+            self.orchestrator = Orchestrator(
+                settings=current_settings,
+                update_progress=self.update_progress,
+                root_window=self.root,
+                log_callback=self.log_message
+            )
+            finish_text = "完成并生成资源包"
+        
+        elif self.project_type == "quest":
+            if not self.project_info:
+                self.log_message("项目信息丢失，无法恢复任务汉化流程。", "ERROR")
+                self._show_welcome_view()
+                return
+
+            self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
+            def run_quest_build(trans_dict):
+                threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True).start()
+            self._run_quest_build_phase = run_quest_build
+            finish_text = "完成"
+
+        self._show_workbench_view(
+            workbench_data=workbench_state['workbench_data'],
+            namespace_formats=workbench_state['namespace_formats'],
+            raw_english_files=workbench_state['raw_english_files'],
+            current_settings=current_settings,
+            project_path=workbench_state['current_project_path'],
+            finish_button_text=finish_text
+        )
+        self.log_message(f"项目 '{self.project_name}' 已从缓存中成功恢复。", "SUCCESS")
+
+    def _create_widgets(self):
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        self.content_frame = ttk.Frame(self.frame)
+        self.content_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.log_container_frame = ttk.LabelFrame(self.frame, text="状态与日志", padding="10")
+        self.log_container_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        
+        self.log_text = scrolledtext.ScrolledText(self.log_container_frame, height=8, state="disabled", wrap="word", font=("Consolas", 9), relief="flat")
+        self.log_text.pack(fill="both", expand=True, pady=5)
+        
+        self._update_log_tag_colors()
+        
+        status_bar_frame = ttk.Frame(self.frame, padding=(10, 5), bootstyle="secondary")
+        status_bar_frame.grid(row=2, column=0, sticky="ew")
+        status_bar_frame.columnconfigure(1, weight=1)
+
+        self.toggle_log_btn = ttk.Button(status_bar_frame, text="隐藏日志", command=self._toggle_log_pane, bootstyle="secondary")
+        self.toggle_log_btn.grid(row=0, column=0, sticky="w")
+        
+        self.status_var = tk.StringVar(value="准备就绪")
+        status_label = ttk.Label(status_bar_frame, textvariable=self.status_var, anchor="w", bootstyle="inverse-secondary")
+        status_label.grid(row=0, column=1, sticky="ew", padx=10)
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(status_bar_frame, variable=self.progress_var, maximum=100, style="Striped.Horizontal.TProgressbar", length=200)
+        self.progress_bar.grid(row=0, column=2, sticky="e")
+
+    def _update_log_tag_colors(self):
+        style = self.root.style
+        self.log_text.tag_config("INFO", foreground=style.colors.secondary)
+        self.log_text.tag_config("WARNING", foreground=style.colors.warning)
+        self.log_text.tag_config("ERROR", foreground=style.colors.danger)
+        self.log_text.tag_config("SUCCESS", foreground=style.colors.success)
+        self.log_text.tag_config("NORMAL", foreground=style.colors.fg)
+        self.log_text.tag_config("CRITICAL", foreground=style.colors.danger, font=("Consolas", 9, "bold"))
+
+    def _toggle_log_pane(self):
+        if self.log_pane_visible:
+            self.log_container_frame.grid_remove()
+            self.toggle_log_btn.config(text="显示日志")
+            self.frame.rowconfigure(1, weight=0)
+        else:
+            self.log_container_frame.grid()
+            self.toggle_log_btn.config(text="隐藏日志")
+            self.frame.rowconfigure(1, weight=1)
+        self.log_pane_visible = not self.log_pane_visible
+
+    def _clear_content_frame(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+    def _show_welcome_view(self):
+        self._clear_content_frame()
+        self.workbench_instance = None
+        self.main_window.update_menu_state()
+        self.project_name = "新项目"
+        self.main_window.update_tab_title(self.tab_id, "新项目")
+        
+        container = ttk.Frame(self.content_frame)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        container.columnconfigure((0, 1), weight=1, uniform="group1")
+        container.rowconfigure(0, weight=1)
+
+        new_project_frame = ttk.LabelFrame(container, text="开始新项目", padding=20)
+        new_project_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        new_project_frame.rowconfigure(2, weight=1)
+
+        mod_rb = ttk.Radiobutton(new_project_frame, text="模组汉化", variable=self.project_type_var, value="mod", style="TRadiobutton")
+        mod_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="推荐流程。扫描Mods文件夹，生成标准汉化资源包。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+
+        quest_rb = ttk.Radiobutton(new_project_frame, text="任务汉化", variable=self.project_type_var, value="quest", style="TRadiobutton")
+        quest_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+
+        ttk.Button(new_project_frame, text="下一步", command=self._show_setup_view, bootstyle="primary").pack(side="bottom", anchor="se")
+
+        load_project_frame = ttk.LabelFrame(container, text="继续已有项目", padding=20)
+        load_project_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        load_project_frame.rowconfigure(0, weight=1)
+        load_project_frame.columnconfigure(0, weight=1)
+        
+        load_btn = ttk.Button(load_project_frame, text="加载项目文件 (.sav)", command=self._load_project, bootstyle="outline")
+        load_btn.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _show_setup_view(self):
+        self._clear_content_frame()
+        self.project_type = self.project_type_var.get()
+        
+        container_wrapper = ttk.Frame(self.content_frame)
+        container_wrapper.pack(expand=True)
+
+        container = ttk.LabelFrame(container_wrapper, padding=20)
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(1, weight=1)
+
+        title_text = "配置模组汉化项目" if self.project_type == "mod" else "配置任务汉化项目"
+        ttk.Label(container, text=title_text, font=("-size 14 -weight bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 20))
+
+        if self.project_type == "mod":
+            self.main_window.update_tab_title(self.tab_id, "模组汉化设置")
+            config = config_manager.load_config()
+            self.mods_dir_var.set(config.get("mods_dir", ""))
+            self.output_dir_var.set(config.get("output_dir", ""))
+
+            ttk.Label(container, text="Mods 文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.mods_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.mods_dir_var)).grid(row=1, column=2, padx=5, pady=8)
+
+            ttk.Label(container, text="输出文件夹:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
+            
+            start_command = self._setup_new_mod_project
+        
+        elif self.project_type == "quest":
+            self.main_window.update_tab_title(self.tab_id, "任务汉化设置")
+            self.modpack_name_var.set("MyModpack")
+
+            ttk.Label(container, text="MC 实例文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.instance_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.instance_dir_var)).grid(row=1, column=2, padx=5, pady=8)
+            
+            ttk.Label(container, text="整合包名称 (英文):").grid(row=2, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.modpack_name_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
+
+            start_command = self._setup_new_quest_project
+        
+        else:
+            self._show_welcome_view()
+            return
+
+        btn_frame = ttk.Frame(container)
+        btn_frame.grid(row=3, column=0, columnspan=3, sticky="e", pady=(20, 0))
+        ttk.Button(btn_frame, text="返回", command=self._show_welcome_view, bootstyle="secondary").pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="开始处理", command=start_command, bootstyle="success").pack(side="left")
+
+    def _show_workbench_view(self, workbench_data, namespace_formats, raw_english_files, current_settings, project_path, finish_button_text="完成"):
+        self._clear_content_frame()
+        if self.log_pane_visible:
+            self._toggle_log_pane()
+        self.workbench_instance = TranslationWorkbench(
+            parent_frame=self.content_frame,
+            initial_data=workbench_data,
+            namespace_formats=namespace_formats,
+            raw_english_files=raw_english_files,
+            current_settings=current_settings,
+            log_callback=self.log_message,
+            project_path=project_path,
+            finish_button_text=finish_button_text,
+            finish_callback=self._on_workbench_finish,
+            cancel_callback=self._on_workbench_cancel,
+            project_name=self.project_name,
+            main_window_instance=self.main_window
+        )
+        self.workbench_instance.pack(fill="both", expand=True)
+        self.main_window.update_menu_state()
+        self.main_window._save_current_session()
+
+    def _on_workbench_finish(self, final_translations, final_workbench_data):
+        self.main_window.update_menu_state()
+        if self.project_type == "mod":
+            self.orchestrator.final_translations = final_translations
+            self.orchestrator.final_workbench_data = final_workbench_data
+            self.log_message("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+            self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+        elif self.project_type == "quest":
+             self.log_message("任务汉化已完成，准备生成最终文件。", "SUCCESS")
+             final_translations_quest = final_translations.get('quest_files', {})
+             self._run_quest_build_phase(final_translations_quest)
+             self._show_welcome_view()
+
+    def _on_workbench_cancel(self):
+        self.main_window.update_menu_state()
+        self.log_message("翻译工作台已取消，操作中止。", "WARNING")
+        self.update_progress("操作已取消", -2)
+        self._show_welcome_view()
+
+    def log_message(self, message, level="NORMAL"):
+        def _log():
+            self.log_text.config(state="normal")
+            self.log_text.insert(tk.END, message + "\n", level)
+            self.log_text.see(tk.END)
+            self.log_text.config(state="disabled")
         try:
-            logging.info("应用程序即将强制关闭。")
-        except:
-            pass
-        finally:
-            os._exit(0)
-    def _create_menu(self):
-        menu_bar = tk.Menu(self.root)
-        self.root.config(menu=menu_bar)
-        tools_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="工具", menu=tools_menu)
-        tools_menu.add_command(label="加载项目", command=self.load_project)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="词典查询", command=self.open_dictionary_search)
-        tools_menu.add_command(label="编辑个人词典", command=self.open_user_dictionary_editor)
-        help_menu = tk.Menu(menu_bar, tearoff=0)
-        menu_bar.add_cascade(label="帮助", menu=help_menu)
-        help_menu.add_command(label="检查更新", command=lambda: self.start_update_check(user_initiated=True))
-        help_menu.add_separator()
-        help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
-    def open_dictionary_search(self):
-        from gui.dictionary_search_window import DictionarySearchWindow
-        DictionarySearchWindow(self.root)
-    def open_user_dictionary_editor(self):
-        from gui.user_dictionary_editor import UserDictionaryEditor
-        UserDictionaryEditor(self.root)
-    def load_project(self):
+            if self.root.winfo_exists(): self.root.after(0, _log)
+        except (RuntimeError, tk.TclError): pass
+
+    def update_progress(self, message, percentage):
+        def _update():
+            self.status_var.set(message)
+            self.progress_bar.config(bootstyle="info-striped")
+            if percentage >= 0: self.progress_var.set(percentage)
+
+            if percentage == 100: self._reset_ui_after_workflow("success")
+            elif percentage < 0:
+                status_map = {-1: "error", -2: "cancelled", -10: "continue"}
+                final_status = status_map.get(percentage, "error")
+                if final_status == "continue":
+                     self.status_var.set("翻译处理完成，请选择预案以生成")
+                     self.progress_bar.config(bootstyle="success")
+                     self.progress_var.set(100)
+                     self.root.after(100, self._continue_to_build_phase)
+                else:
+                    self._reset_ui_after_workflow(final_status)
+        try:
+            if self.root.winfo_exists(): self.root.after(0, _update)
+        except (RuntimeError, tk.TclError): pass
+
+    def _setup_new_mod_project(self):
+        mods_dir = self.mods_dir_var.get()
+        output_dir = self.output_dir_var.get()
+        if not mods_dir or not output_dir:
+            ui_utils.show_error("路径不能为空", "请同时指定 Mods 文件夹和输出文件夹。", parent=self.root)
+            return
+        
+        self.project_type = "mod"
+        self.project_name = Path(mods_dir).parent.name
+        self.project_info = {"mods_dir": mods_dir, "output_dir": output_dir}
+        self.main_window.update_tab_title(self.tab_id, self.project_name)
+        
+        config = config_manager.load_config()
+        config['mods_dir'] = mods_dir
+        config['output_dir'] = output_dir
+        config_manager.save_config(config)
+        self.log_message("模组汉化项目已配置，开始执行...", "INFO")
+
+        self._prepare_ui_for_workflow(1)
+        self.orchestrator = Orchestrator(
+            settings=config,
+            update_progress=self.update_progress,
+            root_window=self.root,
+            log_callback=self.log_message
+        )
+        self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config, None, "完成并生成资源包")
+        threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True).start()
+
+    def _setup_new_quest_project(self):
+        instance_dir = self.instance_dir_var.get()
+        modpack_name = self.modpack_name_var.get().strip()
+        if not instance_dir or not modpack_name:
+            ui_utils.show_error("输入不能为空", "请同时指定实例文件夹和整合包名称。", parent=self.root)
+            return
+
+        self.project_type = "quest"
+        self.project_name = modpack_name
+        self.project_info = {"instance_dir": instance_dir, "modpack_name": modpack_name}
+        self.log_message("任务汉化项目已配置，开始提取文本...", "INFO")
+        self.main_window.update_tab_title(self.tab_id, modpack_name)
+        
+        self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
+        
+        def launch_quest_workbench(data):
+             self._show_workbench_view(data, {}, {}, config_manager.load_config(), None, "完成")
+        self.quest_manager._launch_workbench = launch_quest_workbench
+
+        def run_quest_build(trans_dict):
+            threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True).start()
+        self._run_quest_build_phase = run_quest_build
+
+        threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True).start()
+
+    def _load_project(self):
         path = filedialog.askopenfilename(
             title="选择一个项目存档文件",
             filetypes=[("项目存档", "*.sav"), ("JSON 文件", "*.json"), ("所有文件", "*.*")]
         )
-        if not path:
-            return
+        if not path: return
+
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 save_data = json.load(f)
             required_keys = ['workbench_data', 'namespace_formats', 'raw_english_files']
             if not all(k in save_data for k in required_keys):
                 raise ValueError("存档文件格式不正确或已损坏。")
-            self.main_control_tab.log_message(f"成功加载项目: {Path(path).name}", "SUCCESS")
-            self.main_control_tab.log_message("所有个人设置将保持不变，使用您本地的配置。", "INFO")
+
+            self.project_type = "mod"
+            self.project_name = Path(path).stem
+            self.log_message(f"成功加载项目: {Path(path).name}", "SUCCESS")
+            self.log_message("所有个人设置将保持不变，使用您本地的配置。", "INFO")
+            self.main_window.update_tab_title(self.tab_id, self.project_name)
+
+            self._prepare_ui_for_workflow(1)
+            settings = config_manager.load_config()
+            self.orchestrator = Orchestrator(
+                settings, self.update_progress, self.root,
+                log_callback=self.log_message,
+                save_data=save_data, project_path=path
+            )
+
+            def launch_loaded_workbench(data):
+                self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, settings, path, "完成并生成资源包")
+            self.orchestrator._launch_workbench = launch_loaded_workbench
+            
+            threading.Thread(target=self.orchestrator.run_workflow, daemon=True).start()
+
         except Exception as e:
-            ui_utils.show_error("加载失败", f"无法加载或解析项目文件：\n{e}")
+            ui_utils.show_error("加载失败", f"无法加载或解析项目文件：\n{e}", parent=self.root)
             logging.error(f"加载项目文件 '{path}' 失败: {e}", exc_info=True)
+
+    def _prepare_ui_for_workflow(self, stage: int):
+        if self.workbench_instance:
+            self.workbench_instance.pack_forget()
+        else:
+            self._clear_content_frame()
+    
+        if hasattr(self, 'loading_frame') and self.loading_frame and self.loading_frame.winfo_exists():
+            self.loading_frame.destroy()
+            
+        self.loading_frame = ttk.Frame(self.content_frame)
+        self.loading_frame.pack(expand=True)
+        ttk.Label(self.loading_frame, text="正在处理中，请稍候...", font="-size 14").pack(pady=10)
+        self.root.update_idletasks()
+        
+        if not self.log_pane_visible: self._toggle_log_pane()
+        
+        self.log_text.config(state="normal")
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state="disabled")
+        
+        if stage == 1: self.status_var.set("准备开始处理翻译...")
+        else: self.status_var.set("准备开始生成...")
+        self.progress_var.set(0)
+
+    def _reset_ui_after_workflow(self, final_status: str):
+        if hasattr(self, 'loading_frame') and self.loading_frame and self.loading_frame.winfo_exists():
+            self.loading_frame.destroy()
+            self.loading_frame = None
+    
+        if final_status == "success":
+            self.log_message("流程执行完毕！", "SUCCESS")
+            self.progress_bar.config(bootstyle="success")
+        elif final_status == "cancelled":
+            self.log_message("流程已被用户取消", "WARNING")
+            self.progress_bar.config(bootstyle="secondary")
+        else:
+            self.log_message(f"流程因错误中断", "CRITICAL")
+            self.progress_bar.config(bootstyle="danger")
+    
+        if self.workbench_instance:
+            self.workbench_instance.pack(fill="both", expand=True)
+        else:
+            self._show_welcome_view()
+
+    def _continue_to_build_phase(self):
+        if not self.orchestrator:
+            ui_utils.show_error("内部错误", "Orchestrator实例丢失，无法继续生成。", parent=self.root)
+            self._reset_ui_after_workflow("error")
             return
-        self._prepare_and_run_loaded_project(save_data, path)
-    def _prepare_and_run_loaded_project(self, save_data: dict, project_path: str):
-        self.main_control_tab._prepare_ui_for_workflow(stage=1)
-        settings = {
-            **self.ai_service_tab.get_and_save_settings(), 
-            **self.ai_parameters_tab.get_and_save_settings(),
-            **self.main_control_tab.get_current_settings()
-        }
-        settings['pack_settings'] = self.pack_settings_tab.get_current_settings()
-        self.main_control_tab.orchestrator = Orchestrator(
-            settings, 
-            self.main_control_tab.update_progress, 
-            self.root, 
-            log_callback=self.main_control_tab.log_message,
-            save_data=save_data, 
-            project_path=project_path
-        )
-        threading.Thread(target=self.main_control_tab.orchestrator.run_workflow, daemon=True).start()
-    def start_update_check(self, user_initiated=False):
-        if not getattr(sys, 'frozen', False):
-            if user_initiated: messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。");
+
+        config = config_manager.load_config()
+        presets = config.get("pack_settings_presets", {})
+        if not presets:
+            ui_utils.show_error("操作失败", "没有可用的资源包生成预案。\n请在“配置”菜单中打开设置面板创建一个预案。", parent=self.root)
+            self._reset_ui_after_workflow("cancelled")
             return
-        logging.info("准备启动后台更新检查线程...");
-        update_thread = threading.Thread(target=self._check_for_updates_thread, args=(user_initiated,), daemon=True);
-        update_thread.start()
-    def _check_for_updates_thread(self, user_initiated):
-        update_info = update_checker.check_for_updates(__version__)
-        if update_info: self.root.after(0, self._show_update_dialog, update_info)
-        elif user_initiated: self.root.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，您使用的已是最新版本！"))
-    def _show_update_dialog(self, update_info: dict):
-        dialog = Toplevel(self.root); dialog.title(f"发现新版本: {update_info['version']}"); dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False); message_frame = ttk.Frame(dialog, padding=20); message_frame.pack(fill="x"); message_text = (f"一个新版本 ({update_info['version']}) 可用！\n\n" "是否立即下载并安装更新？"); ttk.Label(message_frame, text=message_text, justify="left").pack(anchor="w"); progress_frame = ttk.Frame(dialog, padding=(20, 10)); progress_frame.pack(fill="x"); self.status_label = ttk.Label(progress_frame, text="准备就绪"); self.status_label.pack(fill="x"); self.progress_bar = ttk.Progressbar(progress_frame, length=300, mode='determinate'); self.progress_bar.pack(fill="x", pady=5); btn_frame = ttk.Frame(dialog, padding=10); btn_frame.pack(fill="x")
-        def on_update(): self.update_btn.config(state="disabled"); self.later_btn.config(state="disabled"); threading.Thread(target=self._start_update_process, args=(update_info,), daemon=True).start()
-        self.update_btn = ttk.Button(btn_frame, text="立即更新", command=on_update, bootstyle="success"); self.update_btn.pack(side="right", padx=5); self.later_btn = ttk.Button(btn_frame, text="稍后提醒", command=dialog.destroy); self.later_btn.pack(side="right")
-    def _update_progress_ui(self, status, percentage, speed):
-        self.status_label.config(text=f"{status}... {int(percentage)}% ({speed})"); self.progress_bar['value'] = percentage
-    def _start_update_process(self, update_info: dict):
-        current_exe_path = Path(sys.executable); exe_dir = current_exe_path.parent; new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new"); old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
-        download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path, lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
-        if not download_ok: self.root.after(0, lambda: messagebox.showerror("更新失败", "下载新版本失败，请检查网络或稍后重试。", parent=self.root)); self.root.after(0, self.later_btn.master.master.destroy); return
+
+        from gui.dialogs import PackPresetDialog
+        dialog = PackPresetDialog(self.root, presets)
+        chosen_preset_name = dialog.result
+
+        if chosen_preset_name is None:
+            self.log_message("生成操作已取消", "INFO")
+            self._reset_ui_after_workflow("cancelled")
+            return
+
+        final_pack_settings = presets.get(chosen_preset_name, {}).copy()
+        final_pack_settings['preset_name'] = chosen_preset_name
+        final_pack_settings['pack_as_zip'] = config.get("pack_as_zip", False)
+
+        self._prepare_ui_for_workflow(stage=2)
+        threading.Thread(target=self.orchestrator.run_build_phase, args=(final_pack_settings,), daemon=True).start()
+
+class MainWindow:
+    def __init__(self, root: ttk.Window):
+        self.root = root
+        self.root.title(f"Minecraft 整合包汉化工坊 Pro - v{__version__}")
+        self.root.geometry("1200x800")
+        self.root.minsize(1000, 700)
+
+        self.settings_window = None
+        self.find_replace_window = None
+        self.project_tabs = {}
+        self.close_tab_map = {}
+        self.tab_counter = 0
+
+        self._create_menu()
+        self._create_widgets()
+
+        from utils.logger_setup import setup_logging
+        setup_logging(self._dispatch_log_to_active_tab)
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        self.root.bind_all("<Control-f>", self._open_find_replace)
+        self.check_initial_config()
+        
+        self.root.bind("<Map>", self._apply_initial_theme, add="+")
+        
+        self._load_session_on_startup()
+
+    def _apply_initial_theme(self, event=None):
+        set_title_bar_theme(self.root, self.root.style)
+        self.root.unbind("<Map>")
+
+    def _on_closing(self):
+        self._save_current_session()
+        if self.find_replace_window and self.find_replace_window.winfo_exists():
+            self.find_replace_window.destroy()
+        self.root.destroy()
+
+    def _save_current_session(self):
+        active_tabs = list(self.project_tabs.values())
+        if any(tab.workbench_instance for tab in active_tabs):
+            session_manager.save_session(active_tabs)
+        else:
+            session_manager.clear_session()
+
+    def _load_session_on_startup(self):
+        session_data = session_manager.load_session()
+        if session_data:
+            self._dispatch_log_to_active_tab(f"检测到 {len(session_data)} 个未关闭的标签页，正在恢复...", "INFO")
+            initial_tab_id = list(self.project_tabs.keys())[0]
+            self._close_tab_by_id(initial_tab_id, force=True)
+            
+            for tab_state in session_data:
+                new_tab = self._add_new_tab()
+                new_tab.restore_from_state(tab_state)
+        else:
+             self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
+
+    def _create_menu(self):
+        self.menu_bar_container = ttk.Frame(self.root)
+        self.menu_bar_container.pack(side="top", fill="x")
+
+        menu_buttons_frame = ttk.Frame(self.menu_bar_container)
+        menu_buttons_frame.pack()
+
+        self.file_menubutton = ttk.Menubutton(menu_buttons_frame, text="文件", bootstyle="toolbutton")
+        self.file_menubutton.pack(side="left", padx=(1, 0))
+        file_menu = Menu(self.file_menubutton, tearoff=0)
+        self.file_menubutton["menu"] = file_menu
+        file_menu.add_command(label="返回项目选择", command=self._reset_active_tab)
+        file_menu.add_separator()
+        file_menu.add_command(label="新建标签页", command=self._add_new_tab)
+        file_menu.add_command(label="关闭当前标签页", command=lambda: self._close_tab_by_id(self.notebook.select()))
+        
+        self.edit_menubutton = ttk.Menubutton(menu_buttons_frame, text="编辑", state="disabled", bootstyle="toolbutton")
+        self.edit_menubutton.pack(side="left")
+        edit_menu = Menu(self.edit_menubutton, tearoff=0)
+        self.edit_menubutton["menu"] = edit_menu
+        edit_menu.add_command(label="撤销 (Ctrl+Z)", command=lambda: self._call_workbench_method('undo'))
+        edit_menu.add_command(label="重做 (Ctrl+Y)", command=lambda: self._call_workbench_method('redo'))
+        edit_menu.add_separator()
+        edit_menu.add_command(label="查找和替换 (Ctrl+F)", command=self._open_find_replace)
+
+        self.view_menubutton = ttk.Menubutton(menu_buttons_frame, text="视图", bootstyle="toolbutton")
+        self.view_menubutton.pack(side="left")
+        view_menu = Menu(self.view_menubutton, tearoff=0)
+        self.view_menubutton["menu"] = view_menu
+        view_menu.add_command(label="切换日间/夜间模式", command=self._toggle_theme)
+
+        self.config_menubutton = ttk.Menubutton(menu_buttons_frame, text="配置", bootstyle="toolbutton")
+        self.config_menubutton.pack(side="left")
+        config_menu = Menu(self.config_menubutton, tearoff=0)
+        self.config_menubutton["menu"] = config_menu
+        config_menu.add_command(label="打开设置面板", command=self.open_settings_window)
+        
+        self.tools_menubutton = ttk.Menubutton(menu_buttons_frame, text="工具", state="disabled", bootstyle="toolbutton")
+        self.tools_menubutton.pack(side="left")
+        tools_menu = Menu(self.tools_menubutton, tearoff=0)
+        self.tools_menubutton["menu"] = tools_menu
+        tools_menu.add_command(label="AI 翻译所有待译项", command=lambda: self._call_workbench_method('_run_ai_translation_async'))
+        tools_menu.add_command(label="查询词典", command=lambda: self._call_workbench_method('_open_dict_search'))
+        tools_menu.add_separator()
+        tools_menu.add_command(label="存入个人词典", command=lambda: self._call_workbench_method('_add_to_user_dictionary'))
+        
+        self.global_tools_menubutton = ttk.Menubutton(menu_buttons_frame, text="全局工具", bootstyle="toolbutton")
+        self.global_tools_menubutton.pack(side="left")
+        global_tools_menu = Menu(self.global_tools_menubutton, tearoff=0)
+        self.global_tools_menubutton["menu"] = global_tools_menu
+        from gui.dictionary_search_window import DictionarySearchWindow
+        from gui.user_dictionary_editor import UserDictionaryEditor
+        global_tools_menu.add_command(label="词典查询", command=lambda: DictionarySearchWindow(self.root))
+        global_tools_menu.add_command(label="编辑个人词典", command=lambda: UserDictionaryEditor(self.root))
+
+        self.help_menubutton = ttk.Menubutton(menu_buttons_frame, text="帮助", bootstyle="toolbutton")
+        self.help_menubutton.pack(side="left")
+        help_menu = Menu(self.help_menubutton, tearoff=0)
+        self.help_menubutton["menu"] = help_menu
+        help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
+
+    def _toggle_theme(self):
+        current_theme = self.root.style.theme_use()
+        new_theme = "darkly" if current_theme == "litera" else "litera"
+        self.root.style.theme_use(new_theme)
+        
+        config = config_manager.load_config()
+        config["theme"] = new_theme
+        config_manager.save_config(config)
+        
+        for tab in self.project_tabs.values():
+            tab._update_log_tag_colors()
+            if tab.workbench_instance:
+                tab.workbench_instance._update_theme_colors()
+
+        self.root.update_idletasks()
+        
+        set_title_bar_theme(self.root, self.root.style)
+        if self.settings_window and self.settings_window.winfo_exists():
+            set_title_bar_theme(self.settings_window, self.root.style)
+        if self.find_replace_window and self.find_replace_window.winfo_exists():
+            set_title_bar_theme(self.find_replace_window, self.root.style)
+
+    def _call_workbench_method(self, method_name):
+        current_tab = self._get_current_tab()
+        if current_tab and current_tab.workbench_instance:
+            method = getattr(current_tab.workbench_instance, method_name, None)
+            if callable(method):
+                method()
+
+    def update_menu_state(self, event=None):
+        current_tab = self._get_current_tab()
+        state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
+        self.edit_menubutton.config(state=state)
+        self.tools_menubutton.config(state=state)
+        if self.find_replace_window and self.find_replace_window.winfo_exists():
+            self.find_replace_window.lift()
+
+    def open_settings_window(self):
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            self.settings_window.focus_set()
+            return
+
+        self.settings_window = ttk.Toplevel(self.root)
+        self.settings_window.title("设置")
+        self.settings_window.geometry("800x700")
+        self.settings_window.minsize(700, 600)
+        self.settings_window.transient(self.root)
+        set_title_bar_theme(self.settings_window, self.root.style)
+
+        settings_frame = UnifiedSettingsTab(self.settings_window)
+        settings_frame.pack(fill="both", expand=True)
+
+    def _create_widgets(self):
+        self.notebook = ttk.Notebook(self.root, padding=(5, 5, 0, 0))
+        self.notebook.pack(fill="both", expand=True)
+
+        self.notebook.bind("<ButtonPress-1>", self._on_tab_click)
+        self.notebook.bind("<<NotebookTabChanged>>", self.update_menu_state)
+
+        self.add_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.add_tab_frame, text='+')
+        self.notebook.tab(self.add_tab_frame, padding=[4, 1, 4, 1])
+
+        self._add_new_tab()
+
+    def _on_tab_click(self, event):
         try:
-            updater_path = Path(sys._MEIPASS) / "updater.exe"
-            if not updater_path.exists(): raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
-        except AttributeError: self.root.after(0, lambda: messagebox.showerror("开发模式", "更新功能只能在打包后的 .exe 程序中使用。")); return
-        except FileNotFoundError as e: self.root.after(0, lambda: messagebox.showerror("更新错误", str(e))); return
-        pid = os.getpid(); command = [str(updater_path), str(pid), str(current_exe_path), str(new_exe_temp_path), str(old_exe_backup_path)]; subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW); self.root.after(100, self._on_closing)
+            clicked_tab_index = self.notebook.index(f"@{event.x},{event.y}")
+            clicked_tab_id = self.notebook.tabs()[clicked_tab_index]
+        except tk.TclError:
+            return
+
+        add_tab_id = self.notebook.tabs()[-1]
+
+        if clicked_tab_id == add_tab_id:
+            self.notebook.after(10, self._add_new_tab)
+            return "break"
+
+        if clicked_tab_id in self.close_tab_map:
+            project_tab_to_close = self.close_tab_map[clicked_tab_id]
+            self.notebook.after(10, lambda: self._close_tab_by_id(project_tab_to_close))
+            return "break"
+
+    def _add_new_tab(self):
+        self.tab_counter += 1
+        
+        project_tab = ProjectTab(self.notebook, self.root, self)
+        
+        insert_pos = len(self.notebook.tabs()) - 1
+        self.notebook.insert(insert_pos, project_tab.frame, text="新项目")
+        
+        tab_id = self.notebook.tabs()[insert_pos]
+        project_tab.tab_id = tab_id
+        self.project_tabs[tab_id] = project_tab
+        
+        close_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.insert(insert_pos + 1, close_tab_frame, text='x')
+        close_tab_id = self.notebook.tabs()[insert_pos + 1]
+        self.notebook.tab(close_tab_id, padding=[4, 1, 4, 1])
+        self.close_tab_map[close_tab_id] = tab_id
+
+        self.notebook.select(tab_id)
+        self.update_menu_state()
+        return project_tab
+    
+    def _reset_active_tab(self):
+        current_tab = self._get_current_tab()
+        if current_tab:
+            current_tab._show_welcome_view()
+
+    def _get_current_tab(self):
+        try:
+            selected_id = self.notebook.select()
+            return self.project_tabs.get(selected_id)
+        except (tk.TclError, IndexError):
+            return None
+
+    def _dispatch_log_to_active_tab(self, message, level):
+        active_tab = self._get_current_tab()
+        if active_tab:
+            active_tab.log_message(message, level)
+        elif not self.project_tabs:
+            self.root.after(50, lambda: self._dispatch_log_to_active_tab(message, level))
+        else:
+            try:
+                first_tab_id = list(self.project_tabs.keys())[0]
+                self.project_tabs[first_tab_id].log_message(message, level)
+            except (IndexError, KeyError):
+                 pass
+
+    def _close_tab_by_id(self, project_tab_id_to_close, force=False):
+        if not project_tab_id_to_close or project_tab_id_to_close not in self.project_tabs:
+            return
+
+        tab_to_close = self.project_tabs[project_tab_id_to_close]
+
+        if len(self.project_tabs) <= 1 and not force:
+            if tab_to_close.workbench_instance:
+                tab_to_close.workbench_instance._on_close_request(force_close=False, on_confirm=self._reset_active_tab)
+            else:
+                self._reset_active_tab()
+            return
+
+        project_tab_ids = [tid for tid in self.notebook.tabs() if tid in self.project_tabs]
+        
+        try:
+            closed_project_index = project_tab_ids.index(project_tab_id_to_close)
+        except ValueError:
+            return
+
+        if closed_project_index == len(project_tab_ids) - 1:
+            target_project_index = closed_project_index - 1
+        else:
+            target_project_index = closed_project_index
+        
+        if target_project_index >= 0:
+            tab_id_to_select = project_tab_ids[target_project_index]
+        else:
+            tab_id_to_select = None
+
+        if tab_to_close.workbench_instance:
+            tab_to_close.workbench_instance._on_close_request(force_close=True)
+        
+        close_tab_id_to_remove = None
+        for close_id, proj_id in self.close_tab_map.items():
+            if proj_id == project_tab_id_to_close:
+                close_tab_id_to_remove = close_id
+                break
+        
+        if close_tab_id_to_remove:
+            self.notebook.forget(close_tab_id_to_remove)
+            del self.close_tab_map[close_tab_id_to_remove]
+        
+        self.notebook.forget(project_tab_id_to_close)
+        del self.project_tabs[project_tab_id_to_close]
+        
+        if tab_id_to_select:
+            self.root.after(10, lambda: self.notebook.select(tab_id_to_select))
+        
+        if not self.project_tabs and not force:
+             self._add_new_tab()
+
+        self.update_menu_state()
+        self._save_current_session()
+
+    def update_tab_title(self, tab_id, new_title):
+        if tab_id in self.project_tabs and new_title:
+            try:
+                clean_title = re.sub(r'[\\/*?:"<>|]', "", new_title)
+                current_tab = self.project_tabs.get(tab_id)
+                if current_tab:
+                    current_tab.project_name = clean_title
+
+                display_title = clean_title if len(clean_title) <= 20 else clean_title[:17] + "..."
+                self.notebook.tab(tab_id, text=display_title)
+            except tk.TclError:
+                pass
+
+    def check_initial_config(self):
+        config = config_manager.load_config()
+        if not config.get('api_keys'):
+            self.root.after(100, lambda: self._dispatch_log_to_active_tab("提醒: AI API密钥为空，请在“配置”菜单中打开设置面板进行配置，否则AI翻译功能将不可用。", "WARNING"))
+    
+    def _open_find_replace(self, event=None):
+        active_tab = self._get_current_tab()
+        if not active_tab or not active_tab.workbench_instance:
+            self.root.bell()
+            return
+            
+        if self.find_replace_window and self.find_replace_window.winfo_exists():
+            self.find_replace_window.lift()
+            self.find_replace_window.focus_set()
+        else:
+            config = config_manager.load_config()
+            initial_settings = config.get("find_replace_settings", {})
+            self.find_replace_window = FindReplaceDialog(self.root, self._handle_find_replace_action, initial_settings)
+
+    def _handle_find_replace_action(self, action, params):
+        config = config_manager.load_config()
+        config["find_replace_settings"] = params
+        config_manager.save_config(config)
+
+        if action == "close":
+            self.find_replace_window = None
+            return
+
+        active_tab = self._get_current_tab()
+        if not active_tab or not active_tab.workbench_instance:
+            return
+        
+        workbench = active_tab.workbench_instance
+
+        if action == "find":
+            workbench.find_next(params)
+        elif action == "replace":
+            workbench.replace_current_and_find_next(params)
+        elif action == "replace_all":
+            workbench.replace_all(params)

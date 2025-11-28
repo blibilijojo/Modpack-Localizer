@@ -3,7 +3,9 @@ from tkinter import messagebox, scrolledtext
 import ttkbootstrap as ttk
 from utils import config_manager
 from gui.custom_widgets import ToolTip
-class UserDictionaryEditor(tk.Toplevel):
+from gui.theme_utils import set_title_bar_theme
+
+class UserDictionaryEditor(ttk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent = parent
@@ -15,12 +17,15 @@ class UserDictionaryEditor(tk.Toplevel):
         self._populate_tree()
         self._update_editor_state(enabled=False)
         self._update_window_title()
+
     def _setup_window(self):
         self.title("个人词典编辑器")
         self.geometry("900x600")
         self.minsize(700, 500)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._on_close_request)
+        set_title_bar_theme(self, self.parent.style)
+
     def _create_widgets(self):
         main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         main_pane.pack(fill="both", expand=True, padx=10, pady=10)
@@ -41,8 +46,8 @@ class UserDictionaryEditor(tk.Toplevel):
         self.tree.bind("<<TreeviewSelect>>", self._on_item_selected)
         action_frame = ttk.Frame(left_frame)
         action_frame.pack(fill="x")
-        ttk.Button(action_frame, text="✚ 新建条目", command=self._prepare_new_entry, bootstyle="success").pack(side="left")
-        self.delete_btn = ttk.Button(action_frame, text="✖ 删除条目", command=self._delete_entry, bootstyle="danger-outline", state="disabled")
+        ttk.Button(action_frame, text="新建条目", command=self._prepare_new_entry, bootstyle="success").pack(side="left")
+        self.delete_btn = ttk.Button(action_frame, text="删除条目", command=self._delete_entry, bootstyle="danger-outline", state="disabled")
         self.delete_btn.pack(side="left", padx=5)
         main_pane.add(left_frame, weight=2)
         editor_frame = ttk.LabelFrame(main_pane, text="编辑区域", padding=10)
@@ -66,6 +71,7 @@ class UserDictionaryEditor(tk.Toplevel):
         bottom_frame.pack(fill="x", side="bottom")
         ttk.Button(bottom_frame, text="取消", command=self._on_close_request, bootstyle="secondary").pack(side="right")
         ttk.Button(bottom_frame, text="保存并关闭", command=self._on_save_and_close, bootstyle="primary").pack(side="right", padx=10)
+
     def _populate_tree(self):
         self.tree.unbind("<<TreeviewSelect>>")
         self.tree.delete(*self.tree.get_children())
@@ -76,6 +82,7 @@ class UserDictionaryEditor(tk.Toplevel):
             iid = f"origin___{origin}"
             self.tree.insert("", "end", iid=iid, values=("按原文", origin, trans))
         self.tree.bind("<<TreeviewSelect>>", self._on_item_selected)
+
     def _on_item_selected(self, event=None):
         selection = self.tree.selection()
         if not selection:
@@ -92,6 +99,7 @@ class UserDictionaryEditor(tk.Toplevel):
         self.key_origin_text.insert("1.0", key_origin)
         self.trans_text.delete("1.0", tk.END)
         self.trans_text.insert("1.0", translation)
+
     def _prepare_new_entry(self):
         self.tree.selection_set()
         self.current_selection_id = None
@@ -100,6 +108,7 @@ class UserDictionaryEditor(tk.Toplevel):
         self.trans_text.delete("1.0", tk.END)
         self.type_var.set("按原文")
         self.key_origin_text.focus_set()
+
     def _save_entry(self):
         key_origin = self.key_origin_text.get("1.0", "end-1c").strip()
         translation = self.trans_text.get("1.0", "end-1c").strip()
@@ -122,6 +131,7 @@ class UserDictionaryEditor(tk.Toplevel):
             self.tree.focus(new_iid)
             self.tree.see(new_iid)
         messagebox.showinfo("成功", "条目已保存！", parent=self)
+
     def _delete_entry(self):
         if not self.current_selection_id:
             return
@@ -134,10 +144,12 @@ class UserDictionaryEditor(tk.Toplevel):
                 self._populate_tree()
                 self._update_editor_state(enabled=False)
                 self.current_selection_id = None
+
     def _on_save_and_close(self):
         config_manager.save_user_dict(self.user_dict)
         self.is_dirty = False
         self.destroy()
+
     def _on_close_request(self):
         if self.is_dirty:
             response = messagebox.askyesnocancel("未保存的更改", "您有未保存的更改，是否要保存？", parent=self)
@@ -147,6 +159,7 @@ class UserDictionaryEditor(tk.Toplevel):
                 self.destroy()
         else:
             self.destroy()
+
     def _update_editor_state(self, enabled: bool, is_new: bool = False):
         state = "normal" if enabled else "disabled"
         self.key_origin_text.config(state=state)
@@ -162,10 +175,12 @@ class UserDictionaryEditor(tk.Toplevel):
             self.type_var.set("")
             self.key_origin_text.delete("1.0", tk.END)
             self.trans_text.delete("1.0", tk.END)
+
     def _set_dirty(self, dirty_status: bool):
         if self.is_dirty != dirty_status:
             self.is_dirty = dirty_status
             self._update_window_title()
+
     def _update_window_title(self):
         title = "个人词典编辑器"
         if self.is_dirty:

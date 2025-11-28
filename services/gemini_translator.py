@@ -39,12 +39,12 @@ class KeyManager:
             cooldown_end_time = time.monotonic() + cooldown_seconds
             self.cooldown_keys[key] = cooldown_end_time
             logging.warning(f"密钥 ...{key[-4:]} 调用失败，将被冷却 {cooldown_seconds} 秒。")
-class GeminiTranslator:
+class AITranslator:
     def __init__(self, api_keys: list[str], api_endpoint: str | None = None):
         self.api_endpoint = api_endpoint.strip() if api_endpoint else None
         self.key_manager = KeyManager(api_keys)
         self.all_keys = api_keys
-        logging.info(f"翻译器已初始化 (并发模式)。API服务器: {self.api_endpoint or 'Google官方'}")
+        logging.info(f"翻译器已初始化 (并发模式)。API服务器: {self.api_endpoint or '默认'}")
     def _get_client(self, api_key: str, timeout=120.0):
         if self.api_endpoint:
             return openai.OpenAI(base_url=self.api_endpoint, api_key=api_key, timeout=timeout)

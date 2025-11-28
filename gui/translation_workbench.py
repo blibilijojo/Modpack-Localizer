@@ -10,22 +10,27 @@ import itertools
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import re
-import copy 
+import copy
 
 from utils import config_manager
-from services.gemini_translator import GeminiTranslator
+from services.gemini_translator import AITranslator
 from gui import ui_utils
 from gui.custom_widgets import ToolTip
+from gui.find_replace_dialog import FindReplaceDialog
 
-class TranslationWorkbench(tk.Toplevel):
-    def __init__(self, parent, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成并生成资源包"):
-        super().__init__(parent)
-        self.parent = parent
+class TranslationWorkbench(ttk.Frame):
+    def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None):
+        super().__init__(parent_frame)
         self.translation_data = initial_data
         self.namespace_formats = namespace_formats
         self.raw_english_files = raw_english_files
         self.current_settings = current_settings
         self.log_callback = log_callback or (lambda msg, lvl: None)
+        self.finish_callback = finish_callback
+        self.cancel_callback = cancel_callback
+        self.project_name = project_name
+        self.main_window = main_window_instance
+
         self.final_translations = None
         self.current_selection_info = None
         self.sort_column = '#0'
@@ -34,8 +39,7 @@ class TranslationWorkbench(tk.Toplevel):
         
         self.current_project_path = project_path
         self.is_dirty = False
-        self.base_title = "翻译工作台"
-
+        
         self.undo_stack = []
         self.redo_stack = []
         self.undo_targets = []
@@ -43,66 +47,65 @@ class TranslationWorkbench(tk.Toplevel):
         
         self.finish_button_text = finish_button_text
 
-        self._setup_window()
         self._create_widgets()
-
+        self.after_idle(self._set_initial_sash_position)
+        
         self._record_action(target_iid=None) 
         self._update_history_buttons()
-        self.bind_all("<Control-z>", self._undo)
-        self.bind_all("<Control-y>", self._redo)
+        self.bind_all("<Control-z>", self.undo)
+        self.bind_all("<Control-y>", self.redo)
+        self.bind_all("<Control-s>", lambda e: self._save_project())
 
         self._setup_treeview_tags()
         self._populate_namespace_tree()
         self._update_ui_state(interactive=True, item_selected=False)
         self._set_dirty(False)
 
-    def _setup_window(self):
-        self.title(self.base_title)
-        self.geometry("1200x800")
-        self.minsize(1000, 600)
-        self.resizable(True, True)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self._on_close_request)
+    def get_state(self):
+        return {
+            "workbench_data": self.undo_stack[-1] if self.undo_stack else self.translation_data,
+            "namespace_formats": self.namespace_formats,
+            "raw_english_files": self.raw_english_files,
+            "current_project_path": self.current_project_path,
+        }
 
     def _set_initial_sash_position(self):
         try:
-            width = self.main_pane.winfo_width()
-            self.main_pane.sashpos(0, width // 3)
+            self.update_idletasks()
+            width = self.winfo_width()
+            initial_pos = int(width * 0.3)
+            if initial_pos > 50:
+                self.main_pane.sashpos(0, initial_pos)
         except tk.TclError:
             pass
 
     def _create_widgets(self):
         self.main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        self.main_pane.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+        self.main_pane.pack(fill="both", expand=True, padx=5, pady=(5, 0))
 
-        left_frame = ttk.Frame(self.main_pane, padding=5)
-        ttk.Label(left_frame, text="模组列表", bootstyle="primary").pack(anchor="w", pady=(0, 5))
-        self.ns_tree = ttk.Treeview(left_frame, columns=("pending", "completed"), show="tree headings")
-        
-        columns_to_sort = {
-            "#0": "模组 (文件名)",
-            "pending": "待翻译",
-            "completed": "已翻译"
-        }
-
+        self.left_frame = ttk.Frame(self.main_pane, padding=5)
+        ttk.Label(self.left_frame, text="模组/任务列表", bootstyle="primary").pack(anchor="w", pady=(0, 5))
+        self.ns_tree = ttk.Treeview(self.left_frame, columns=("pending", "completed"), show="tree headings")
+        columns_to_sort = {"#0": "项目", "pending": "待翻译", "completed": "已翻译"}
         for col, text in columns_to_sort.items():
             self.original_headings[col] = text
             self.ns_tree.heading(col, text=text, command=lambda c=col: self._sort_by_column(c))
-        
         self.ns_tree.column("#0", width=220, minwidth=160, stretch=True)
         self.ns_tree.column("pending", width=60, stretch=False, anchor="center")
         self.ns_tree.column("completed", width=60, stretch=False, anchor="center")
-        
         self.ns_tree.pack(fill="both", expand=True)
         self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
-        self.main_pane.add(left_frame, weight=1)
+        self.main_pane.add(self.left_frame, weight=1)
 
-        right_pane = ttk.PanedWindow(self.main_pane, orient=tk.VERTICAL)
-        self.main_pane.add(right_pane, weight=2)
+        right_frame_container = ttk.Frame(self.main_pane)
+        self.main_pane.add(right_frame_container, weight=3)
+
+        right_pane = ttk.PanedWindow(right_frame_container, orient=tk.VERTICAL)
+        right_pane.pack(fill="both", expand=True)
 
         table_container = ttk.Frame(right_pane, padding=5)
         self.trans_tree = ttk.Treeview(table_container, columns=("key", "english", "chinese", "source"), show="headings")
-        self.trans_tree.heading("key", text="原文Key"); self.trans_tree.column("key", width=200, stretch=False)
+        self.trans_tree.heading("key", text="原文键"); self.trans_tree.column("key", width=200, stretch=False)
         self.trans_tree.heading("english", text="原文"); self.trans_tree.column("english", width=250, stretch=True)
         self.trans_tree.heading("chinese", text="译文"); self.trans_tree.column("chinese", width=250, stretch=True)
         self.trans_tree.heading("source", text="来源"); self.trans_tree.column("source", width=120, stretch=False)
@@ -113,54 +116,217 @@ class TranslationWorkbench(tk.Toplevel):
         right_pane.add(table_container, weight=3)
         
         editor_frame = ttk.LabelFrame(right_pane, text="翻译编辑器", padding=10)
-        editor_frame.grid_columnconfigure(1, weight=1)
+        editor_frame.columnconfigure(1, weight=1)
         ttk.Label(editor_frame, text="原文:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=5, pady=5)
-        self.en_text_display = scrolledtext.ScrolledText(editor_frame, height=3, wrap="word", state="disabled", relief="flat", background=self.cget('bg'))
-        self.en_text_display.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
         
+        style = ttk.Style.get_instance()
+        theme_bg_color = style.lookup('TFrame', 'background')
+        theme_fg_color = style.lookup('TLabel', 'foreground')
+        self.en_text_display = scrolledtext.ScrolledText(
+            editor_frame, height=3, wrap="word", relief="flat",
+            background=theme_bg_color, foreground=theme_fg_color
+        )
+        self.en_text_display.bind("<KeyPress>", lambda e: "break")
+        self.en_text_display.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
         zh_header_frame = ttk.Frame(editor_frame); zh_header_frame.grid(row=1, column=1, sticky="ew", padx=5, pady=(5,0))
         ttk.Label(zh_header_frame, text="译文:", anchor="nw").pack(side="left")
-        shortcut_info_label = ttk.Label(zh_header_frame, text="快捷键: Enter = 跳转到下一个条目 | Ctrl+Enter = 跳转到下一个待翻译项", bootstyle="secondary")
+        shortcut_info_label = ttk.Label(zh_header_frame, text="快捷键: Enter 跳转到下一条, Ctrl+Enter 跳转到下一条待翻译")
         shortcut_info_label.pack(side="right")
-        
         self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=3, wrap="word", state="disabled")
         self.zh_text_input.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-        self.zh_text_input.bind("<<Modified>>", self._on_text_modified)
+        self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
         self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
         self.zh_text_input.bind("<Return>", self._save_and_jump_sequential)
         self.zh_text_input.bind("<Control-Return>", self._save_and_jump_pending)
-
         editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="e", pady=(5,0))
-        self.ai_translate_button = ttk.Button(editor_btn_frame, text="🚀 一键 AI 翻译 (空缺项)", command=self._run_ai_translation_async, bootstyle="success-outline")
-        self.ai_translate_button.pack(side="left", padx=(0, 10))
-        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="⭐ 存入个人词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
-        self.add_to_dict_btn.pack(side="left", padx=(0, 10))
         
-        self.undo_btn = ttk.Button(editor_btn_frame, text="撤销", command=self._undo, bootstyle="info-outline")
+        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="存入个人词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
+        self.add_to_dict_btn.pack(side="left", padx=(0, 10))
+        self.undo_btn = ttk.Button(editor_btn_frame, text="撤销", command=self.undo, bootstyle="info-outline")
         self.undo_btn.pack(side="left", padx=(0, 5))
         ToolTip(self.undo_btn, "撤销上一步操作 (Ctrl+Z)")
-
-        self.redo_btn = ttk.Button(editor_btn_frame, text="重做", command=self._redo, bootstyle="info-outline")
+        self.redo_btn = ttk.Button(editor_btn_frame, text="重做", command=self.redo, bootstyle="info-outline")
         self.redo_btn.pack(side="left", padx=(0, 10))
         ToolTip(self.redo_btn, "重做已撤销的操作 (Ctrl+Y)")
 
-        ttk.Button(editor_btn_frame, text="查询词典", command=self._open_dict_search, bootstyle="info-outline").pack(side="left")
         right_pane.add(editor_frame, weight=1)
 
         btn_frame = ttk.Frame(self, padding=10)
         btn_frame.pack(fill="x")
-        self.status_label = ttk.Label(btn_frame, text="请选择一个模组以开始")
+        self.status_label = ttk.Label(btn_frame, text="请选择一个项目以开始")
         self.status_label.pack(side="left", fill="x", expand=True)
-        
-        self.cancel_button = ttk.Button(btn_frame, text="取消", command=self._on_close_request, bootstyle="secondary")
-        self.cancel_button.pack(side="right", padx=10)
-        
+
+        self.save_button = ttk.Button(btn_frame, text="保存项目", command=self._save_project, bootstyle="primary-outline")
+        self.save_button.pack(side="right", padx=5)
         self.finish_button = ttk.Button(btn_frame, text=self.finish_button_text, command=self._on_finish, bootstyle="success")
         self.finish_button.pack(side="right")
-        self.save_button = ttk.Button(btn_frame, text="保存项目...", command=self._save_project, bootstyle="info")
-        self.save_button.pack(side="right", padx=10)
+
+    def _update_theme_colors(self):
+        style = ttk.Style.get_instance()
+        theme_bg_color = style.lookup('TFrame', 'background')
+        theme_fg_color = style.lookup('TLabel', 'foreground')
+        self.en_text_display.config(background=theme_bg_color, foreground=theme_fg_color)
+
+    def _get_searchable_items(self, scope):
+        if scope == 'current':
+            selection = self.ns_tree.selection()
+            if not selection:
+                messagebox.showwarning("范围错误", "请先在左侧选择一个项目以确定搜索范围。", parent=self)
+                return []
+            return self.trans_tree.get_children()
+        else:
+            all_iids = []
+            for ns_iid in self.ns_tree.get_children():
+                for idx, item in enumerate(self.translation_data.get(ns_iid, {}).get('items', [])):
+                    if item.get('en', '').strip():
+                        all_iids.append(f"{ns_iid}___{idx}")
+            return all_iids
+
+    def _safe_select_item(self, iid):
+        if self.trans_tree.exists(iid):
+            self.trans_tree.selection_set(iid)
+            self.trans_tree.focus(iid)
+            self.trans_tree.see(iid)
+
+    def find_next(self, params):
+        find_text = params["find_text"]
+        direction = 1 if params["direction"] == "down" else -1
         
-        self.after(1, self._set_initial_sash_position)
+        all_items = self._get_searchable_items(params["scope"])
+        if not all_items: return
+
+        try:
+            current_selection_iid = self.trans_tree.selection()[0]
+            start_index = all_items.index(current_selection_iid)
+        except (IndexError, ValueError):
+            start_index = -1 if direction == 1 else len(all_items)
+            
+        search_range = list(range(len(all_items)))
+        ordered_indices = (search_range[start_index+direction::direction] + 
+                           (search_range if params["wrap"] else []))
+
+        column_map = {"en": [1], "zh": [2], "all": [0, 1, 2]}
+        column_indices = column_map.get(params["search_column"], [0, 1, 2])
+
+        for i in ordered_indices:
+            iid = all_items[i]
+            ns, idx = self._get_ns_idx_from_iid(iid)
+            if ns is None: continue
+
+            item_data = self.translation_data[ns]['items'][idx]
+            values = (item_data['key'], item_data['en'], item_data.get('zh', ''))
+
+            for col_idx in column_indices:
+                cell_text = values[col_idx]
+                
+                search_text_to_check = find_text if params["match_case"] else find_text.lower()
+                cell_to_check = cell_text if params["match_case"] else cell_text.lower()
+
+                if search_text_to_check in cell_to_check:
+                    current_ns_selection = self.ns_tree.selection()
+                    if not current_ns_selection or current_ns_selection[0] != ns:
+                        self.ns_tree.selection_set(ns)
+                        self.ns_tree.focus(ns)
+                        self.ns_tree.see(ns)
+                        self.update_idletasks() 
+                        self.after(10, lambda iid=iid: self._safe_select_item(iid))
+                    else:
+                        self._safe_select_item(iid)
+                    return
+        
+        messagebox.showinfo("查找", f"未能找到 \"{find_text}\"", parent=self)
+
+    def replace_current_and_find_next(self, params):
+        selection = self.trans_tree.selection()
+        if not selection:
+            self.find_next(params)
+            return
+
+        iid = selection[0]
+        ns, idx = self._get_ns_idx_from_iid(iid)
+        if ns is None: return
+
+        item = self.translation_data[ns]['items'][idx]
+        original_zh = item.get('zh', '')
+
+        find_text = params["find_text"]
+        replace_text = params["replace_text"]
+        
+        flags = 0 if params["match_case"] else re.IGNORECASE
+        
+        new_zh = re.sub(find_text, replace_text, original_zh, flags=flags)
+
+        if new_zh != original_zh:
+            self.zh_text_input.delete("1.0", tk.END)
+            self.zh_text_input.insert("1.0", new_zh)
+            self._save_current_edit()
+        
+        self.after(10, lambda p=params: self.find_next(p))
+
+    def replace_all(self, params):
+        self._save_current_edit()
+
+        find_text = params["find_text"]
+        replace_text = params["replace_text"]
+        
+        if not messagebox.askyesno("全部替换", f"您确定要将所有 \"{find_text}\" 替换为 \"{replace_text}\" 吗？\n此操作可以被撤销。", parent=self):
+            return
+
+        flags = 0 if params["match_case"] else re.IGNORECASE
+        compiled_re = re.compile(find_text, flags)
+        
+        namespaces_to_search = []
+        if params["scope"] == "current":
+            selection = self.ns_tree.selection()
+            if selection:
+                namespaces_to_search.append(selection[0])
+        else:
+            namespaces_to_search.extend(self.translation_data.keys())
+
+        if not namespaces_to_search:
+            messagebox.showwarning("范围错误", "请先在左侧选择一个项目以确定替换范围。", parent=self)
+            return
+        
+        column_map = {"en": [1], "zh": [2], "all": [0, 1, 2]}
+        column_indices = column_map.get(params["search_column"], [0, 1, 2])
+        
+        replacement_count = 0
+        for ns in namespaces_to_search:
+            for item in self.translation_data[ns]['items']:
+                
+                text_to_check_in = []
+                values = (item['key'], item['en'], item.get('zh', ''))
+                for col_idx in column_indices:
+                    text_to_check_in.append(values[col_idx])
+
+                found_in_scope = any(compiled_re.search(text) for text in text_to_check_in)
+
+                if found_in_scope:
+                    original_zh = item.get('zh', '')
+                    new_zh = compiled_re.sub(replace_text, original_zh)
+                    if new_zh != original_zh:
+                        item['zh'] = new_zh
+                        item['source'] = '手动校对'
+                        replacement_count += 1
+        
+        if replacement_count > 0:
+            self.trans_tree.selection_set() 
+            self.current_selection_info = None
+            self._clear_editor()
+
+            self._record_action(target_iid=None)
+            self._set_dirty(True)
+            self._full_ui_refresh()
+            messagebox.showinfo("操作完成", f"已成功完成 {replacement_count} 次替换。", parent=self)
+        else:
+            messagebox.showinfo("操作完成", "没有找到可替换的文本。", parent=self)
+            
+    def _get_ns_idx_from_iid(self, iid):
+        try:
+            ns, idx_str = iid.rsplit('___', 1)
+            return ns, int(idx_str)
+        except (ValueError, IndexError):
+            return None, None
 
     def _record_action(self, target_iid: str | None):
         if self.undo_stack and self.translation_data == self.undo_stack[-1]:
@@ -172,7 +338,7 @@ class TranslationWorkbench(tk.Toplevel):
         self.redo_targets.clear()
         self._update_history_buttons()
 
-    def _undo(self, event=None):
+    def undo(self, event=None):
         if len(self.undo_stack) > 1:
             self.redo_stack.append(self.undo_stack.pop())
             target_to_reselect = self.undo_targets.pop()
@@ -184,7 +350,7 @@ class TranslationWorkbench(tk.Toplevel):
             self._full_ui_refresh(target_to_reselect)
             self._update_history_buttons()
 
-    def _redo(self, event=None):
+    def redo(self, event=None):
         if self.redo_stack:
             self.undo_stack.append(self.redo_stack.pop())
             target_to_reselect = self.redo_targets.pop()
@@ -273,18 +439,28 @@ class TranslationWorkbench(tk.Toplevel):
             items = data.get('items', [])
             if not items: continue
             
-            untranslated_count = sum(1 for item in items if not item.get('zh', '').strip())
+            untranslated_count = sum(1 for item in items if not item.get('zh', '').strip() and item.get('en', '').strip())
             total_count = len(items)
             completed_count = total_count - untranslated_count
             
-            display_text = f"{ns} ({data.get('jar_name', 'Unknown')})"
+            display_text = data.get('display_name', f"{ns} ({data.get('jar_name', 'Unknown')})")
             self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(untranslated_count, completed_count))
 
     def _update_namespace_summary(self, ns: str):
-        if not self.ns_tree.exists(ns): return
+        if not self.ns_tree.exists(ns):
+            return
+        
         items = self.translation_data[ns].get('items', [])
-        untranslated_count = sum(1 for item in items if not item.get('zh', '').strip())
-        completed_count = len(items) - untranslated_count
+        if not items:
+            self.ns_tree.set(ns, "pending", 0)
+            self.ns_tree.set(ns, "completed", 0)
+            return
+
+        untranslated_count = sum(1 for item in items if not item.get('zh', '').strip() and item.get('en', '').strip())
+        
+        total_count = len(items)
+        completed_count = total_count - untranslated_count
+        
         self.ns_tree.set(ns, "pending", untranslated_count)
         self.ns_tree.set(ns, "completed", completed_count)
 
@@ -294,10 +470,11 @@ class TranslationWorkbench(tk.Toplevel):
         if not selection or not self.ns_tree.exists(selection[0]): return
         ns = selection[0]
         for idx, item_data in enumerate(self.translation_data.get(ns, {}).get('items', [])):
-            source = item_data.get('source', '')
-            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
-                                   tags=(source,))
+            if item_data.get('en', '').strip():
+                source = item_data.get('source', '')
+                self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
+                                       values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                       tags=(source,))
 
     def _on_namespace_selected(self, event=None):
         self._save_current_edit()
@@ -308,7 +485,7 @@ class TranslationWorkbench(tk.Toplevel):
         self._populate_item_list()
         self._clear_editor()
         self._update_ui_state(interactive=True, item_selected=False)
-        self.status_label.config(text=f"已选择模组: {selection[0]}")
+        self.status_label.config(text=f"已选择项目: {selection[0]}")
 
     def _on_item_selected(self, event=None):
         self._save_current_edit()
@@ -316,8 +493,8 @@ class TranslationWorkbench(tk.Toplevel):
         if not selection: return
 
         row_id = selection[0]
-        try: ns, idx_str = row_id.rsplit('___', 1); idx = int(idx_str)
-        except ValueError: return
+        ns, idx = self._get_ns_idx_from_iid(row_id)
+        if ns is None: return
         
         self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': row_id}
         item_data = self.translation_data[ns]['items'][idx]
@@ -335,35 +512,34 @@ class TranslationWorkbench(tk.Toplevel):
             self.zh_text_input.edit_modified(False)
             
     def _save_current_edit(self, record_undo=True):
-        if not self.current_selection_info: return
+        if not self.current_selection_info:
+            return
+
         info = self.current_selection_info
         new_zh_text = self.zh_text_input.get("1.0", "end-1c").strip()
         item = self.translation_data[info['ns']]['items'][info['idx']]
-        
         original_zh = item.get('zh', '').strip()
-        if original_zh == new_zh_text: return
 
-        self._set_dirty(True)
-        item['zh'] = new_zh_text
-        is_now_pending = not new_zh_text
-        
-        new_source = '手动校对' if not is_now_pending else '待翻译'
-        item['source'] = new_source
-        
-        if record_undo:
-            self._record_action(target_iid=info['row_id'])
+        if original_zh != new_zh_text:
+            self._set_dirty(True)
+            item['zh'] = new_zh_text
+            
+            is_now_pending = not new_zh_text and item.get('en', '').strip()
+            new_source = '手动校对' if not is_now_pending else '待翻译'
+            item['source'] = new_source
+            
+            if record_undo:
+                self._record_action(target_iid=info['row_id'])
 
-        self.trans_tree.item(info['row_id'], values=(item['key'], item['en'], item['zh'], new_source), tags=(new_source,))
+        current_source = item.get('source', '待翻译')
+        self.trans_tree.item(info['row_id'], values=(item['key'], item['en'], item['zh'], current_source), tags=(current_source,))
         self._update_namespace_summary(info['ns'])
 
     def _set_dirty(self, is_dirty: bool):
         self.is_dirty = is_dirty
-        title = self.base_title
-        
-        file_name = f" - {Path(self.current_project_path).name}" if self.current_project_path else ""
-        dirty_marker = "*" if self.is_dirty else ""
-        
-        self.title(f"{title}{file_name}{dirty_marker}")
+        self.save_button.config(bootstyle="primary" if is_dirty else "primary-outline")
+        if self.main_window and self.is_dirty:
+            self.main_window._save_current_session()
 
     def _perform_save(self, save_path) -> bool:
         self._save_current_edit()
@@ -385,29 +561,42 @@ class TranslationWorkbench(tk.Toplevel):
             self.status_label.config(text=f"项目已成功保存到: {Path(save_path).name}")
             return True
         except Exception as e:
-            messagebox.showerror("保存失败", f"保存项目文件时出错：\n{e}")
+            messagebox.showerror("保存失败", f"保存项目文件时出错：\n{e}", parent=self)
             return False
 
     def _save_project(self) -> bool:
         path_to_save = self.current_project_path
         if not path_to_save:
-            path_to_save = filedialog.asksaveasfilename(
-                title="保存项目", 
-                defaultextension=".sav", 
-                filetypes=[("项目存档", "*.sav"), ("JSON 文件", "*.json")]
-            )
-            if not path_to_save: 
-                return False
+            return self._save_project_as()
         
         return self._perform_save(path_to_save)
 
-    def _on_close_request(self):
+    def _save_project_as(self) -> bool:
+        path_to_save = filedialog.asksaveasfilename(
+            title="项目另存为",
+            defaultextension=".sav",
+            filetypes=[("项目存档", "*.sav"), ("JSON 文件", "*.json")],
+            initialfile=self.project_name
+        )
+        if not path_to_save:
+            return False
+        
+        return self._perform_save(path_to_save)
+
+    def _on_close_request(self, force_close=False, on_confirm=None):
         self.unbind_all("<Control-z>")
         self.unbind_all("<Control-y>")
-        
-        self._save_current_edit()
+        self.unbind_all("<Control-s>")
 
-        if self.is_dirty:
+        self._save_current_edit()
+        
+        def do_confirm():
+            if on_confirm:
+                on_confirm()
+            elif self.cancel_callback:
+                self.cancel_callback()
+
+        if not force_close and self.is_dirty:
             response = messagebox.askyesnocancel(
                 "保存更改?", 
                 f"项目有未保存的更改，是否要保存？",
@@ -415,18 +604,16 @@ class TranslationWorkbench(tk.Toplevel):
             )
             if response is True:
                 if self._save_project():
-                    self.final_translations = None
-                    self.destroy()
+                    do_confirm()
             elif response is False:
-                self.final_translations = None
-                self.destroy()
-            else:
-                self.bind_all("<Control-z>", self._undo)
-                self.bind_all("<Control-y>", self._redo)
+                do_confirm()
+            else: 
+                self.bind_all("<Control-z>", self.undo)
+                self.bind_all("<Control-y>", self.redo)
+                self.bind_all("<Control-s>", lambda e: self._save_project())
                 return
         else:
-            self.final_translations = None
-            self.destroy()
+            do_confirm()
             
     def _save_and_jump_sequential(self, event=None):
         self._save_and_jump(lambda items, current_id: items[(items.index(current_id) + 1) % len(items)])
@@ -436,11 +623,12 @@ class TranslationWorkbench(tk.Toplevel):
         def find_next_pending(items, current_id):
             start_index = items.index(current_id)
             for row_id in items[start_index+1:] + items[:start_index+1]:
-                ns, idx_str = row_id.rsplit('___', 1)
-                item = self.translation_data[ns]['items'][int(idx_str)]
-                if not item.get('zh', '').strip():
+                ns, idx = self._get_ns_idx_from_iid(row_id)
+                if ns is None: continue
+                item = self.translation_data[ns]['items'][idx]
+                if not item.get('zh', '').strip() and item.get('en', '').strip():
                     return row_id
-            ui_utils.show_info("恭喜", f"模组 '{self.current_selection_info['ns']}' 中已没有待翻译的条目！", parent=self)
+            ui_utils.show_info("恭喜", f"项目 '{self.current_selection_info['ns']}' 中已没有待翻译的条目！", parent=self)
             return None
         self._save_and_jump(find_next_pending)
         return "break"
@@ -476,10 +664,8 @@ class TranslationWorkbench(tk.Toplevel):
             self.ns_tree.selection_set()
             self.trans_tree.selection_set()
 
-        self.ai_translate_button.config(state=base_state)
-        self.save_button.config(state=base_state)
         self.finish_button.config(state=base_state)
-        self.cancel_button.config(state=base_state)
+        self.save_button.config(state=base_state)
         
         if item_selected and interactive:
             self.add_to_dict_btn.config(state="normal")
@@ -492,8 +678,11 @@ class TranslationWorkbench(tk.Toplevel):
         self._set_editor_content("", "")
         
     def _set_editor_content(self, en_text: str, zh_text: str):
-        self.en_text_display.config(state="normal"); self.en_text_display.delete("1.0", "end"); self.en_text_display.insert("1.0", en_text); self.en_text_display.config(state="disabled")
-        self.zh_text_input.config(state="normal"); self.zh_text_input.delete("1.0", "end"); self.zh_text_input.insert("1.0", zh_text)
+        self.en_text_display.delete("1.0", "end")
+        self.en_text_display.insert("1.0", en_text)
+        self.zh_text_input.config(state="normal")
+        self.zh_text_input.delete("1.0", "end")
+        self.zh_text_input.insert("1.0", zh_text)
 
     def _add_to_user_dictionary(self):
         if not self.current_selection_info: return
@@ -502,11 +691,23 @@ class TranslationWorkbench(tk.Toplevel):
         translation = self.zh_text_input.get("1.0", "end-1c").strip()
         if not translation:
             messagebox.showwarning("操作无效", "译文不能为空！", parent=self); return
-        save_by_key = messagebox.askyesnocancel("选择保存模式", f"如何保存这条翻译？\n\n- [是] 按“Key”保存 (最高优先级)\n- [否] 按“原文”保存 (较高优先级)\n- [取消] 不执行任何操作", parent=self)
+        
+        prompt_message = (
+            f"请选择存入个人词典的方式：\n\n"
+            f"[是] = 按 Key 保存\n"
+            f"[否] = 按 原文 保存\n\n"
+            f"按Key保存具有最高匹配优先级。"
+        )
+        save_by_key = messagebox.askyesnocancel("选择保存模式", prompt_message, parent=self)
+        
         if save_by_key is None: return
         user_dict = config_manager.load_user_dict()
-        if save_by_key: user_dict["by_key"][key] = translation; mode_str = f"Key: {key}"
-        else: user_dict["by_origin_name"][origin_name] = translation; mode_str = f"原文: {origin_name}"
+        if save_by_key: 
+            user_dict["by_key"][key] = translation
+            mode_str = f"Key: {key}"
+        else: 
+            user_dict["by_origin_name"][origin_name] = translation
+            mode_str = f"原文: {origin_name}"
         config_manager.save_user_dict(user_dict)
         self.status_label.config(text=f"成功！已将“{translation}”存入个人词典 ({mode_str})")
         self._set_dirty(True)
@@ -517,7 +718,7 @@ class TranslationWorkbench(tk.Toplevel):
         if self.current_selection_info:
             item_data = self.translation_data[self.current_selection_info['ns']]['items'][self.current_selection_info['idx']]
             initial_query = item_data['en']
-        DictionarySearchWindow(self, initial_query=initial_query)
+        DictionarySearchWindow(self.main_window.root, initial_query=initial_query)
         
     def _run_ai_translation_async(self):
         self._save_current_edit()
@@ -528,14 +729,14 @@ class TranslationWorkbench(tk.Toplevel):
 
     def _ai_translation_worker(self):
         try:
-            items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip()]
+            items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip() and item.get('en', '').strip()]
             if not items_to_translate_info:
                 self.after(0, lambda: self.status_label.config(text="没有需要AI翻译的空缺条目。"))
                 self.log_callback("没有需要AI翻译的空缺条目。", "INFO"); return
             
             texts_to_translate = [info['en'] for info in items_to_translate_info]
             s = self.current_settings
-            translator = GeminiTranslator(s['api_keys'], s.get('api_endpoint'))
+            translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
             batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
             total_batches, translations_nested = len(batches), [None] * len(batches)
             
@@ -562,10 +763,6 @@ class TranslationWorkbench(tk.Toplevel):
 
     def _is_valid_translation(self, text: str | None) -> bool:
         if not text or not text.strip():
-            return False
-        if re.search(r'[\u4e00-\u9fff]', text):
-            return True
-        if re.search(r'[a-zA-Z]', text):
             return False
         return True
 
@@ -602,5 +799,6 @@ class TranslationWorkbench(tk.Toplevel):
                 if item.get('zh', '').strip():
                     final_lookup[ns][item['key']] = item['zh']
         
-        self.final_translations = dict(final_lookup)
-        self.destroy()
+        final_translations = dict(final_lookup)
+        if self.finish_callback:
+            self.finish_callback(final_translations, latest_data)

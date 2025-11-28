@@ -4,7 +4,9 @@ import logging
 from utils.dictionary_searcher import DictionarySearcher
 from utils.config_manager import load_config
 from gui import ui_utils
-class DictionarySearchWindow(tk.Toplevel):
+from gui.theme_utils import set_title_bar_theme
+
+class DictionarySearchWindow(ttk.Toplevel):
     SEARCH_MODES = {
         "原文查译文": "en",
         "译文查原文": "zh"
@@ -30,12 +32,15 @@ class DictionarySearchWindow(tk.Toplevel):
         if self.initial_query:
             self.search_var.set(self.initial_query)
             self.after(50, self._perform_search)
+
     def _setup_window(self):
         self.title("社区词典查询")
         self.geometry("800x600")
         self.minsize(600, 400)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        set_title_bar_theme(self, self.parent.style)
+
     def _create_widgets(self):
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill="both", expand=True)
@@ -74,6 +79,7 @@ class DictionarySearchWindow(tk.Toplevel):
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
+
     def _perform_search(self):
         logging.info("UI请求执行搜索...")
         if not self.searcher.is_available():
@@ -108,6 +114,7 @@ class DictionarySearchWindow(tk.Toplevel):
                     item.get('VERSION', '')
                 ))
             logging.info("结果填充完毕。")
+
     def on_close(self):
         logging.info("关闭词典查询窗口...")
         if self.searcher:

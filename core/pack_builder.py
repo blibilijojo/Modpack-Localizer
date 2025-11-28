@@ -6,56 +6,56 @@ import tempfile
 import shutil
 import zipfile
 import os
+import json
+
 class PackBuilder:
-    def _escape_string_for_json(self, text: str) -> str:
-        text = text.replace('\\', '\\\\')
-        text = text.replace('"', '\\"')
-        text = text.replace('\n', '\\n')
-        text = text.replace('\r', '\\r')
-        text = text.replace('\t', '\\t')
-        return text
+    def _build_json_file_robust(self, template_content: str, translations: Dict[str, str]) -> str:
+        kv_pattern = re.compile(r'("((?:[^"\\]|\\.)*)")\s*:\s*("((?:[^"\\]|\\.)*)")')
+
+        def replacer_callback(match: re.Match) -> str:
+            key_with_quotes = match.group(1)
+            original_value_with_quotes = match.group(3)
+
+            try:
+                key = json.loads(key_with_quotes)
+
+                if key in translations:
+                    translated_value = translations[key]
+                    new_value_with_quotes = json.dumps(translated_value, ensure_ascii=False)
+                    return match.group(0).replace(original_value_with_quotes, new_value_with_quotes, 1)
+
+            except (json.JSONDecodeError, KeyError):
+                pass
+            
+            return match.group(0)
+
+        return kv_pattern.sub(replacer_callback, template_content)
+
     def _build_lang_file(self, template_content: str, translations: Dict[str, str]) -> str:
         output_lines = []
         line_regex = re.compile(r"^(\s*)([^#=\s]+)(\s*=\s*)(.*)$")
-        for line in template_content.splitlines():
-            match = line_regex.match(line)
+
+        for line_with_ending in template_content.splitlines(keepends=True):
+            line_content = line_with_ending.rstrip('\r\n')
+            match = line_regex.match(line_content)
+            
             if match:
                 indent, key, separator, original_value = match.groups()
-                if key in translations:
-                    translated_value = str(translations[key]).replace('\n', '\\n')
-                    new_line = f"{indent}{key}{separator}{translated_value}"
-                    output_lines.append(new_line)
-                else:
-                    output_lines.append(line)
+                translated_value = translations.get(key, original_value).replace('\n', '\\n')
+                new_line_content = f"{indent}{key}{separator}{translated_value}"
+                original_ending = line_with_ending[len(line_content):]
+                output_lines.append(new_line_content + original_ending)
             else:
-                output_lines.append(line)
-        output_content = "\n".join(output_lines)
-        if template_content.endswith('\n') and not output_content.endswith('\n'):
-            output_content += '\n'
-        return output_content
-    def _build_json_file_pure_text_replacement(self, template_content: str, translations: Dict[str, str]) -> str:
-        def replacer(match):
-            key_with_quotes = match.group(1)
-            key_content_escaped = match.group(2)
-            separator = match.group(3)
-            try:
-                key = key_content_escaped.encode('latin-1').decode('unicode-escape')
-            except Exception:
-                return match.group(0)
-            if key in translations:
-                translated_text = translations[key]
-                escaped_translated_text = self._escape_string_for_json(translated_text)
-                return f'{key_with_quotes}{separator}"{escaped_translated_text}"'
-            else:
-                return match.group(0)
-        pattern = re.compile(r'("((?:[^"\\]|\\.)*)")(\s*:\s*)("((?:[^"\\]|\\.)*)")')
-        output_content = pattern.sub(replacer, template_content)
-        return output_content
+                output_lines.append(line_with_ending)
+                
+        return "".join(output_lines)
+
     def _sanitize_filename(self, text: str) -> str:
-        first_line = text.splitlines()[0]
+        first_line = text.splitlines()[0] if text else ""
         if not first_line.strip():
             return "GeneratedPack"
         return re.sub(r'[\\/*?:"<>|]', "", first_line).strip()
+
     def _get_unique_path(self, target_path: Path) -> Path:
         if not target_path.exists():
             return target_path
@@ -73,8 +73,9 @@ class PackBuilder:
             if not new_path.exists():
                 return new_path
             counter += 1
+
     def run(self, output_dir: Path, final_translations_lookup_by_ns: dict, pack_settings: dict, namespace_formats: dict, raw_english_files: dict):
-        logging.info(f"--- 开始资源包构建流程 (纯文本替换模式) ---")
+        logging.info(f"--- 开始资源包构建流程 (正则替换模式) ---")
         pack_as_zip = pack_settings.get('pack_as_zip', False)
         pack_description = pack_settings.get('pack_description', 'A Modpack Localization Pack')
         base_name_raw = pack_settings.get('pack_base_name', 'Generated_Pack')
@@ -84,26 +85,26 @@ class PackBuilder:
             logging.info(f"在临时目录中构建资源包内容: {temp_dir}")
             for namespace, template_content in raw_english_files.items():
                 translations = final_translations_lookup_by_ns.get(namespace, {})
-                if not translations:
-                    continue
                 try:
                     lang_dir = temp_dir / "assets" / namespace / "lang"
                     lang_dir.mkdir(parents=True, exist_ok=True)
                     file_format = namespace_formats.get(namespace, 'json')
+                    
                     if file_format == 'json':
-                        output_content = self._build_json_file_pure_text_replacement(template_content, translations)
+                        output_content = self._build_json_file_robust(template_content, translations)
                         target_path = lang_dir / "zh_cn.json"
                     elif file_format == 'lang':
                         output_content = self._build_lang_file(template_content, translations)
                         target_path = lang_dir / "zh_cn.lang"
                     else:
                         continue
+                        
                     target_path.write_text(output_content, encoding='utf-8')
                 except Exception as e:
                     logging.error(f"为 '{namespace}' 构建文件时出错: {e}", exc_info=True)
                     return False, f"构建 '{namespace}' 文件时出错: {e}"
             try:
-                escaped_description = self._escape_string_for_json(pack_description)
+                escaped_description = json.dumps(pack_description, ensure_ascii=False)[1:-1]
                 pack_mcmeta_content = (
                     "{\n"
                     '    "pack": {\n'

@@ -6,8 +6,8 @@ def main():
     """
     应用程序主入口点。
     """
-    config = config_manager.load_config()
-    theme_name = config.get("theme", "litera")
+    # 固定使用亮色主题，不再支持主题切换
+    theme_name = "litera"
     
     root = ttk.Window(themename=theme_name)
     app = MainWindow(root)

@@ -108,6 +108,9 @@ class Orchestrator:
         if workbench.final_translations is not None:
             self.final_translations = workbench.final_translations
             self.final_workbench_data = workbench.translation_data
+            # 更新raw_english_files和namespace_formats，确保再次生成资源包时使用最新数据
+            self.raw_english_files = workbench.raw_english_files
+            self.namespace_formats = workbench.namespace_formats
             self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
             self.update_progress("翻译处理完成，现在可以生成资源包", -10)
         else:
@@ -178,7 +181,7 @@ class Orchestrator:
             )
             if success:
                 self.log(f"资源包生成成功！", "SUCCESS")
-                self.update_progress("资源包生成成功！", 100)
+                self.update_progress("资源包生成成功！", 99)
             else:
                 raise RuntimeError(message)
         except Exception as e:

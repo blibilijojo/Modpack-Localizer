@@ -75,14 +75,19 @@ class AITranslator:
         logging.error("所有API密钥均无法获取模型列表")
         return []
     def translate_batch(self, batch_info: tuple) -> list[str]:
-        (batch_index_inner, batch_inner, model_name, prompt_template) = batch_info
+        # 解析批次信息，处理可选的超时参数
+        if len(batch_info) == 5:
+            batch_index_inner, batch_inner, model_name, prompt_template, ai_stream_timeout = batch_info
+        else:
+            batch_index_inner, batch_inner, model_name, prompt_template = batch_info
+            ai_stream_timeout = 30  # 默认超时时间
         attempt = 0
         while True:
             api_key = self.key_manager.get_key()
             logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
             try:
                 effective_model_name = f"models/{model_name}" if not self.api_endpoint else model_name
-                client = self._get_client(api_key)
+                client = self._get_client(api_key, timeout=ai_stream_timeout)
                 input_dict = dict(enumerate(batch_inner))
                 prompt_content = prompt_template.replace('{input_data_json}', json.dumps(input_dict, ensure_ascii=False))
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}

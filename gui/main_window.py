@@ -1,7 +1,6 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog, scrolledtext
+from tkinter import messagebox, filedialog, scrolledtext, Menu
 import ttkbootstrap as ttk
-from ttkbootstrap import Menu
 import logging
 import threading
 from pathlib import Path
@@ -79,6 +78,9 @@ class ProjectTab:
                 root_window=self.root,
                 log_callback=self.log_message
             )
+            # 初始化Orchestrator的raw_english_files和namespace_formats
+            self.orchestrator.raw_english_files = workbench_state['raw_english_files']
+            self.orchestrator.namespace_formats = workbench_state['namespace_formats']
             finish_text = "完成并生成资源包"
         
         elif self.project_type == "quest":
@@ -301,7 +303,14 @@ class ProjectTab:
             self.progress_bar.config(bootstyle="info-striped")
             if percentage >= 0: self.progress_var.set(percentage)
 
-            if percentage == 100: self._reset_ui_after_workflow("success")
+            if percentage == 100: 
+                # 仅当翻译处理完成时才重置UI，资源包生成使用99%
+                self._reset_ui_after_workflow("success")
+            elif percentage == 99:
+                # 资源包生成成功，重置UI，移除加载界面，保持工作台可见
+                self._reset_ui_after_workflow("success")
+                self.status_var.set("资源包生成成功！您可以继续修改或再次生成。")
+                self.progress_bar.config(bootstyle="success")
             elif percentage < 0:
                 status_map = {-1: "error", -2: "cancelled", -10: "continue"}
                 final_status = status_map.get(percentage, "error")
@@ -421,8 +430,7 @@ class ProjectTab:
         ttk.Label(self.loading_frame, text="正在处理中，请稍候...", font="-size 14").pack(pady=10)
         self.root.update_idletasks()
         
-        if not self.log_pane_visible: self._toggle_log_pane()
-        
+        # 移除自动展开日志的功能，保留日志清除功能
         self.log_text.config(state="normal")
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state="disabled")
@@ -495,6 +503,9 @@ class MainWindow:
 
         self._create_menu()
         self._create_widgets()
+        
+        # 在创建完所有组件后再更新菜单状态
+        self.update_menu_state()
 
         from utils.logger_setup import setup_logging
         setup_logging(self._dispatch_log_to_active_tab)
@@ -538,65 +549,135 @@ class MainWindow:
              self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
 
     def _create_menu(self):
-        self.menu_bar_container = ttk.Frame(self.root)
-        self.menu_bar_container.pack(side="top", fill="x")
-
-        menu_buttons_frame = ttk.Frame(self.menu_bar_container)
-        menu_buttons_frame.pack()
-
-        self.file_menubutton = ttk.Menubutton(menu_buttons_frame, text="文件", bootstyle="toolbutton")
-        self.file_menubutton.pack(side="left", padx=(1, 0))
-        file_menu = Menu(self.file_menubutton, tearoff=0)
-        self.file_menubutton["menu"] = file_menu
-        file_menu.add_command(label="返回项目选择", command=self._reset_active_tab)
-        file_menu.add_separator()
-        file_menu.add_command(label="新建标签页", command=self._add_new_tab)
-        file_menu.add_command(label="关闭当前标签页", command=lambda: self._close_tab_by_id(self.notebook.select()))
+        """创建Windows原生菜单栏"""
+        current_theme = self.root.style.theme_use()
+        is_dark = current_theme == "darkly"
         
-        self.edit_menubutton = ttk.Menubutton(menu_buttons_frame, text="编辑", state="disabled", bootstyle="toolbutton")
-        self.edit_menubutton.pack(side="left")
-        edit_menu = Menu(self.edit_menubutton, tearoff=0)
-        self.edit_menubutton["menu"] = edit_menu
-        edit_menu.add_command(label="撤销 (Ctrl+Z)", command=lambda: self._call_workbench_method('undo'))
-        edit_menu.add_command(label="重做 (Ctrl+Y)", command=lambda: self._call_workbench_method('redo'))
-        edit_menu.add_separator()
-        edit_menu.add_command(label="查找和替换 (Ctrl+F)", command=self._open_find_replace)
-
-        self.view_menubutton = ttk.Menubutton(menu_buttons_frame, text="视图", bootstyle="toolbutton")
-        self.view_menubutton.pack(side="left")
-        view_menu = Menu(self.view_menubutton, tearoff=0)
-        self.view_menubutton["menu"] = view_menu
-        view_menu.add_command(label="切换日间/夜间模式", command=self._toggle_theme)
-
-        self.config_menubutton = ttk.Menubutton(menu_buttons_frame, text="配置", bootstyle="toolbutton")
-        self.config_menubutton.pack(side="left")
-        config_menu = Menu(self.config_menubutton, tearoff=0)
-        self.config_menubutton["menu"] = config_menu
-        config_menu.add_command(label="打开设置面板", command=self.open_settings_window)
+        # 直接使用主题的具体颜色值
+        if is_dark:
+            # 暗黑模式颜色
+            menu_bg = "#1a1a1a"
+            menu_fg = "#ffffff"
+            active_bg = "#404040"
+            active_fg = "#ffffff"
+        else:
+            # 亮色模式颜色
+            menu_bg = "#f0f0f0"
+            menu_fg = "#000000"
+            active_bg = "#d0d0d0"
+            active_fg = "#000000"
         
-        self.tools_menubutton = ttk.Menubutton(menu_buttons_frame, text="工具", state="disabled", bootstyle="toolbutton")
-        self.tools_menubutton.pack(side="left")
-        tools_menu = Menu(self.tools_menubutton, tearoff=0)
-        self.tools_menubutton["menu"] = tools_menu
-        tools_menu.add_command(label="AI 翻译所有待译项", command=lambda: self._call_workbench_method('_run_ai_translation_async'))
-        tools_menu.add_command(label="查询词典", command=lambda: self._call_workbench_method('_open_dict_search'))
-        tools_menu.add_separator()
-        tools_menu.add_command(label="存入个人词典", command=lambda: self._call_workbench_method('_add_to_user_dictionary'))
+        # 创建主菜单，并直接设置颜色
+        self.menu_bar = Menu(self.root, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.root.config(menu=self.menu_bar)
         
-        self.global_tools_menubutton = ttk.Menubutton(menu_buttons_frame, text="全局工具", bootstyle="toolbutton")
-        self.global_tools_menubutton.pack(side="left")
-        global_tools_menu = Menu(self.global_tools_menubutton, tearoff=0)
-        self.global_tools_menubutton["menu"] = global_tools_menu
-        from gui.dictionary_search_window import DictionarySearchWindow
+        # 文件菜单，并直接设置颜色
+        self.file_menu = Menu(self.menu_bar, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.menu_bar.add_cascade(label="文件", menu=self.file_menu)
+        self.file_menu.add_command(label="新建项目/标签页", command=self._add_new_tab)
+        self.file_menu.add_command(label="返回项目选择", command=self._reset_active_tab)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="关闭当前标签页", command=lambda: self._close_tab_by_id(self.notebook.select()))
+        
+        # 编辑菜单，并直接设置颜色
+        self.edit_menu = Menu(self.menu_bar, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.menu_bar.add_cascade(label="编辑", menu=self.edit_menu)
+        self.edit_menu.add_command(label="撤销 (Ctrl+Z)", command=lambda: self._call_workbench_method('undo'))
+        self.edit_menu.add_command(label="重做 (Ctrl+Y)", command=lambda: self._call_workbench_method('redo'))
+        self.edit_menu.add_separator()
+        self.edit_menu.add_command(label="查找和替换 (Ctrl+F)", command=self._open_find_replace)
+
+        # 工具菜单，并直接设置颜色
+        self.tools_menu = Menu(self.menu_bar, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.menu_bar.add_cascade(label="工具", menu=self.tools_menu)
+        self.tools_menu.add_command(label="AI 翻译所有待译项", command=lambda: self._call_workbench_method('_run_ai_translation_async'))
+        self.tools_menu.add_command(label="查询词典", command=lambda: self._call_workbench_method('_open_dict_search'))
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label="存入个人词典", command=lambda: self._call_workbench_method('_add_to_user_dictionary'))
+        
+        # 全局工具菜单已整合到工具菜单中
         from gui.user_dictionary_editor import UserDictionaryEditor
-        global_tools_menu.add_command(label="词典查询", command=lambda: DictionarySearchWindow(self.root))
-        global_tools_menu.add_command(label="编辑个人词典", command=lambda: UserDictionaryEditor(self.root))
+        # 在工具菜单中添加编辑个人词典选项
+        self.tools_menu.add_command(label="编辑个人词典", command=lambda: UserDictionaryEditor(self.root))
+        
+        # 视图菜单已移除，功能已整合到底栏
 
-        self.help_menubutton = ttk.Menubutton(menu_buttons_frame, text="帮助", bootstyle="toolbutton")
-        self.help_menubutton.pack(side="left")
-        help_menu = Menu(self.help_menubutton, tearoff=0)
-        self.help_menubutton["menu"] = help_menu
-        help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
+        # 设置菜单，并直接设置颜色
+        self.settings_menu = Menu(self.menu_bar, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.menu_bar.add_cascade(label="设置", menu=self.settings_menu)
+        self.settings_menu.add_command(label="打开设置面板", command=self.open_settings_window)
+        
+        # 帮助菜单，并直接设置颜色
+        self.help_menu = Menu(self.menu_bar, tearoff=0, 
+                            bg=menu_bg, fg=menu_fg,
+                            activebackground=active_bg, activeforeground=active_fg)
+        self.menu_bar.add_cascade(label="帮助", menu=self.help_menu)
+        self.help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
+        self.help_menu.add_command(label="检查更新", command=self._check_for_updates)
+        self.help_menu.add_separator()
+        self.help_menu.add_command(label="关于", command=self._show_about)
+    
+    def _update_menu_theme(self):
+        """更新菜单主题以适配暗黑模式"""
+        # 重新创建整个菜单，以便应用新的主题颜色
+        self._create_menu()
+        # 更新菜单状态
+        self.update_menu_state()
+        # 刷新窗口以确保变更生效
+        self.root.update_idletasks()
+    
+    def update_menu_state(self, event=None):
+        """更新菜单状态"""
+        current_tab = self._get_current_tab()
+        state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
+        
+        # 为编辑菜单的每个命令设置状态
+        self.edit_menu.entryconfig(0, state=state)  # 撤销
+        self.edit_menu.entryconfig(1, state=state)  # 重做
+        self.edit_menu.entryconfig(3, state=state)  # 查找和替换
+        
+        # 为工具菜单的每个命令设置状态
+        self.tools_menu.entryconfig(0, state=state)  # AI 翻译所有待译项
+        self.tools_menu.entryconfig(1, state=state)  # 查询词典
+        self.tools_menu.entryconfig(3, state=state)  # 存入个人词典
+        self.tools_menu.entryconfig(4, state="normal")  # 编辑个人词典 - 始终可用
+        
+        if self.find_replace_window and self.find_replace_window.winfo_exists():
+            self.find_replace_window.lift()
+    
+    def _check_for_updates(self):
+        """检查程序更新"""
+        self._dispatch_log_to_active_tab("正在检查更新...", "INFO")
+        from utils import update_checker
+        threading.Thread(target=lambda: self._check_update_worker(update_checker), daemon=True).start()
+    
+    def _check_update_worker(self, update_checker):
+        """检查更新的工作线程"""
+        try:
+            latest_version = update_checker.check_for_updates()
+            from _version import __version__
+            if latest_version and latest_version > __version__:
+                self._dispatch_log_to_active_tab(f"发现新版本: {latest_version}（当前版本: {__version__}），请访问项目主页下载更新。", "INFO")
+            else:
+                self._dispatch_log_to_active_tab("当前已是最新版本。", "INFO")
+        except Exception as e:
+            self._dispatch_log_to_active_tab(f"检查更新失败: {str(e)}", "ERROR")
+    
+    def _show_about(self):
+        """显示关于对话框"""
+        from _version import __version__
+        about_text = f"Minecraft 整合包汉化工坊 Pro\n\n版本: v{__version__}\n\nGitHub: https://github.com/blibilijojo/Modpack-Localizer\n\n用于快速汉化 Minecraft 整合包和模组的工具。"
+        messagebox.showinfo("关于", about_text, parent=self.root)
 
     def _toggle_theme(self):
         current_theme = self.root.style.theme_use()
@@ -614,11 +695,29 @@ class MainWindow:
 
         self.root.update_idletasks()
         
+        # 关键修复：在Windows平台上，我们需要重新创建窗口来确保菜单栏颜色正确
+        # 首先保存当前窗口状态
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        
+        # 设置标题栏主题
         set_title_bar_theme(self.root, self.root.style)
         if self.settings_window and self.settings_window.winfo_exists():
             set_title_bar_theme(self.settings_window, self.root.style)
         if self.find_replace_window and self.find_replace_window.winfo_exists():
             set_title_bar_theme(self.find_replace_window, self.root.style)
+        
+        # 隐藏并重新显示窗口，这会触发Windows重新绘制窗口，包括菜单栏
+        self.root.withdraw()
+        self.root.deiconify()
+        
+        # 恢复窗口位置和大小
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # 更新菜单主题
+        self._update_menu_theme()
 
     def _call_workbench_method(self, method_name):
         current_tab = self._get_current_tab()
@@ -626,14 +725,6 @@ class MainWindow:
             method = getattr(current_tab.workbench_instance, method_name, None)
             if callable(method):
                 method()
-
-    def update_menu_state(self, event=None):
-        current_tab = self._get_current_tab()
-        state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
-        self.edit_menubutton.config(state=state)
-        self.tools_menubutton.config(state=state)
-        if self.find_replace_window and self.find_replace_window.winfo_exists():
-            self.find_replace_window.lift()
 
     def open_settings_window(self):
         if self.settings_window and self.settings_window.winfo_exists():
@@ -776,7 +867,11 @@ class MainWindow:
         del self.project_tabs[project_tab_id_to_close]
         
         if tab_id_to_select:
-            self.root.after(10, lambda: self.notebook.select(tab_id_to_select))
+            try:
+                self.notebook.select(tab_id_to_select)
+            except tk.TclError:
+                # 如果要选择的标签页不存在，跳过选择操作
+                pass
         
         if not self.project_tabs and not force:
              self._add_new_tab()

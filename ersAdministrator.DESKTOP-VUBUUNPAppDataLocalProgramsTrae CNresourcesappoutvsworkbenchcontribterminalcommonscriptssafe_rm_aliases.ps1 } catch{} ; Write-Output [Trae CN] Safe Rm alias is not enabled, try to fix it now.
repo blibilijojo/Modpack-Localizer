@@ -1,0 +1,10 @@
+[33m3b14198[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m feat: 优化翻译工作台功能并修复多个问题
+[33m305e25e[m[33m ([m[1;33mtag: [m[1;33mv2.3.1[m[33m)[m feat: 优化版本解析和错误处理，新增JSON工具函数
+[33mc937654[m[33m ([m[1;33mtag: [m[1;33mv2.3.0[m[33m)[m Bump version to 2.3.0
+[33md78d2ea[m Merge branch 'main' of https://github.com/blibilijojo/Modpack-Localizer
+[33m5b4e14e[m feat: 重构代码并添加新功能
+[33m84c3ba1[m Update README.md
+[33m32f98a7[m[33m ([m[1;33mtag: [m[1;33mv2.2.0[m[33m)[m Finalize changes for version 2.2.0
+[33m48cfcb1[m chore: 更新
+[33m74ca6da[m Update README.md
+[33m16f9e2c[m Delete 汉化包测试 directory

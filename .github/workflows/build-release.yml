@@ -26,6 +26,15 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
+    - name: Check directory and files
+      run: |
+        Write-Output "Current directory: $(Get-Location)"
+        Write-Output "Files in current directory:"
+        Get-ChildItem
+        Write-Output "Checking if updater.py exists:"
+        if (Test-Path -Path "updater.py" -PathType Leaf) { Write-Output "YES" } else { Write-Output "NO" }
+        Get-Content updater.py -ErrorAction SilentlyContinue || Write-Output "Cannot read updater.py"
+
     - name: Build updater.exe
       run: |
         pyinstaller --noconfirm --onefile --name "updater" --hidden-import "psutil" updater.py

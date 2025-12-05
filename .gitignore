@@ -22,3 +22,10 @@ ModpackLocalizer.log
 updater_error.log
 ai_error_logs/
 汉化包测试/
+
+# Build outputs
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc

@@ -13,7 +13,7 @@ import re
 import copy
 
 from utils import config_manager
-from services.gemini_translator import AITranslator
+from services.ai_translator import AITranslator
 from gui import ui_utils
 from gui.custom_widgets import ToolTip
 from gui.find_replace_dialog import FindReplaceDialog

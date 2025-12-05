@@ -2,17 +2,17 @@
     "//说明": "这是Modpack Localizer Pro的配置文件模板。请复制本文件并重命名为 'config.json'，然后填入您自己的信息。",
 
     "api_keys": [
-        "在此处填入你的第一个Google Gemini API密钥",
+        "在此处填入你的第一个API密钥（兼容OpenAI格式）",
         "如果需要，可以在这里添加第二个、第三个...程序会在失败时自动轮换"
     ],
-    "model": "gemini-1.5-flash-latest",
+    "model": "gpt-3.5-turbo",
     "model_list": [
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest"
+        "gpt-3.5-turbo",
+        "gpt-4-turbo"
     ],
     "prompt": "你是一名精通《我的世界》(Minecraft) 游戏模组的专业汉化者。\n请将输入JSON数组中的每一个英文短语或句子精确地翻译成简体中文。\n\n核心翻译规则：\n- **精准翻译**: 必须保持原文的技术术语、游戏机制和语气。\n- **格式保留**: 必须完整保留原文中的所有格式化代码（例如 %s, %d, §a, \\n 等）。\n\n你的回复必须只包含一个JSON数组，数组元素为翻译后的字符串。\n\n输入: {input_texts}",
     
-    "//自定义API服务器地址": "可选。如果你使用了代理或第三方兼容Gemini的API服务，请在此处填写其地址。例如: https://api.proxy.com/v1",
+    "//自定义API服务器地址": "可选。如果你使用了代理或第三方兼容OpenAI的API服务，请在此处填写其地址。例如: https://api.proxy.com/v1",
     "api_endpoint": "",
     
     "use_grounding": false,

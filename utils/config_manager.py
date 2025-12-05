@@ -18,7 +18,7 @@ DEFAULT_PROMPT = """
 """
 
 DEFAULT_CONFIG = {
-    "api_keys": [], "api_keys_raw": "", "model": "gemini-1.5-flash-latest", "model_list": [],
+    "api_keys": [], "api_keys_raw": "", "model": "gpt-3.5-turbo", "model_list": [],
     "prompt": DEFAULT_PROMPT.strip(),
     "api_endpoint": "", "use_grounding": False, "ai_batch_size": 50, "ai_max_threads": 4,
     "ai_stream_timeout": 30,

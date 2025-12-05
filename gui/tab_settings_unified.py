@@ -373,7 +373,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self._save_all_settings()
         
     def _fetch_models_async(self):
-        from services.gemini_translator import AITranslator
+        from services.ai_translator import AITranslator
         service_config = config_manager.load_config()
         api_keys = service_config.get('api_keys', [])
         if not api_keys or not any(api_keys):
@@ -384,7 +384,7 @@ CRITICAL: 致命错误，程序即将崩溃
         threading.Thread(target=self._fetch_worker, daemon=True).start()
 
     def _fetch_worker(self):
-        from services.gemini_translator import AITranslator
+        from services.ai_translator import AITranslator
         try:
             service_config = config_manager.load_config()
             translator = AITranslator(service_config['api_keys'], service_config.get('api_endpoint'))

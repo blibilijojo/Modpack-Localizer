@@ -49,12 +49,8 @@ class AITranslator:
         if self.api_endpoint:
             return openai.OpenAI(base_url=self.api_endpoint, api_key=api_key, timeout=timeout)
         else:
-            return openai.OpenAI(
-                base_url="https://generativelanguage.googleapis.com/v1beta",
-                api_key="non_empty_dummy_value",
-                default_query={"key": api_key},
-                timeout=timeout
-            )
+            # 使用标准OpenAI API配置
+            return openai.OpenAI(api_key=api_key, timeout=timeout)
     def fetch_models(self) -> list[str]:
         logging.info(f"正在获取模型列表...")
         for key in cycle(self.all_keys):
@@ -63,8 +59,11 @@ class AITranslator:
                 models_response = client.models.list()
                 def get_model_weight(model_name: str) -> int:
                     name = model_name.lower()
-                    if "gemini-1.5-pro" in name: return 9
-                    if "gemini-1.5-flash" in name: return 8
+                    # 通用模型权重排序，优先考虑gpt-4系列，然后是gpt-3.5系列，最后是其他模型
+                    if "gpt-4" in name: return 10
+                    if "gpt-3.5" in name: return 9
+                    if "gpt-" in name: return 8
+                    # 其他模型根据名称长度排序
                     return 0
                 model_list = models_response.data if hasattr(models_response, 'data') else models_response.models
                 sorted_models = sorted([m.id.replace("models/", "") for m in model_list], key=lambda x: (-get_model_weight(x), x))
@@ -86,7 +85,7 @@ class AITranslator:
             api_key = self.key_manager.get_key()
             logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
             try:
-                effective_model_name = f"models/{model_name}" if not self.api_endpoint else model_name
+                effective_model_name = model_name
                 client = self._get_client(api_key, timeout=ai_stream_timeout)
                 input_dict = dict(enumerate(batch_inner))
                 prompt_content = prompt_template.replace('{input_data_json}', json.dumps(input_dict, ensure_ascii=False))

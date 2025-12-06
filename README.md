@@ -12,12 +12,12 @@ Modpack Localizer Pro 是一款专业的 Minecraft 整合包汉化工作台，�
 | 交互式翻译工作台 | 社区词典查询 |
 | :---: | :---: |
 | 专业的三栏式布局，方便您按模组对上千条文本进行高效的审查、编辑和校对。 | 强大的原文/译文双向模糊搜索，快速找到您需要的参考翻译。 |
-| 【此处需添加：交互式翻译工作台界面截图，展示三栏式布局和翻译功能】 | 【此处需添加：社区词典查询界面截图，展示搜索功能和结果展示】 |
+|<img width="1202" height="864" alt="pythonw_Mj56FPX5Md" src="https://github.com/user-attachments/assets/c5e34918-f33d-49e7-9b31-7443b685ce86" />|<img width="802" height="639" alt="pythonw_FNGnk6F7nZ" src="https://github.com/user-attachments/assets/032c2b05-fbf8-4228-8b85-8ce42667c5a2" />|
 
 | 专业任务汉化 | 灵活的资源包设置 |
 | :---: | :---: |
 | 自动检测并处理 FTB Quests 和 Better Questing 任务文件，实现无损汉化。 | 通过预案系统和动态占位符，轻松管理和生成满足不同需求的资源包。 |
-| 【此处需添加：任务汉化界面截图，展示任务文件处理功能】 | 【此处需添加：资源包设置界面截图，展示预案管理和动态占位符功能】 |
+|<img width="1202" height="864" alt="pythonw_koGSg1oskG" src="https://github.com/user-attachments/assets/c81c74ac-d3da-467d-8e12-38dadfeb6b35" />|<img width="802" height="693" alt="pythonw_4WgPjvsVr2" src="https://github.com/user-attachments/assets/3638e48f-3524-4dff-9ac7-212e2e809425" />|
 
 </div>
 

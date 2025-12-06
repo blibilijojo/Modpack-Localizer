@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 from utils import config_manager
 from gui.custom_widgets import ToolTip
@@ -30,7 +31,7 @@ class UserDictionaryEditor(ttk.Toplevel):
         main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         main_pane.pack(fill="both", expand=True, padx=10, pady=10)
         left_frame = ttk.Frame(main_pane)
-        tree_frame = ttk.LabelFrame(left_frame, text="词典条目")
+        tree_frame = tk_ttk.LabelFrame(left_frame, text="词典条目")
         tree_frame.pack(fill="both", expand=True, pady=(0, 5))
         self.tree = ttk.Treeview(tree_frame, columns=("type", "key_origin", "translation"), show="headings")
         self.tree.heading("type", text="类型", anchor="w")
@@ -50,7 +51,7 @@ class UserDictionaryEditor(ttk.Toplevel):
         self.delete_btn = ttk.Button(action_frame, text="删除条目", command=self._delete_entry, bootstyle="danger-outline", state="disabled")
         self.delete_btn.pack(side="left", padx=5)
         main_pane.add(left_frame, weight=2)
-        editor_frame = ttk.LabelFrame(main_pane, text="编辑区域", padding=10)
+        editor_frame = tk_ttk.LabelFrame(main_pane, text="编辑区域", padding=10)
         editor_frame.columnconfigure(1, weight=1)
         ttk.Label(editor_frame, text="类型:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.type_var = tk.StringVar()

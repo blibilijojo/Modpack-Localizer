@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 from gui.theme_utils import set_title_bar_theme
 
@@ -43,24 +44,24 @@ class FindReplaceDialog(tk.Toplevel):
         options_container = ttk.Frame(main_frame)
         options_container.pack(fill="x", pady=10)
         
-        options_frame = ttk.LabelFrame(options_container, text="选项", padding=10)
+        options_frame = tk_ttk.LabelFrame(options_container, text="选项", padding=10)
         options_frame.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
         ttk.Checkbutton(options_frame, text="大小写匹配", variable=self.match_case_var).pack(anchor="w")
         ttk.Checkbutton(options_frame, text="循环查找", variable=self.wrap_around_var).pack(anchor="w")
         
-        column_frame = ttk.LabelFrame(options_container, text="列范围", padding=10)
+        column_frame = tk_ttk.LabelFrame(options_container, text="列范围", padding=10)
         column_frame.pack(side="left", fill="x", expand=True, padx=5)
         ttk.Radiobutton(column_frame, text="全部列", variable=self.search_column_var, value="all").pack(anchor="w")
         ttk.Radiobutton(column_frame, text="原文", variable=self.search_column_var, value="en").pack(anchor="w")
         ttk.Radiobutton(column_frame, text="译文", variable=self.search_column_var, value="zh").pack(anchor="w")
 
-        scope_frame = ttk.LabelFrame(options_container, text="范围", padding=10)
+        scope_frame = tk_ttk.LabelFrame(options_container, text="范围", padding=10)
         scope_frame.pack(side="left", fill="x", expand=True, padx=5)
         ttk.Radiobutton(scope_frame, text="当前模组", variable=self.search_scope_var, value="current").pack(anchor="w")
         ttk.Radiobutton(scope_frame, text="所有模组", variable=self.search_scope_var, value="all").pack(anchor="w")
 
-        direction_frame = ttk.LabelFrame(options_container, text="方向", padding=10)
+        direction_frame = tk_ttk.LabelFrame(options_container, text="方向", padding=10)
         direction_frame.pack(side="left", fill="x", expand=True, padx=(5, 0))
         ttk.Radiobutton(direction_frame, text="向上", variable=self.search_direction_var, value="up").pack(anchor="w")
         ttk.Radiobutton(direction_frame, text="向下", variable=self.search_direction_var, value="down").pack(anchor="w")

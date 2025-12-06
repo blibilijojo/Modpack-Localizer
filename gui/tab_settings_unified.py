@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
+from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 from gui import ui_utils, custom_widgets
 from utils import config_manager
@@ -63,7 +64,7 @@ class UnifiedSettingsTab(ttk.Frame):
         self.pack_settings_manager = TabPackSettings(parent)
 
     def _create_basic_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="基础设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="基础设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", ""))
@@ -89,11 +90,11 @@ class UnifiedSettingsTab(ttk.Frame):
         self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
 
     def _create_advanced_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="高级设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="高级设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
     def _create_log_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="日志设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="日志设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
         # 日志设置说明
@@ -145,7 +146,7 @@ CRITICAL: 致命错误，程序即将崩溃
         ttk.Label(frame, text="日志文件默认保存在程序运行目录下，可用于排查程序运行中遇到的问题。").pack(anchor="w", pady=5, padx=0, fill="x")
 
     def _create_resource_pack_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="资源包设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="资源包设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
         self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
@@ -162,7 +163,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self.download_dict_button.pack(side="left", padx=(5, 0))
 
     def _create_community_packs_list(self, parent):
-        packs_frame = ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
+        packs_frame = tk_ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
         packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         list_container = ttk.Frame(packs_frame)
         list_container.pack(fill="both", expand=True)
@@ -187,7 +188,7 @@ CRITICAL: 致命错误，程序即将崩溃
         down_btn.pack(side="left", padx=2)
 
     def _create_ai_service_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="AI 服务设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="AI 服务设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
         
         ttk.Label(frame, text="API 密钥 (多个密钥可用 换行 或 , 分隔):").pack(anchor="w")
@@ -203,7 +204,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self.api_endpoint_var.trace_add("write", lambda *args: self._save_all_settings())
     
     def _create_ai_parameters_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="AI 参数设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="AI 参数设置", padding="10")
         frame.pack(fill="both", expand=True, pady=5, padx=5)
         
         self.model_var = tk.StringVar(value=self.config.get("model", "请先获取模型"))
@@ -218,7 +219,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self.fetch_models_button = ttk.Button(model_frame, text="获取模型列表", command=self._fetch_models_async, bootstyle="info-outline")
         self.fetch_models_button.pack(side='left')
         
-        perf_frame = ttk.LabelFrame(frame, text="性能与重试设置", padding="10")
+        perf_frame = tk_ttk.LabelFrame(frame, text="性能与重试设置", padding="10")
         perf_frame.pack(fill='x', expand=True, pady=10)
         perf_frame.columnconfigure(1, weight=1)
         perf_frame.columnconfigure(3, weight=1)

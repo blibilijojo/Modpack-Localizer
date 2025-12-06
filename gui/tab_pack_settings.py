@@ -23,7 +23,7 @@ class TabPackSettings:
         self.frame = parent_frame
         self.config = config_manager.load_config()
 
-        preset_frame = ttk.LabelFrame(self.frame, text="预案管理", padding=10)
+        preset_frame = tk_ttk.LabelFrame(self.frame, text="预案管理", padding=10)
         preset_frame.pack(fill="x", pady=5)
         self.preset_var = tk.StringVar()
         self.preset_combo = ttk.Combobox(preset_frame, textvariable=self.preset_var, state="readonly")
@@ -39,7 +39,7 @@ class TabPackSettings:
         delete_btn = ttk.Button(preset_btn_frame, text="删除", command=self._delete_preset, bootstyle="danger-outline", width=6)
         delete_btn.pack(side="left", padx=2)
 
-        metadata_frame = ttk.LabelFrame(self.frame, text="预案内容 (pack.mcmeta & pack.png)", padding=10)
+        metadata_frame = tk_ttk.LabelFrame(self.frame, text="预案内容 (pack.mcmeta & pack.png)", padding=10)
         metadata_frame.pack(fill="x", pady=10)
         metadata_frame.columnconfigure(1, weight=1)
         self.pack_format_var = tk.StringVar()

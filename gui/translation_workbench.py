@@ -1,6 +1,7 @@
 import tkinter as tk
-import ttkbootstrap as ttk
 from tkinter import scrolledtext, messagebox, filedialog, simpledialog
+from tkinter import ttk as tk_ttk
+import ttkbootstrap as ttk
 from collections import defaultdict
 import json
 from datetime import datetime
@@ -123,7 +124,7 @@ class TranslationWorkbench(ttk.Frame):
         self.trans_tree.bind("<<TreeviewSelect>>", self._on_item_selected)
         right_pane.add(table_container, weight=3)
         
-        editor_frame = ttk.LabelFrame(right_pane, text="翻译编辑器", padding=10)
+        editor_frame = tk_ttk.LabelFrame(right_pane, text="翻译编辑器", padding=10)
         editor_frame.columnconfigure(1, weight=1)
         ttk.Label(editor_frame, text="原文:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=5, pady=5)
         

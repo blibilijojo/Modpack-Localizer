@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog, scrolledtext, Menu
+from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 import logging
 import threading
@@ -112,7 +113,7 @@ class ProjectTab:
         self.content_frame = ttk.Frame(self.frame)
         self.content_frame.grid(row=0, column=0, sticky="nsew")
 
-        self.log_container_frame = ttk.LabelFrame(self.frame, text="状态与日志", padding="10")
+        self.log_container_frame = tk_ttk.LabelFrame(self.frame, text="状态与日志", padding="10")
         self.log_container_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(0, 5))
         
         self.log_text = scrolledtext.ScrolledText(self.log_container_frame, height=8, state="disabled", wrap="word", font=("Consolas", 9), relief="flat")
@@ -172,7 +173,7 @@ class ProjectTab:
         container.columnconfigure((0, 1), weight=1, uniform="group1")
         container.rowconfigure(0, weight=1)
 
-        new_project_frame = ttk.LabelFrame(container, text="开始新项目", padding=20)
+        new_project_frame = tk_ttk.LabelFrame(container, text="开始新项目", padding=20)
         new_project_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         new_project_frame.rowconfigure(2, weight=1)
 
@@ -186,7 +187,7 @@ class ProjectTab:
 
         ttk.Button(new_project_frame, text="下一步", command=self._show_setup_view, bootstyle="primary").pack(side="bottom", anchor="se")
 
-        load_project_frame = ttk.LabelFrame(container, text="继续已有项目", padding=20)
+        load_project_frame = tk_ttk.LabelFrame(container, text="继续已有项目", padding=20)
         load_project_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         load_project_frame.rowconfigure(0, weight=1)
         load_project_frame.columnconfigure(0, weight=1)
@@ -201,7 +202,7 @@ class ProjectTab:
         container_wrapper = ttk.Frame(self.content_frame)
         container_wrapper.pack(expand=True)
 
-        container = ttk.LabelFrame(container_wrapper, padding=20)
+        container = tk_ttk.LabelFrame(container_wrapper, padding=20)
         container.pack(fill="both", expand=True)
         container.columnconfigure(1, weight=1)
 

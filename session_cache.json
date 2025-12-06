@@ -10,6 +10,7 @@
             "workbench_data": {
                 "abnormals_core": {
                     "jar_name": "abnormals_core-1.16.5-3.3.1.jar",
+                    "display_name": "abnormals_core (abnormals_core-1.16.5-3.3.1.jar)",
                     "items": [
                         {
                             "key": "abnormals_core.config.smooth_sky_color",
@@ -38,8 +39,8 @@
                         {
                             "key": "abnormals_core.config.slabfish_hat.enabled.tooltip",
                             "en": "Toggles the Slabfish hat. Available to Tier 2+ patrons.",
-                            "zh": "",
-                            "source": "\u5f85\u7ffb\u8bd1"
+                            "zh": "\u677f\u9c7c\u5f00\u5173\u5e3d\u5b50\u677f\u9c7c\u5e3d\u5b50\u5e3d\u5b50\u677f\u9c7c\u5e3d\u5b50",
+                            "source": "\u624b\u52a8\u6821\u5bf9"
                         },
                         {
                             "key": "abnormals_core.config.slabfish_hat.sweater",
@@ -107,11 +108,11 @@
                             "zh": "\u8239",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "abnormals_core (abnormals_core-1.16.5-3.3.1.jar)"
+                    ]
                 },
                 "amfd": {
                     "jar_name": "Alex's Delight 1.1.3 - Forge 1.16.5.jar",
+                    "display_name": "amfd (Alex's Delight 1.1.3 - Forge 1.16.5.jar)",
                     "items": [
                         {
                             "key": "item.amfd.lobster_linguini",
@@ -167,11 +168,11 @@
                             "zh": "\u86c6\u866b\u6c99\u62c9",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "amfd (Alex's Delight 1.1.3 - Forge 1.16.5.jar)"
+                    ]
                 },
                 "alexsmobsmusic": {
                     "jar_name": "Alex's Mobs music mod.jar",
+                    "display_name": "alexsmobsmusic (Alex's Mobs music mod.jar)",
                     "items": [
                         {
                             "key": "subtitles.voidwormdefeat",
@@ -185,11 +186,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "alexsmobsmusic (Alex's Mobs music mod.jar)"
+                    ]
                 },
                 "alexsmobs": {
                     "jar_name": "alexsmobs-1.12.1.jar",
+                    "display_name": "alexsmobs (alexsmobs-1.12.1.jar)",
                     "items": [
                         {
                             "key": "itemGroup.alexsmobs",
@@ -4139,11 +4140,11 @@
                             "zh": "\u8ba9\u6d77\u9e25\u5077\u8d70\u4f60\u7684\u7269\u54c1\u680f\u91cc\u7684\u98df\u7269\u3002",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "alexsmobs (alexsmobs-1.12.1.jar)"
+                    ]
                 },
                 "armiger": {
                     "jar_name": "Armiger-1.16.5-1.1.0.jar",
+                    "display_name": "armiger (Armiger-1.16.5-1.1.0.jar)",
                     "items": [
                         {
                             "key": "_Commands",
@@ -4205,11 +4206,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "armiger (Armiger-1.16.5-1.1.0.jar)"
+                    ]
                 },
                 "atum": {
                     "jar_name": "Atum-1.16.5-2.2.12.jar",
+                    "display_name": "atum (Atum-1.16.5-2.2.12.jar)",
                     "items": [
                         {
                             "key": "_comment",
@@ -12197,11 +12198,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "atum (Atum-1.16.5-2.2.12.jar)"
+                    ]
                 },
                 "betterdungeons": {
                     "jar_name": "BetterDungeons-1.16.4-1.2.1.jar",
+                    "display_name": "betterdungeons (BetterDungeons-1.16.4-1.2.1.jar)",
                     "items": [
                         {
                             "key": "betterdungeons.small_dungeon.banner.zombie",
@@ -12293,11 +12294,11 @@
                             "zh": "\u8e0f\u5165\u4e00\u5904\u5730\u4e0b\u5893\u7a74",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "betterdungeons (BetterDungeons-1.16.4-1.2.1.jar)"
+                    ]
                 },
                 "betterportals": {
                     "jar_name": "BetterPortals-1.16.4-0.3.9.jar",
+                    "display_name": "betterportals (BetterPortals-1.16.4-0.3.9.jar)",
                     "items": [
                         {
                             "key": "item.betterportals.portal_fluid_bucket",
@@ -12347,11 +12348,11 @@
                             "zh": "\u65e0\u6cd5\u5728\u8be5\u7ef4\u5ea6\u4f7f\u7528\uff01",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "betterportals (BetterPortals-1.16.4-0.3.9.jar)"
+                    ]
                 },
                 "betterstrongholds": {
                     "jar_name": "BetterStrongholds-1.16.4-1.2.1.jar",
+                    "display_name": "betterstrongholds (BetterStrongholds-1.16.4-1.2.1.jar)",
                     "items": [
                         {
                             "key": "betterstrongholds.commands.locate.stronghold",
@@ -12359,11 +12360,11 @@
                             "zh": "\u4f7f\u7528/locate betterstrongholds:stronghold\u4ee3\u66ff\uff01",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "betterstrongholds (BetterStrongholds-1.16.4-1.2.1.jar)"
+                    ]
                 },
                 "citadel": {
                     "jar_name": "citadel-1.8.1-1.16.5.jar",
+                    "display_name": "citadel (citadel-1.8.1-1.16.5.jar)",
                     "items": [
                         {
                             "key": "item.citadel.debug",
@@ -12473,11 +12474,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "citadel (citadel-1.8.1-1.16.5.jar)"
+                    ]
                 },
                 "cloth-config2": {
                     "jar_name": "cloth-config-4.17.132-forge.jar",
+                    "display_name": "cloth-config2 (cloth-config-4.17.132-forge.jar)",
                     "items": [
                         {
                             "key": "text.cloth-config.save_and_done",
@@ -12773,11 +12774,11 @@
                             "zh": "\u70b9\u51fb\u6b64\u5904\u6253\u5f00Minecraft\u9009\u9879\u6587\u4ef6\uff0c\u6ca1\u6709\u7279\u5b9a\u539f\u56e0",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "cloth-config2 (cloth-config-4.17.132-forge.jar)"
+                    ]
                 },
                 "controlling": {
                     "jar_name": "Controlling-7.0.0.31.jar",
+                    "display_name": "controlling (Controlling-7.0.0.31.jar)",
                     "items": [
                         {
                             "key": "options.search",
@@ -12857,11 +12858,11 @@
                             "zh": "\u786e\u5b9a\uff1f",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "controlling (Controlling-7.0.0.31.jar)"
+                    ]
                 },
                 "creativecore": {
                     "jar_name": "CreativeCore_v2.2.1_mc1.16.5.jar",
+                    "display_name": "creativecore (CreativeCore_v2.2.1_mc1.16.5.jar)",
                     "items": [
                         {
                             "key": "gui.client-config",
@@ -12887,11 +12888,11 @@
                             "zh": "\u6dfb\u52a0",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "creativecore (CreativeCore_v2.2.1_mc1.16.5.jar)"
+                    ]
                 },
                 "curios": {
                     "jar_name": "curios-forge-1.16.5-4.1.0.0.jar",
+                    "display_name": "curios (curios-forge-1.16.5-4.1.0.0.jar)",
                     "items": [
                         {
                             "key": "curios.name",
@@ -13187,11 +13188,11 @@
                             "zh": "\u5207\u6362\u53ef\u89c1\u6027",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "curios (curios-forge-1.16.5-4.1.0.0.jar)"
+                    ]
                 },
                 "dummmmmmy": {
                     "jar_name": "dummmmmmy-1.16.5-1.3.3.jar",
+                    "display_name": "dummmmmmy (dummmmmmy-1.16.5-1.3.3.jar)",
                     "items": [
                         {
                             "key": "item.dummmmmmy.target_dummy_placer",
@@ -13217,11 +13218,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "dummmmmmy (dummmmmmy-1.16.5-1.3.3.jar)"
+                    ]
                 },
                 "dungeons_arise": {
                     "jar_name": "DungeonsArise-1.16.5-2.1.49-beta.jar",
+                    "display_name": "dungeons_arise (DungeonsArise-1.16.5-2.1.49-beta.jar)",
                     "items": [
                         {
                             "key": "filled_map.dungeons_arise:monastery",
@@ -13397,11 +13398,11 @@
                             "zh": "\u8611\u83c7\u623f\u5b50\u63a2\u9669\u5bb6\u5730\u56fe",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "dungeons_arise (DungeonsArise-1.16.5-2.1.49-beta.jar)"
+                    ]
                 },
                 "dsurround": {
                     "jar_name": "DynamicSurroundings-1.16.5-4.0.5.0.jar",
+                    "display_name": "dsurround (DynamicSurroundings-1.16.5-4.0.5.0.jar)",
                     "items": [
                         {
                             "key": "dsurround.modname",
@@ -13607,11 +13608,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "dsurround (DynamicSurroundings-1.16.5-4.0.5.0.jar)"
+                    ]
                 },
                 "environs": {
                     "jar_name": "DynamicSurroundings-1.16.5-4.0.5.0.jar",
+                    "display_name": "environs (DynamicSurroundings-1.16.5-4.0.5.0.jar)",
                     "items": [
                         {
                             "key": "environs.modname",
@@ -14051,11 +14052,11 @@
                             "zh": "\u7011\u5e03",
                             "source": "\u793e\u533a\u8bcd\u5178[\u539f\u6587]"
                         }
-                    ],
-                    "display_name": "environs (DynamicSurroundings-1.16.5-4.0.5.0.jar)"
+                    ]
                 },
                 "mobeffects": {
                     "jar_name": "DynamicSurroundings-1.16.5-4.0.5.0.jar",
+                    "display_name": "mobeffects (DynamicSurroundings-1.16.5-4.0.5.0.jar)",
                     "items": [
                         {
                             "key": "mobeffects.modname",
@@ -14333,11 +14334,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "mobeffects (DynamicSurroundings-1.16.5-4.0.5.0.jar)"
+                    ]
                 },
                 "sndctrl": {
                     "jar_name": "DynamicSurroundings-1.16.5-4.0.5.0.jar",
+                    "display_name": "sndctrl (DynamicSurroundings-1.16.5-4.0.5.0.jar)",
                     "items": [
                         {
                             "key": "sndctrl.modname",
@@ -14807,11 +14808,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "sndctrl (DynamicSurroundings-1.16.5-4.0.5.0.jar)"
+                    ]
                 },
                 "enchantinginfuser": {
                     "jar_name": "EnchantingInfuser-v1.0.2-1.16.5-Forge.jar",
+                    "display_name": "enchantinginfuser (EnchantingInfuser-v1.0.2-1.16.5-Forge.jar)",
                     "items": [
                         {
                             "key": "block.enchantinginfuser.enchanting_infuser",
@@ -14855,11 +14856,11 @@
                             "zh": "\u8be5\u9b54\u5492\u4e0e%s\u4e0d\u517c\u5bb9",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "enchantinginfuser (EnchantingInfuser-v1.0.2-1.16.5-Forge.jar)"
+                    ]
                 },
                 "entityculling": {
                     "jar_name": "entityculling-forge-mc1.16.5-1.5.2.jar",
+                    "display_name": "entityculling (entityculling-forge-mc1.16.5-1.5.2.jar)",
                     "items": [
                         {
                             "key": "text.entityculling.title",
@@ -14873,11 +14874,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "entityculling (entityculling-forge-mc1.16.5-1.5.2.jar)"
+                    ]
                 },
                 "farmersdelight": {
                     "jar_name": "FarmersDelight-1.16.5-0.6.0.jar",
+                    "display_name": "farmersdelight (FarmersDelight-1.16.5-0.6.0.jar)",
                     "items": [
                         {
                             "key": "block.farmersdelight.stove",
@@ -16337,11 +16338,11 @@
                             "zh": "\u4ece\u732a\u6216\u75a3\u732a\u517d\u817f\u4e0a\u5207\u4e0b\u7684\u4e00\u5927\u5757\u8089\u3002\u5251\u592a\u5927\u4e86\uff0c\u60f3\u5207\u4e0b\u5b83\u4f60\u5f97\u627e\u4e00\u628a\u66f4\u8f7b\u7684\u5de5\u5177\u2026\u2026",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "farmersdelight (FarmersDelight-1.16.5-0.6.0.jar)"
+                    ]
                 },
                 "ftblibrary": {
                     "jar_name": "ftb-library-forge-1605.3.4-build.90.jar",
+                    "display_name": "ftblibrary (ftb-library-forge-1605.3.4-build.90.jar)",
                     "items": [
                         {
                             "key": "gui.accept",
@@ -16697,11 +16698,11 @@
                             "zh": "\u7a7a",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "ftblibrary (ftb-library-forge-1605.3.4-build.90.jar)"
+                    ]
                 },
                 "ftbquests": {
                     "jar_name": "ftb-quests-forge-1605.3.7-build.165.jar",
+                    "display_name": "ftbquests (ftb-quests-forge-1605.3.7-build.165.jar)",
                     "items": [
                         {
                             "key": "ftbquests",
@@ -19055,11 +19056,11 @@
                             "zh": "\u5df2\u4ece\u201c%3$s\u201d\u5bfc\u51fa%1$s/%2$s\u7269\u54c1",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "ftbquests (ftb-quests-forge-1605.3.7-build.165.jar)"
+                    ]
                 },
                 "ftbteams": {
                     "jar_name": "ftb-teams-forge-1605.2.3-build.40.jar",
+                    "display_name": "ftbteams (ftb-teams-forge-1605.2.3-build.40.jar)",
                     "items": [
                         {
                             "key": "ftbteams.already_in_party",
@@ -19223,11 +19224,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "ftbteams (ftb-teams-forge-1605.2.3-build.40.jar)"
+                    ]
                 },
                 "ftbultimine": {
                     "jar_name": "ftb-ultimine-forge-1605.3.1-build.45.jar",
+                    "display_name": "ftbultimine (ftb-ultimine-forge-1605.3.1-build.45.jar)",
                     "items": [
                         {
                             "key": "key.ftbultimine",
@@ -19325,11 +19326,11 @@
                             "zh": "\u6fc0\u6d3b\u65f6\u5141\u8bb8\u4f7f\u7528%s",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "ftbultimine (ftb-ultimine-forge-1605.3.1-build.45.jar)"
+                    ]
                 },
                 "geckolib3": {
                     "jar_name": "geckolib-forge-1.16.5-3.0.106.jar",
+                    "display_name": "geckolib3 (geckolib-forge-1.16.5-3.0.106.jar)",
                     "items": [
                         {
                             "key": "itemGroup.geckolib_examples",
@@ -19385,11 +19386,11 @@
                             "zh": "\u80a5\u6599",
                             "source": "\u793e\u533a\u8bcd\u5178[\u539f\u6587]"
                         }
-                    ],
-                    "display_name": "geckolib3 (geckolib-forge-1.16.5-3.0.106.jar)"
+                    ]
                 },
                 "guardvillagers": {
                     "jar_name": "guardvillagers-1.16.5.1.2.6.jar",
+                    "display_name": "guardvillagers (guardvillagers-1.16.5.1.2.6.jar)",
                     "items": [
                         {
                             "key": "entity.guardvillagers.guard",
@@ -19433,11 +19434,11 @@
                             "zh": "\u62a4\u7532\u503c\uff1a%s",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "guardvillagers (guardvillagers-1.16.5.1.2.6.jar)"
+                    ]
                 },
                 "itemfilters": {
                     "jar_name": "item-filters-forge-1605.2.5-build.9.jar",
+                    "display_name": "itemfilters (item-filters-forge-1605.2.5-build.9.jar)",
                     "items": [
                         {
                             "key": "itemGroup.itemfilters.main",
@@ -19649,11 +19650,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "itemfilters (item-filters-forge-1605.2.5-build.9.jar)"
+                    ]
                 },
                 "jei": {
                     "jar_name": "jei-1.16.5-7.8.0.1013.jar",
+                    "display_name": "jei (jei-1.16.5-7.8.0.1013.jar)",
                     "items": [
                         {
                             "key": "_comment",
@@ -20099,11 +20100,11 @@
                             "zh": "%s\u5d4c\u5957\u6d4b\u8bd5",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "jei (jei-1.16.5-7.8.0.1013.jar)"
+                    ]
                 },
                 "jojo": {
                     "jar_name": "JJBA-RipplesOfThePast-1.16.5-0.2.2-pre6.jar",
+                    "display_name": "jojo (JJBA-RipplesOfThePast-1.16.5-0.2.2-pre6.jar)",
                     "items": [
                         {
                             "key": "itemGroup.jojo_tab",
@@ -27917,11 +27918,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "jojo (JJBA-RipplesOfThePast-1.16.5-0.2.2-pre6.jar)"
+                    ]
                 },
                 "lanserverproperties": {
                     "jar_name": "lanserverproperties-1.4.jar",
+                    "display_name": "lanserverproperties (lanserverproperties-1.4.jar)",
                     "items": [
                         {
                             "key": "lanserverproperties.gui.online_mode",
@@ -27941,11 +27942,11 @@
                             "zh": "\u76d1\u542c\u7aef\u53e3",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "lanserverproperties (lanserverproperties-1.4.jar)"
+                    ]
                 },
                 "libipn": {
                     "jar_name": "libIPN-forge-1.16-3.0.2.jar",
+                    "display_name": "libipn (libIPN-forge-1.16-3.0.2.jar)",
                     "items": [
                         {
                             "key": "libipn.common.gui.config.reset",
@@ -28115,11 +28116,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "libipn (libIPN-forge-1.16-3.0.2.jar)"
+                    ]
                 },
                 "cataclysm": {
                     "jar_name": "L_Enders Cataclysm-0.48 Changed Theme -1.16.5.jar",
+                    "display_name": "cataclysm (L_Enders Cataclysm-0.48 Changed Theme -1.16.5.jar)",
                     "items": [
                         {
                             "key": "item.cataclysm.witherite_ingot",
@@ -28925,11 +28926,11 @@
                             "zh": "\u6740\u6b7b\u4e0b\u754c\u5408\u91d1\u5de8\u517d",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "cataclysm (L_Enders Cataclysm-0.48 Changed Theme -1.16.5.jar)"
+                    ]
                 },
                 "modernui": {
                     "jar_name": "ModernUI-1.16.5-2.7.1.105-universal.jar",
+                    "display_name": "modernui (ModernUI-1.16.5-2.7.1.105-universal.jar)",
                     "items": [
                         {
                             "key": "options.chat.visibility",
@@ -29189,11 +29190,11 @@
                             "zh": "Modern UI: OpenGL\u7248\u672c\u8fc7\u65e7, \u9700\u8981 OpenGL {2} \u6216\u66f4\u9ad8\u7684\u7248\u672c, \u5f53\u524d\u4e3a OpenGL {3}, \u8bf7\u5347\u7ea7\u4f60\u7684\u663e\u5361\u9a71\u52a8, \u8f83\u65b0\u7684macOS\u7cfb\u7edf\u53ef\u80fd\u4e0d\u652f\u6301",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "modernui (ModernUI-1.16.5-2.7.1.105-universal.jar)"
+                    ]
                 },
                 "modnametooltip": {
                     "jar_name": "modnametooltip_1.16.2-1.15.0.jar",
+                    "display_name": "modnametooltip (modnametooltip_1.16.2-1.15.0.jar)",
                     "items": [
                         {
                             "key": "config.modnametooltip.formatting.modNameFormat",
@@ -29207,11 +29208,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "modnametooltip (modnametooltip_1.16.2-1.15.0.jar)"
+                    ]
                 },
                 "mowziesmobs": {
                     "jar_name": "mowziesmobs-1.5.27.jar",
+                    "display_name": "mowziesmobs (mowziesmobs-1.5.27.jar)",
                     "items": [
                         {
                             "key": "_comment",
@@ -31253,11 +31254,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "mowziesmobs (mowziesmobs-1.5.27.jar)"
+                    ]
                 },
                 "nimble": {
                     "jar_name": "Nimble-1.16.2-0.4.1.jar",
+                    "display_name": "nimble (Nimble-1.16.2-0.4.1.jar)",
                     "items": [
                         {
                             "key": "nimble.gui.keygroup",
@@ -31271,11 +31272,11 @@
                             "zh": "\u4f7f\u7528\u7b2c\u4e09\u4eba\u79f0\u6b63\u9762",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "nimble (Nimble-1.16.2-0.4.1.jar)"
+                    ]
                 },
                 "notenoughanimations": {
                     "jar_name": "notenoughanimations-forge-1.9.2-mc1.16.5.jar",
+                    "display_name": "notenoughanimations (notenoughanimations-forge-1.9.2-mc1.16.5.jar)",
                     "items": [
                         {
                             "key": "text.nea.title",
@@ -31775,11 +31776,11 @@
                             "zh": "\u4ec5\u5728\u7b2c\u4e00\u4eba\u79f0\u89c6\u89d2\u4e2d\u5e94\u7528\u65cb\u8f6c\u9501\u5b9a\u6548\u679c",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "notenoughanimations (notenoughanimations-forge-1.9.2-mc1.16.5.jar)"
+                    ]
                 },
                 "ostoverhaul": {
                     "jar_name": "ostOverhaul-0.1-1.16-Forge.jar",
+                    "display_name": "ostoverhaul (ostOverhaul-0.1-1.16-Forge.jar)",
                     "items": [
                         {
                             "key": "item.ostoverhaul.weird_realm_disc",
@@ -31805,11 +31806,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "ostoverhaul (ostOverhaul-0.1-1.16-Forge.jar)"
+                    ]
                 },
                 "secondchanceforge": {
                     "jar_name": "secondchanceforge-1.16.5-1.5.0.jar",
+                    "display_name": "secondchanceforge (secondchanceforge-1.16.5-1.5.0.jar)",
                     "items": [
                         {
                             "key": "secondchanceforge.config.title",
@@ -32081,11 +32082,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "secondchanceforge (secondchanceforge-1.16.5-1.5.0.jar)"
+                    ]
                 },
                 "selene": {
                     "jar_name": "selene-1.16.5-1.9.0.jar",
+                    "display_name": "selene (selene-1.16.5-1.9.0.jar)",
                     "items": [
                         {
                             "key": "fluid.selene.generic_fluid",
@@ -32105,11 +32106,11 @@
                             "zh": "\u55b7\u6e85\u836f\u6c34",
                             "source": "\u793e\u533a\u8bcd\u5178[\u539f\u6587]"
                         }
-                    ],
-                    "display_name": "selene (selene-1.16.5-1.9.0.jar)"
+                    ]
                 },
                 "stalwart_dungeons": {
                     "jar_name": "stalwart-dungeons-1.16.5-1.1.7.jar",
+                    "display_name": "stalwart_dungeons (stalwart-dungeons-1.16.5-1.1.7.jar)",
                     "items": [
                         {
                             "key": "item.stalwart_dungeons.awful_dagger",
@@ -32843,11 +32844,11 @@
                             "zh": "\u00a7c\u4e0b\u754c\u9524",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "stalwart_dungeons (stalwart-dungeons-1.16.5-1.1.7.jar)"
+                    ]
                 },
                 "terraforged": {
                     "jar_name": "TerraForged-1.16.5-0.2.16.jar",
+                    "display_name": "terraforged (TerraForged-1.16.5-0.2.16.jar)",
                     "items": [
                         {
                             "key": "biome.terraforged.bryce",
@@ -35165,11 +35166,11 @@
                             "zh": "\u63a7\u5236\u4e16\u754c\u9ad8\u5ea6",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "terraforged (TerraForged-1.16.5-0.2.16.jar)"
+                    ]
                 },
                 "tetra": {
                     "jar_name": "tetra-1.16.5-3.20.0.jar",
+                    "display_name": "tetra (tetra-1.16.5-3.20.0.jar)",
                     "items": [
                         {
                             "key": "itemGroup.tetra",
@@ -50615,11 +50616,11 @@
                             "zh": "\u7a7f\u6234\u8005\u4f1a\u66f4\u5feb\u5730\u88ab\u6c34\u6df9\u6ca1\u3002",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "tetra (tetra-1.16.5-3.20.0.jar)"
+                    ]
                 },
                 "graveyard": {
                     "jar_name": "The_Graveyard_2.1_(FORGE)_for_1.16.4-1.16.5.jar",
+                    "display_name": "graveyard (The_Graveyard_2.1_(FORGE)_for_1.16.4-1.16.5.jar)",
                     "items": [
                         {
                             "key": "block.graveyard.tg_stone",
@@ -51185,11 +51186,11 @@
                             "zh": "\u7f16\u8f91\u5893\u7891",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "graveyard (The_Graveyard_2.1_(FORGE)_for_1.16.4-1.16.5.jar)"
+                    ]
                 },
                 "toms_storage": {
                     "jar_name": "toms_storage-1.16.5-1.2.24.jar",
+                    "display_name": "toms_storage (toms_storage-1.16.5-1.2.24.jar)",
                     "items": [
                         {
                             "key": "block.toms_storage.ts.inventory_connector",
@@ -51689,11 +51690,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "toms_storage (toms_storage-1.16.5-1.2.24.jar)"
+                    ]
                 },
                 "travelersbackpack": {
                     "jar_name": "TravelersBackpack-1.16.5-5.4.51.jar",
+                    "display_name": "travelersbackpack (TravelersBackpack-1.16.5-5.4.51.jar)",
                     "items": [
                         {
                             "key": "itemGroup.travelersbackpack",
@@ -52751,11 +52752,11 @@
                             "zh": "\u50f5\u5c38",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "travelersbackpack (TravelersBackpack-1.16.5-5.4.51.jar)"
+                    ]
                 },
                 "voicechat": {
                     "jar_name": "voicechat-forge-1.16.5-2.5.27.jar",
+                    "display_name": "voicechat (voicechat-forge-1.16.5-2.5.27.jar)",
                     "items": [
                         {
                             "key": "key.categories.voicechat",
@@ -54017,11 +54018,11 @@
                             "zh": "\u5f53\u5904\u4e8e\u7fa4\u7ec4\u4e2d\u65f6\u662f\u5426\u663e\u793a\u81ea\u5df1\u7684\u56fe\u6807",
                             "source": "\u6a21\u7ec4\u81ea\u5e26"
                         }
-                    ],
-                    "display_name": "voicechat (voicechat-forge-1.16.5-2.5.27.jar)"
+                    ]
                 },
                 "waystones": {
                     "jar_name": "Waystones_1.16.5-7.6.4.jar",
+                    "display_name": "waystones (Waystones_1.16.5-7.6.4.jar)",
                     "items": [
                         {
                             "key": "itemGroup.waystones",
@@ -54563,11 +54564,11 @@
                             "zh": "\u4f20\u9001\u77f3\u76d8",
                             "source": "\u793e\u533a\u8bcd\u5178[Key]"
                         }
-                    ],
-                    "display_name": "waystones (Waystones_1.16.5-7.6.4.jar)"
+                    ]
                 },
                 "wyml": {
                     "jar_name": "wyml-1.1.2-forge.jar",
+                    "display_name": "wyml (wyml-1.1.2-forge.jar)",
                     "items": [
                         {
                             "key": "itemGroup.wyml.creative_tab",
@@ -54635,11 +54636,11 @@
                             "zh": "\u7eb8\u888b",
                             "source": "\u793e\u533a\u8bcd\u5178[\u539f\u6587]"
                         }
-                    ],
-                    "display_name": "wyml (wyml-1.1.2-forge.jar)"
+                    ]
                 },
                 "antiqueatlas": {
                     "jar_name": "[\u53e4\u5f0f\u5730\u56fe] antiqueatlas-6.2.4-forge-mc1.16.5.jar",
+                    "display_name": "antiqueatlas ([\u53e4\u5f0f\u5730\u56fe] antiqueatlas-6.2.4-forge-mc1.16.5.jar)",
                     "items": [
                         {
                             "key": "item.antiqueatlas.antique_atlas",
@@ -55001,11 +55002,11 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "antiqueatlas ([\u53e4\u5f0f\u5730\u56fe] antiqueatlas-6.2.4-forge-mc1.16.5.jar)"
+                    ]
                 },
                 "cosmeticarmorreworked": {
                     "jar_name": "[\u65f6\u88c5\u76d4\u7532\u91cd\u7f6e\u7248] CosmeticArmorReworked-1.16.5-v5a.jar",
+                    "display_name": "cosmeticarmorreworked ([\u65f6\u88c5\u76d4\u7532\u91cd\u7f6e\u7248] CosmeticArmorReworked-1.16.5-v5a.jar)",
                     "items": [
                         {
                             "key": "cos.key.opencosarmorinventory",
@@ -55037,8 +55038,7 @@
                             "zh": "",
                             "source": "\u5f85\u7ffb\u8bd1"
                         }
-                    ],
-                    "display_name": "cosmeticarmorreworked ([\u65f6\u88c5\u76d4\u7532\u91cd\u7f6e\u7248] CosmeticArmorReworked-1.16.5-v5a.jar)"
+                    ]
                 }
             },
             "namespace_formats": {

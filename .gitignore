@@ -31,3 +31,4 @@ __pycache__/
 *.pyc
 
 session_cache.json
+term_database.json

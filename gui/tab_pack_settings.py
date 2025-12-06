@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import simpledialog, filedialog
+from tkinter import simpledialog, filedialog, ttk as tk_ttk
 import ttkbootstrap as ttk
 from gui import ui_utils
 from utils import config_manager

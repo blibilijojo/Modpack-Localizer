@@ -59,7 +59,12 @@ DEFAULT_CONFIG = {
     "use_origin_name_lookup": True,
     "translation_mode": "ai",
     "log_level": "INFO",
-    "theme": "litera"
+    "theme": "litera",
+    # 社区词典导入过滤设置
+    "community_dict_filter": {
+        "max_word_count": 0,  # 原文最大单词数，0表示不限制
+        "require_chinese_translation": True  # 译文必须包含中文
+    }
 }
 
 def load_config() -> dict:

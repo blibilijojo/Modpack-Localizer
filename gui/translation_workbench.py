@@ -18,6 +18,7 @@ from services.ai_translator import AITranslator
 from gui import ui_utils
 from gui.custom_widgets import ToolTip
 from gui.find_replace_dialog import FindReplaceDialog
+from core.term_database import TermDatabase
 
 class TranslationWorkbench(ttk.Frame):
     def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None):
@@ -31,6 +32,17 @@ class TranslationWorkbench(ttk.Frame):
         self.cancel_callback = cancel_callback
         self.project_name = project_name
         self.main_window = main_window_instance
+
+        # 初始化术语库
+        self.term_db = TermDatabase()
+        
+        # 术语提示优化：防抖机制
+        self._term_update_id = None
+        self._last_term_update_time = 0
+        self._term_update_delay = 100  # 延迟100ms执行术语匹配
+        
+        # 术语匹配结果缓存
+        self._term_match_cache = {}
 
         self.final_translations = None
         self.current_selection_info = None
@@ -126,24 +138,51 @@ class TranslationWorkbench(ttk.Frame):
         
         editor_frame = tk_ttk.LabelFrame(right_pane, text="翻译编辑器", padding=10)
         editor_frame.columnconfigure(1, weight=1)
-        ttk.Label(editor_frame, text="原文:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=5, pady=5)
+        # 创建原文和术语提示的并列布局
+        content_frame = ttk.Frame(editor_frame)
+        content_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        content_frame.columnconfigure(0, weight=1)
+        content_frame.columnconfigure(1, weight=1)
+        content_frame.rowconfigure(0, weight=1)
+        
+        # 左侧：原文显示
+        en_container = ttk.Frame(content_frame)
+        en_container.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        en_container.rowconfigure(1, weight=1)
+        
+        ttk.Label(en_container, text="原文:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=0, pady=0)
         
         style = ttk.Style.get_instance()
         theme_bg_color = style.lookup('TFrame', 'background')
         theme_fg_color = style.lookup('TLabel', 'foreground')
         self.en_text_display = scrolledtext.ScrolledText(
-            editor_frame, height=3, wrap="word", relief="flat",
+            en_container, height=5, wrap="word", relief="flat",
             background=theme_bg_color, foreground=theme_fg_color
         )
         self.en_text_display.bind("<KeyPress>", lambda e: "break")
-        self.en_text_display.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        self.en_text_display.grid(row=1, column=0, sticky="nsew", padx=0, pady=5)
+        
+        # 右侧：术语提示
+        term_container = ttk.Frame(content_frame)
+        term_container.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        term_container.rowconfigure(1, weight=1)
+        
+        ttk.Label(term_container, text="术语提示:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=0, pady=0)
+        
+        self.term_text = scrolledtext.ScrolledText(
+            term_container, height=5, wrap="word", relief="flat",
+            background=theme_bg_color, foreground=theme_fg_color, state="disabled"
+        )
+        self.term_text.grid(row=1, column=0, sticky="nsew", padx=0, pady=5)
+        
+        # 译文输入区域
         zh_header_frame = ttk.Frame(editor_frame); zh_header_frame.grid(row=1, column=1, sticky="ew", padx=5, pady=(5,0))
         ttk.Label(zh_header_frame, text="译文:", anchor="nw").pack(side="left")
         shortcut_info_label = ttk.Label(zh_header_frame, text="快捷键: Enter 跳转到下一条, Ctrl+Enter 跳转到下一条待翻译")
         shortcut_info_label.pack(side="right")
-        self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=3, wrap="word", state="disabled")
+        self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=5, wrap="word", state="disabled")
         # 确保译文栏水平填充整个可用空间
-        self.zh_text_input.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+        self.zh_text_input.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
         self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
         self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
         self.zh_text_input.bind("<Return>", self._save_and_jump_sequential)
@@ -151,7 +190,17 @@ class TranslationWorkbench(ttk.Frame):
         # 添加复制事件处理，确保只复制实际文本
         self.zh_text_input.bind("<Control-c>", self._on_copy)
         self.zh_text_input.bind("<Control-C>", self._on_copy)
+        # 添加术语提示实时更新
+        self.zh_text_input.bind("<KeyRelease>", self._update_term_suggestions, add="+")
         editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="e", pady=(5,0))
+        
+        self.export_btn = ttk.Button(editor_btn_frame, text="导出待译文本", command=self._show_export_menu, state="disabled", bootstyle="primary-outline")
+        self.export_btn.pack(side="left", padx=(0, 10))
+        ToolTip(self.export_btn, "导出待翻译的文本到文件或剪贴板")
+        
+        self.import_btn = ttk.Button(editor_btn_frame, text="导入翻译结果", command=self._show_import_menu, state="disabled", bootstyle="primary-outline")
+        self.import_btn.pack(side="left", padx=(0, 10))
+        ToolTip(self.import_btn, "从文件或剪贴板导入翻译结果")
         
         self.ai_translate_btn = ttk.Button(editor_btn_frame, text="AI翻译所有待译项", command=self._run_ai_translation_async, state="disabled", bootstyle="primary-outline")
         self.ai_translate_btn.pack(side="left", padx=(0, 10))
@@ -713,6 +762,9 @@ class TranslationWorkbench(ttk.Frame):
         self._update_ui_state(interactive=True, item_selected=True)
         self.status_label.config(text=f"正在编辑: {ns} / {item_data['key']}")
         self.zh_text_input.focus_set()
+        
+        # 显示匹配的术语
+        self._show_matching_terms(item_data['en'])
 
     def _on_text_modified(self, event=None):
         if self.zh_text_input.edit_modified():
@@ -875,6 +927,10 @@ class TranslationWorkbench(ttk.Frame):
         self.finish_button.config(state=base_state)
         self.save_button.config(state=base_state)
         
+        # 更新导出导入按钮状态
+        self.export_btn.config(state=base_state)
+        self.import_btn.config(state=base_state)
+        
         # 更新AI翻译按钮状态
         ai_translate_state = base_state if interactive else "disabled"
         self.ai_translate_btn.config(state=ai_translate_state)
@@ -885,10 +941,358 @@ class TranslationWorkbench(ttk.Frame):
         else:
             self.add_to_dict_btn.config(state="disabled")
             self.zh_text_input.config(state="disabled", cursor="")
+            
+    def _show_export_menu(self):
+        """显示导出菜单"""
+        export_menu = tk.Menu(self, tearoff=0)
+        
+        # 导出范围选项
+        scope_menu = tk.Menu(export_menu, tearoff=0)
+        scope_menu.add_command(label="当前模组的待译项", command=lambda: self._export_to_file(scope="current"))
+        scope_menu.add_command(label="所有模组的待译项", command=lambda: self._export_to_file(scope="all"))
+        scope_menu.add_command(label="当前模组的所有项", command=lambda: self._export_to_file(scope="current_all"))
+        scope_menu.add_command(label="所有模组的所有项", command=lambda: self._export_to_file(scope="all_all"))
+        export_menu.add_cascade(label="导出到文件", menu=scope_menu)
+        
+        # 复制到剪贴板选项
+        copy_menu = tk.Menu(export_menu, tearoff=0)
+        copy_menu.add_command(label="当前模组的待译项", command=lambda: self._copy_to_clipboard(scope="current"))
+        copy_menu.add_command(label="所有模组的待译项", command=lambda: self._copy_to_clipboard(scope="all"))
+        copy_menu.add_command(label="当前模组的所有项", command=lambda: self._copy_to_clipboard(scope="current_all"))
+        copy_menu.add_command(label="所有模组的所有项", command=lambda: self._copy_to_clipboard(scope="all_all"))
+        export_menu.add_cascade(label="复制到剪贴板", menu=copy_menu)
+        
+        # 显示菜单
+        x, y = self.export_btn.winfo_rootx(), self.export_btn.winfo_rooty() + self.export_btn.winfo_height()
+        export_menu.post(x, y)
+        
+    def _show_import_menu(self):
+        """显示导入菜单"""
+        import_menu = tk.Menu(self, tearoff=0)
+        import_menu.add_command(label="从文件导入", command=self._import_from_file)
+        import_menu.add_command(label="从剪贴板导入", command=self._import_from_clipboard)
+        
+        # 显示菜单
+        x, y = self.import_btn.winfo_rootx(), self.import_btn.winfo_rooty() + self.import_btn.winfo_height()
+        import_menu.post(x, y)
+        
+    def _get_export_data(self, scope):
+        """获取要导出的数据"""
+        export_data = []
+        namespaces_to_export = []
+        
+        if scope in ["current", "current_all"]:
+            selection = self.ns_tree.selection()
+            if not selection:
+                messagebox.showwarning("范围错误", "请先在左侧选择一个项目以确定导出范围。", parent=self)
+                return None
+            namespaces_to_export = [selection[0]]
+        else:
+            namespaces_to_export = list(self.translation_data.keys())
+        
+        for ns in namespaces_to_export:
+            ns_data = self.translation_data[ns]
+            items = ns_data.get('items', [])
+            for item in items:
+                if scope in ["current", "all"] and item.get('zh', '').strip():
+                    continue  # 只导出待译项
+                export_item = {
+                    'key': item['key'],
+                    'en': item['en'],
+                    'zh': item.get('zh', ''),
+                    'source': item.get('source', ''),
+                    'namespace': ns
+                }
+                export_data.append(export_item)
+        
+        return export_data
+        
+    def _export_to_file(self, scope):
+        """导出数据到文件"""
+        export_data = self._get_export_data(scope)
+        if not export_data:
+            return
+        
+        file_path = filedialog.asksaveasfilename(
+            title="导出翻译数据",
+            defaultextension=".json",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")],
+            initialfile=f"translation_export_{scope}.json"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=4)
+            messagebox.showinfo("导出成功", f"已成功导出 {len(export_data)} 条记录到 {file_path}", parent=self)
+        except Exception as e:
+            messagebox.showerror("导出失败", f"导出数据时出错：{e}", parent=self)
+            logging.error(f"导出数据失败: {e}")
+            
+    def _copy_to_clipboard(self, scope):
+        """复制数据到剪贴板"""
+        export_data = self._get_export_data(scope)
+        if not export_data:
+            return
+        
+        try:
+            json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
+            self.clipboard_clear()
+            self.clipboard_append(json_str)
+            messagebox.showinfo("复制成功", f"已成功复制 {len(export_data)} 条记录到剪贴板", parent=self)
+        except Exception as e:
+            messagebox.showerror("复制失败", f"复制数据到剪贴板时出错：{e}", parent=self)
+            logging.error(f"复制数据到剪贴板失败: {e}")
+            
+    def _import_from_file(self):
+        """从文件导入翻译结果"""
+        file_path = filedialog.askopenfilename(
+            title="导入翻译结果",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+            self._process_import_data(import_data)
+        except Exception as e:
+            messagebox.showerror("导入失败", f"从文件导入数据时出错：{e}", parent=self)
+            logging.error(f"从文件导入数据失败: {e}")
+            
+    def _import_from_clipboard(self):
+        """从剪贴板导入翻译结果"""
+        try:
+            clipboard_text = self.clipboard_get()
+            import_data = json.loads(clipboard_text)
+            self._process_import_data(import_data)
+        except json.JSONDecodeError:
+            messagebox.showerror("导入失败", "剪贴板中的数据格式不正确，请确保是有效的JSON格式。", parent=self)
+        except Exception as e:
+            messagebox.showerror("导入失败", f"从剪贴板导入数据时出错：{e}", parent=self)
+            logging.error(f"从剪贴板导入数据失败: {e}")
+            
+    def _process_import_data(self, import_data):
+        """处理导入的翻译数据"""
+        if not isinstance(import_data, list):
+            messagebox.showerror("导入失败", "导入数据格式不正确，请确保是包含翻译条目的列表。", parent=self)
+            return
+        
+        # 保存当前状态用于撤销
+        self._record_action(target_iid=None)
+        
+        updated_count = 0
+        skipped_count = 0
+        not_found_count = 0
+        
+        for import_item in import_data:
+            key = import_item.get('key')
+            namespace = import_item.get('namespace')
+            zh = import_item.get('zh', '').strip()
+            
+            if not key or not namespace:
+                skipped_count += 1
+                continue
+            
+            # 查找匹配的条目
+            found = False
+            if namespace in self.translation_data:
+                items = self.translation_data[namespace]['items']
+                for item in items:
+                    if item['key'] == key:
+                        # 更新翻译
+                        if zh:
+                            item['zh'] = zh
+                            item['source'] = '外部导入'
+                            updated_count += 1
+                        found = True
+                        break
+            
+            if not found:
+                not_found_count += 1
+        
+        # 更新UI
+        self._full_ui_refresh()
+        self._set_dirty(True)
+        
+        # 显示导入结果
+        message = f"导入完成！\n"
+        message += f"成功更新: {updated_count} 条\n"
+        message += f"跳过无效条目: {skipped_count} 条\n"
+        message += f"未找到匹配项: {not_found_count} 条"
+        messagebox.showinfo("导入结果", message, parent=self)
 
     def _clear_editor(self):
         self._set_editor_content("", "")
         
+    def _show_matching_terms(self, en_text: str):
+        """
+        显示匹配的术语，支持精确单词匹配和不区分大小写合并
+        使用防抖和缓存机制优化性能
+        Args:
+            en_text: 原文文本
+        """
+        # 1. 检查缓存，避免重复计算
+        cache_key = en_text
+        if cache_key in self._term_match_cache:
+            display_terms = self._term_match_cache[cache_key]
+            self._update_term_display(display_terms)
+            return
+        
+        # 2. 防抖机制：取消之前的更新任务
+        if self._term_update_id:
+            self.after_cancel(self._term_update_id)
+        
+        # 3. 延迟执行术语匹配，减少UI阻塞
+        def delayed_term_match():
+            # 使用优化后的find_matching_terms方法
+            matching_terms = self.term_db.find_matching_terms(en_text)
+            
+            # 不区分大小写合并相同术语
+            merged_terms = {}
+            for term in matching_terms:
+                term_lower = term['original'].lower()
+                if term_lower not in merged_terms:
+                    merged_terms[term_lower] = []
+                merged_terms[term_lower].append(term)
+            
+            # 从原文中提取实际的术语版本，并准备显示数据
+            term_with_positions = []
+            for term_lower, term_list in merged_terms.items():
+                # 在原文中查找实际的术语版本（保持大小写）和位置
+                pattern = re.compile(rf'\b{re.escape(term_lower)}\b', re.IGNORECASE)
+                match = pattern.search(en_text)
+                if match:
+                    actual_term = match.group(0)  # 原文中实际的术语版本
+                    position = match.start()  # 记录首次出现的位置
+                else:
+                    actual_term = term_list[0]['original']  # 否则使用术语库中的版本
+                    position = float('inf')  # 未找到的术语放在最后
+                
+                # 按术语长度排序，选择最长的术语（可能有不同长度的变体）
+                term_list.sort(key=lambda x: len(x['original']), reverse=True)
+                primary_term = term_list[0]
+                
+                # 合并所有译文（去重）
+                all_translations = set()
+                for t in term_list:
+                    if isinstance(t['translation'], list):
+                        all_translations.update(t['translation'])
+                    else:
+                        all_translations.add(t['translation'])
+                
+                # 创建显示用的术语对象
+                display_term = {
+                    'actual_original': actual_term,
+                    'original': primary_term['original'],
+                    'translation': list(all_translations),
+                    'domain': primary_term['domain'],
+                    'comment': primary_term['comment'],
+                    'position': position
+                }
+                term_with_positions.append(display_term)
+            
+            # 按照术语在原文中首次出现的位置排序
+            display_terms = sorted(term_with_positions, key=lambda x: x['position'])
+            
+            # 缓存结果
+            self._term_match_cache[cache_key] = display_terms
+            
+            # 更新UI
+            self._update_term_display(display_terms)
+        
+        # 延迟执行术语匹配
+        self._term_update_id = self.after(self._term_update_delay, delayed_term_match)
+        
+    def _update_term_display(self, display_terms):
+        """
+        更新术语提示区域的显示
+        Args:
+            display_terms: 要显示的术语列表
+        """
+        # 更新术语提示区域
+        self.term_text.config(state="normal")
+        self.term_text.delete("1.0", tk.END)
+        
+        if display_terms:
+            for i, term in enumerate(display_terms):
+                # 使用原文中的实际版本显示
+                term_info = f"{term['actual_original']} → {', '.join(term['translation'])} [{term['domain']}]"
+                if term['comment']:
+                    term_info += f" - {term['comment']}"
+                # 只在不是最后一个术语时添加换行符
+                if i < len(display_terms) - 1:
+                    self.term_text.insert(tk.END, term_info + "\n")
+                else:
+                    self.term_text.insert(tk.END, term_info)
+                # 绑定点击事件，支持点击插入术语
+                self.term_text.tag_add(f"term_{i}", f"{i+1}.0", f"{i+1}.end")
+                self.term_text.tag_bind(f"term_{i}", "<Button-1>", 
+                                     lambda e, t=term: self._insert_term(t['translation']))
+                # 添加悬停效果
+                self.term_text.tag_configure(f"term_{i}", foreground="#0066cc")
+        else:
+            self.term_text.insert(tk.END, "未找到匹配的术语")
+        
+        self.term_text.config(state="disabled")
+        self.term_text.yview_moveto(0.0)
+    
+    def _insert_term(self, translation):
+        """
+        将选中的术语插入到译文框中
+        Args:
+            translation: 术语译文（可能是字符串或列表）
+        """
+        if self.current_selection_info:
+            # 处理翻译数据类型，确保是字符串
+            if isinstance(translation, list):
+                # 如果是列表，使用第一个译文
+                trans_text = translation[0] if translation else ""
+            else:
+                trans_text = translation
+            
+            # 获取当前选中的文本范围
+            try:
+                # 如果有选中内容，替换选中的部分
+                start = self.zh_text_input.index("sel.first")
+                end = self.zh_text_input.index("sel.last")
+                self.zh_text_input.delete(start, end)
+                self.zh_text_input.insert(start, trans_text)
+            except tk.TclError:
+                # 如果没有选中内容，在当前光标位置插入
+                cursor_pos = self.zh_text_input.index("insert")
+                self.zh_text_input.insert(cursor_pos, trans_text)
+            
+            self._save_current_edit()
+    
+    def _update_term_suggestions(self, event=None):
+        """
+        实时更新术语提示
+        """
+        if self.current_selection_info:
+            ns = self.current_selection_info['ns']
+            idx = self.current_selection_info['idx']
+            item_data = self.translation_data[ns]['items'][idx]
+            self._show_matching_terms(item_data['en'])
+    
+    def _clear_term_cache(self):
+        """
+        清除术语缓存，当术语库更新时调用
+        """
+        self._term_match_cache.clear()
+        logging.debug("术语缓存已清除")
+    
+    def reload_term_database(self):
+        """
+        重新加载术语库并清除缓存
+        """
+        self.term_db.reload()
+        self._clear_term_cache()
+    
     def _set_editor_content(self, en_text: str, zh_text: str):
         # 设置原文显示
         self.en_text_display.delete("1.0", "end")
@@ -909,6 +1313,9 @@ class TranslationWorkbench(ttk.Frame):
         # 重置滚动条位置，确保文本从顶部开始显示
         self.zh_text_input.yview_moveto(0.0)
         self.zh_text_input.xview_moveto(0.0)
+        
+        # 更新术语提示区域
+        self._show_matching_terms(en_text)
     
     def _on_copy(self, event):
         """处理复制事件，确保只复制实际文本，不包含额外的换行和空格"""

@@ -606,8 +606,11 @@ class MainWindow:
         
         # 全局工具菜单已整合到工具菜单中
         from gui.user_dictionary_editor import UserDictionaryEditor
+        from gui.term_database_editor import TermDatabaseEditor
         # 在工具菜单中添加编辑个人词典选项
         self.tools_menu.add_command(label="编辑个人词典", command=lambda: UserDictionaryEditor(self.root))
+        # 添加术语库编辑器选项
+        self.tools_menu.add_command(label="术语库编辑器", command=lambda: TermDatabaseEditor(self.root))
         
         # 视图菜单已移除，功能已整合到底栏
 
@@ -749,6 +752,11 @@ class MainWindow:
 
         self.notebook.bind("<ButtonPress-1>", self._on_tab_click)
         self.notebook.bind("<<NotebookTabChanged>>", self.update_menu_state)
+        
+        # 拖拽相关事件绑定
+        self.notebook.bind("<ButtonPress-1>", self._on_drag_start, add="+")
+        self.notebook.bind("<B1-Motion>", self._on_drag_motion)
+        self.notebook.bind("<ButtonRelease-1>", self._on_drag_end)
 
         self.add_tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.add_tab_frame, text='+')
@@ -773,6 +781,10 @@ class MainWindow:
             project_tab_to_close = self.close_tab_map[clicked_tab_id]
             self.notebook.after(10, lambda: self._close_tab_by_id(project_tab_to_close))
             return "break"
+        
+        # 如果点击的是项目标签，不返回break，允许事件继续传播到拖拽处理
+        if clicked_tab_id in self.project_tabs:
+            return
 
     def _add_new_tab(self):
         self.tab_counter += 1
@@ -879,6 +891,138 @@ class MainWindow:
 
         self.update_menu_state()
         self._save_current_session()
+        
+    def _on_drag_start(self, event):
+        """开始拖拽标签"""
+        try:
+            # 获取点击的标签索引
+            tab_index = self.notebook.index(f"@{event.x},{event.y}")
+            all_tabs = self.notebook.tabs()
+            
+            # 确保不是最后一个标签(+)和关闭标签
+            if tab_index == len(all_tabs) - 1:
+                self.dragged_tab_index = None
+                self.dragged_tab_id = None
+                return
+            
+            clicked_tab_id = all_tabs[tab_index]
+            
+            # 只有项目标签可以拖拽
+            if clicked_tab_id in self.project_tabs:
+                self.dragged_tab_index = tab_index
+                self.dragged_tab_id = clicked_tab_id
+                self.dragged_tab_pos = (event.x, event.y)
+            else:
+                self.dragged_tab_index = None
+                self.dragged_tab_id = None
+        except tk.TclError:
+            self.dragged_tab_index = None
+            self.dragged_tab_id = None
+    
+    def _on_drag_motion(self, event):
+        """拖拽标签过程"""
+        if self.dragged_tab_index is None or self.dragged_tab_id is None:
+            return
+        
+        try:
+            # 获取当前鼠标位置对应的标签索引
+            target_index = self.notebook.index(f"@{event.x},{event.y}")
+        except tk.TclError:
+            return
+        
+        all_tabs = self.notebook.tabs()
+        
+        # 不能拖到最后一个标签(+)
+        if target_index == len(all_tabs) - 1:
+            return
+        
+        # 不能拖到关闭标签上
+        target_tab_id = all_tabs[target_index]
+        if target_tab_id in self.close_tab_map:
+            return
+        
+        # 如果拖到了新的位置，立即重新排列
+        if target_index != self.dragged_tab_index:
+            self._reorder_tabs(target_index)
+    
+    def _on_drag_end(self, event):
+        """结束拖拽"""
+        self.dragged_tab_index = None
+        self.dragged_tab_id = None
+        self.dragged_tab_pos = None
+        self._save_current_session()
+    
+    def _reorder_tabs(self, target_index):
+        """重新排列标签，使用Tcl命令直接操作标签位置，避免不必要的刷新"""
+        if self.dragged_tab_id is None:
+            return
+        
+        # 获取所有标签的ID列表
+        all_tabs = self.notebook.tabs()
+        
+        # 检查拖拽的标签是否仍在notebook中
+        if self.dragged_tab_id not in all_tabs:
+            return
+        
+        # 获取关闭标签
+        close_tab_id = None
+        for cid, pid in self.close_tab_map.items():
+            if pid == self.dragged_tab_id:
+                close_tab_id = cid
+                break
+        
+        if close_tab_id is None:
+            return
+        
+        # 检查关闭标签是否仍在notebook中
+        if close_tab_id not in all_tabs:
+            return
+        
+        # 获取当前拖拽标签和关闭标签的索引
+        dragged_idx = all_tabs.index(self.dragged_tab_id)
+        close_idx = all_tabs.index(close_tab_id)
+        
+        # 确保关闭标签在拖拽标签后面
+        assert close_idx == dragged_idx + 1, "关闭标签必须紧跟在项目标签后面"
+        
+        # 计算新的位置
+        # 目标位置不能是最后一个标签(+)
+        if target_index >= len(all_tabs) - 1:
+            target_index = len(all_tabs) - 2
+        
+        # 如果目标位置等于当前位置，不需要移动
+        if target_index == dragged_idx:
+            return
+        
+        # 构建新的标签顺序
+        new_order = list(all_tabs)
+        
+        # 移除当前位置的项目标签和关闭标签
+        del new_order[close_idx]
+        del new_order[dragged_idx]
+        
+        # 在新位置插入项目标签和关闭标签
+        new_order.insert(target_index, self.dragged_tab_id)
+        new_order.insert(target_index + 1, close_tab_id)
+        
+        # 使用Tcl命令重新排列标签，避免不必要的刷新
+        # 获取notebook的Tcl命令前缀
+        notebook_tcl = self.notebook._w
+        
+        # 保存当前选中的标签
+        current_selected = self.notebook.select()
+        
+        # 遍历新顺序，重新排列标签
+        for i, tab_id in enumerate(new_order):
+            # 使用Tcl命令直接设置标签位置
+            self.notebook.tk.call(notebook_tcl, "insert", i, tab_id)
+        
+        # 恢复选中的标签
+        if current_selected in new_order:
+            self.notebook.select(current_selected)
+        
+        # 更新拖拽标签的索引
+        self.dragged_tab_index = target_index
 
     def update_tab_title(self, tab_id, new_title):
         if tab_id in self.project_tabs and new_title:

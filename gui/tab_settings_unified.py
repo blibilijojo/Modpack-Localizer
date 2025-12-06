@@ -60,31 +60,51 @@ class UnifiedSettingsTab(ttk.Frame):
         self._create_advanced_settings(container)
 
     def _create_pack_settings_tab_content(self, parent):
+        container = ttk.Frame(parent)
+        container.pack(fill="both", expand=True)
         from gui.tab_pack_settings import TabPackSettings
-        self.pack_settings_manager = TabPackSettings(parent)
+        self.pack_settings_manager = TabPackSettings(container)
 
     def _create_basic_settings(self, parent):
+        # 基础设置框架
         frame = tk_ttk.LabelFrame(parent, text="基础设置", padding="10")
-        frame.pack(fill="x", pady=(0, 5), padx=5)
+        frame.pack(fill="x", pady=(0, 10), padx=5)
+        frame.columnconfigure(0, weight=1)
+
+        # 输出设置分组
+        output_frame = tk_ttk.LabelFrame(frame, text="输出设置", padding="10")
+        output_frame.pack(fill="x", pady=(0, 10))
+        output_frame.columnconfigure(1, weight=1)
 
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", ""))
-        self._create_path_entry(frame, "默认输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
+        self._create_path_entry(output_frame, "默认输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
 
         self.pack_as_zip_var = tk.BooleanVar(value=self.config.get("pack_as_zip", False))
-        zip_check = ttk.Checkbutton(frame, text="打包为.zip压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
+        zip_check = ttk.Checkbutton(output_frame, text="打包为.zip压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
         zip_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(zip_check, "开启后, 将直接生成一个.zip格式的资源包文件, 而不是文件夹。")
 
+        # 翻译匹配设置分组
+        matching_frame = tk_ttk.LabelFrame(frame, text="翻译匹配设置", padding="10")
+        matching_frame.pack(fill="x", pady=(0, 10))
+        matching_frame.columnconfigure(0, weight=1)
+
         self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
-        origin_check = ttk.Checkbutton(frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
+        origin_check = ttk.Checkbutton(matching_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
         origin_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
 
+        # 网络设置分组
+        network_frame = tk_ttk.LabelFrame(frame, text="网络设置", padding="10")
+        network_frame.pack(fill="x")
+        network_frame.columnconfigure(0, weight=1)
+
         self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
-        proxy_check = ttk.Checkbutton(frame, text="使用代理加速下载", variable=self.use_proxy_var, bootstyle="primary")
+        proxy_check = ttk.Checkbutton(network_frame, text="使用代理加速下载", variable=self.use_proxy_var, bootstyle="primary")
         proxy_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(proxy_check, "开启后，在下载社区词典或程序更新时会自动使用内置的代理服务。")
 
+        # 绑定设置保存事件
         self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_all_settings())
         self.use_proxy_var.trace_add("write", lambda *args: self._save_all_settings())
         self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
@@ -92,6 +112,17 @@ class UnifiedSettingsTab(ttk.Frame):
     def _create_advanced_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="高级设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
+        frame.columnconfigure(0, weight=1)
+        
+        # 重置设置分组
+        reset_frame = tk_ttk.LabelFrame(frame, text="重置设置", padding="10")
+        reset_frame.pack(fill="x", pady=5)
+        reset_frame.columnconfigure(0, weight=1)
+        
+        ttk.Label(reset_frame, text="将所有设置恢复为默认值:", wraplength=600).pack(anchor="w", pady=5)
+        reset_btn = ttk.Button(reset_frame, text="重置为默认设置", command=self._reset_settings, bootstyle="danger-outline")
+        reset_btn.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(reset_btn, "警告：此操作将清除所有自定义设置，包括API密钥和路径设置。")
 
     def _create_log_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="日志设置", padding="10")
@@ -150,17 +181,63 @@ CRITICAL: 致命错误，程序即将崩溃
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
         self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
+        # 添加trace事件监听器，确保值变化时自动保存
+        self.community_dict_var.trace_add("write", lambda *args: self._save_all_settings())
         dict_path_frame = ttk.Frame(frame)
         dict_path_frame.pack(fill="x", pady=5)
         dict_label = ttk.Label(dict_path_frame, text="社区词典文件:", width=15)
         dict_label.pack(side="left")
         custom_widgets.ToolTip(dict_label, "可选。一个包含补充翻译的 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
-        dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var)
+        dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var, takefocus=False)
         dict_entry.pack(side="left", fill="x", expand=True, padx=5)
+        # 防止自动选中文本
+        dict_entry.after_idle(dict_entry.selection_clear)
         browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline")
         browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新", command=self._check_and_update_dict_async, bootstyle="info")
         self.download_dict_button.pack(side="left", padx=(5, 0))
+        
+        # 社区词典过滤设置
+        filter_config = self.config.get("community_dict_filter", {})
+        filter_frame = tk_ttk.LabelFrame(frame, text="社区词典导入过滤", padding="10")
+        filter_frame.pack(fill="x", pady=10)
+        filter_frame.columnconfigure(1, weight=1)
+        
+        # 最大单词数设置
+        max_word_label = ttk.Label(filter_frame, text="原文最大单词数:", width=15)
+        max_word_label.grid(row=0, column=0, sticky="w", pady=5)
+        self.max_word_count_var = tk.IntVar(value=filter_config.get("max_word_count", 0))
+        # 添加trace事件监听器，确保值变化时自动保存
+        self.max_word_count_var.trace_add("write", lambda *args: self._save_all_settings())
+        max_word_spinbox = ttk.Spinbox(
+            filter_frame, 
+            from_=0, 
+            to=20, 
+            textvariable=self.max_word_count_var,
+            increment=1,
+            width=10,
+            takefocus=False
+        )
+        max_word_spinbox.grid(row=0, column=1, sticky="w", pady=5, padx=5)
+        custom_widgets.ToolTip(max_word_spinbox, "导入社区词典时，原文单词数超过此值的条目将被过滤掉，0表示不限制")
+        # 防止自动选中文本
+        max_word_spinbox.after_idle(max_word_spinbox.selection_clear)
+        # 绑定事件，调整后立即清除选中状态
+        max_word_spinbox.bind("<ButtonRelease>", lambda e: max_word_spinbox.after_idle(max_word_spinbox.selection_clear))
+        max_word_spinbox.bind("<KeyRelease>", lambda e: max_word_spinbox.after_idle(max_word_spinbox.selection_clear))
+        
+        # 译文必须包含中文设置
+        self.require_chinese_var = tk.BooleanVar(value=filter_config.get("require_chinese_translation", True))
+        # 添加trace事件监听器，确保值变化时自动保存
+        self.require_chinese_var.trace_add("write", lambda *args: self._save_all_settings())
+        require_chinese_check = ttk.Checkbutton(
+            filter_frame, 
+            text="译文必须包含中文", 
+            variable=self.require_chinese_var,
+            bootstyle="primary"
+        )
+        require_chinese_check.grid(row=1, column=0, columnspan=2, sticky="w", pady=5, padx=5)
+        custom_widgets.ToolTip(require_chinese_check, "启用后，导入时会过滤掉译文不包含中文的条目")
 
     def _create_community_packs_list(self, parent):
         packs_frame = tk_ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
@@ -198,7 +275,10 @@ CRITICAL: 致命错误，程序即将崩溃
 
         ttk.Label(frame, text="自定义API服务器地址 (兼容OpenAI):").pack(anchor="w", pady=(5, 0))
         self.api_endpoint_var = tk.StringVar(value=self.config.get("api_endpoint", ""))
-        ttk.Entry(frame, textvariable=self.api_endpoint_var).pack(fill="x", pady=2)
+        api_entry = ttk.Entry(frame, textvariable=self.api_endpoint_var, takefocus=False)
+        api_entry.pack(fill="x", pady=2)
+        # 防止自动选中文本
+        api_entry.after_idle(api_entry.selection_clear)
         
         self.api_keys_text.bind("<<Modified>>", self._on_text_change)
         self.api_endpoint_var.trace_add("write", lambda *args: self._save_all_settings())
@@ -206,36 +286,55 @@ CRITICAL: 致命错误，程序即将崩溃
     def _create_ai_parameters_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="AI 参数设置", padding="10")
         frame.pack(fill="both", expand=True, pady=5, padx=5)
+        frame.columnconfigure(0, weight=1)
         
         self.model_var = tk.StringVar(value=self.config.get("model", "请先获取模型"))
         self.current_model_list = self.config.get("model_list", [])
 
-        model_frame = ttk.Frame(frame)
+        # 模型设置分组
+        model_frame = tk_ttk.LabelFrame(frame, text="模型设置", padding="10")
         model_frame.pack(fill='x', pady=5)
-        ttk.Label(model_frame, text="AI 模型:").pack(side='left', anchor='w')
+        model_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(model_frame, text="AI 模型:", width=12).grid(row=0, column=0, sticky="w", pady=5)
         self.model_option_menu = ttk.Combobox(model_frame, textvariable=self.model_var, state="readonly", values=self.current_model_list)
         if not self.current_model_list: self.model_option_menu.config(state="disabled")
-        self.model_option_menu.pack(side='left', fill='x', expand=True, padx=5)
+        self.model_option_menu.grid(row=0, column=1, sticky="ew", pady=5, padx=5)
         self.fetch_models_button = ttk.Button(model_frame, text="获取模型列表", command=self._fetch_models_async, bootstyle="info-outline")
-        self.fetch_models_button.pack(side='left')
+        self.fetch_models_button.grid(row=0, column=2, pady=5, padx=5)
         
-        perf_frame = tk_ttk.LabelFrame(frame, text="性能与重试设置", padding="10")
-        perf_frame.pack(fill='x', expand=True, pady=10)
+        # 性能设置分组
+        perf_frame = tk_ttk.LabelFrame(frame, text="性能设置", padding="10")
+        perf_frame.pack(fill='x', pady=5)
         perf_frame.columnconfigure(1, weight=1)
         perf_frame.columnconfigure(3, weight=1)
 
         self._create_perf_spinbox(perf_frame, "翻译批处理大小:", "ai_batch_size", (1, 1000), "单次API请求包含的文本数量", is_float=False).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
         self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", (1, 16), "同时发送API请求的最大数量", is_float=False).grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
-        self._create_perf_spinbox(perf_frame, "最大重试次数:", "ai_max_retries", (0, 100), "单个翻译批次失败后的最大重试次数", is_float=False).grid(row=1, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
-        self._create_perf_spinbox(perf_frame, "速率限制冷却(s):", "ai_retry_rate_limit_cooldown", (1.0, 300.0), "因速率限制失败后，单个密钥的冷却时间", is_float=True).grid(row=1, column=2, columnspan=2, sticky="ew", pady=2)
-        self._create_perf_spinbox(perf_frame, "初始重试延迟(s):", "ai_retry_initial_delay", (0.1, 60.0), "常规错误第一次重试前的等待时间", is_float=True).grid(row=2, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
-        self._create_perf_spinbox(perf_frame, "最大重试延迟(s):", "ai_retry_max_delay", (1.0, 600.0), "指数退避策略中，最长的单次等待时间上限", is_float=True).grid(row=2, column=2, columnspan=2, sticky="ew", pady=2)
-        self._create_perf_spinbox(perf_frame, "延迟退避因子:", "ai_retry_backoff_factor", (1.0, 5.0), "指数退避的乘数，大于1以实现延迟递增", is_float=True).grid(row=3, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
         
-        self.prompt_text = scrolledtext.ScrolledText(frame, height=5, wrap="word")
+        # 重试设置分组
+        retry_frame = tk_ttk.LabelFrame(frame, text="重试设置", padding="10")
+        retry_frame.pack(fill='x', pady=5)
+        retry_frame.columnconfigure(1, weight=1)
+        retry_frame.columnconfigure(3, weight=1)
+
+        self._create_perf_spinbox(retry_frame, "最大重试次数:", "ai_max_retries", (0, 100), "单个翻译批次失败后的最大重试次数", is_float=False).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
+        self._create_perf_spinbox(retry_frame, "速率限制冷却(s):", "ai_retry_rate_limit_cooldown", (1.0, 300.0), "因速率限制失败后，单个密钥的冷却时间", is_float=True).grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
+        self._create_perf_spinbox(retry_frame, "初始重试延迟(s):", "ai_retry_initial_delay", (0.1, 60.0), "常规错误第一次重试前的等待时间", is_float=True).grid(row=1, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
+        self._create_perf_spinbox(retry_frame, "最大重试延迟(s):", "ai_retry_max_delay", (1.0, 600.0), "指数退避策略中，最长的单次等待时间上限", is_float=True).grid(row=1, column=2, columnspan=2, sticky="ew", pady=2)
+        self._create_perf_spinbox(retry_frame, "延迟退避因子:", "ai_retry_backoff_factor", (1.0, 5.0), "指数退避的乘数，大于1以实现延迟递增", is_float=True).grid(row=2, column=0, columnspan=4, sticky="ew", pady=2)
+        
+        # Prompt设置分组
+        prompt_frame = tk_ttk.LabelFrame(frame, text="Prompt 设置", padding="10")
+        prompt_frame.pack(fill='both', expand=True, pady=5)
+        prompt_frame.columnconfigure(0, weight=1)
+        
+        ttk.Label(prompt_frame, text="自定义翻译提示词:", anchor="w").pack(fill="x", pady=(0, 5))
+        self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=5, wrap="word")
         self.prompt_text.pack(fill='both', expand=True, pady=5)
         self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
         
+        # 绑定事件
         self.model_option_menu.bind('<<ComboboxSelected>>', lambda e: (self._save_all_settings(), self.model_option_menu.selection_clear()))
         self.prompt_text.bind("<<Modified>>", self._on_text_change)
 
@@ -249,6 +348,12 @@ CRITICAL: 致命错误，程序即将崩溃
         config["use_github_proxy"] = self.use_proxy_var.get()
         config["pack_as_zip"] = self.pack_as_zip_var.get()
         config["log_level"] = self.log_level_var.get()
+        
+        # 保存社区词典过滤设置
+        config["community_dict_filter"] = {
+            "max_word_count": self.max_word_count_var.get(),
+            "require_chinese_translation": self.require_chinese_var.get()
+        }
 
         raw_text = self.api_keys_text.get("1.0", "end-1c")
         text_with_newlines = raw_text.replace(',', '\n')
@@ -259,8 +364,6 @@ CRITICAL: 致命错误，程序即将崩溃
         config["model"] = self.model_var.get()
         config["model_list"] = self.current_model_list
         config["prompt"] = self.prompt_text.get("1.0", tk.END).strip()
-        
-        
         
         spinbox_keys = [
             "ai_batch_size", "ai_max_threads", "ai_max_retries", 
@@ -287,6 +390,11 @@ CRITICAL: 致命错误，程序即将崩溃
         self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
         self.log_level_var.set(self.config.get("log_level", "INFO"))
         
+        # 更新社区词典过滤设置
+        filter_config = self.config.get("community_dict_filter", {})
+        self.max_word_count_var.set(filter_config.get("max_word_count", 0))
+        self.require_chinese_var.set(filter_config.get("require_chinese_translation", True))
+        
         self.api_keys_text.delete("1.0", tk.END)
         self.api_keys_text.insert(tk.END, self.config.get("api_keys_raw", ""))
         self.api_endpoint_var.set(self.config.get("api_endpoint", ""))
@@ -303,8 +411,6 @@ CRITICAL: 致命错误，程序即将崩溃
         for path in self.config.get("community_pack_paths", []):
             self.packs_listbox.insert(tk.END, path)
         
-        
-        
         # 更新AI参数spinbox值
         spinbox_keys = [
             "ai_batch_size", "ai_max_threads", "ai_max_retries", 
@@ -315,6 +421,27 @@ CRITICAL: 致命错误，程序即将崩溃
             var = getattr(self, f"{key}_var", None)
             if var:
                 var.set(self.config.get(key, config_manager.DEFAULT_CONFIG.get(key)))
+        
+        # 确保所有输入控件在更新后不会自动选中文本
+        self.after_idle(self._clear_all_selections)
+    
+    def _clear_all_selections(self):
+        """清除所有输入控件的选中状态"""
+        # 清除所有输入控件的选中状态
+        for widget in self.winfo_children():
+            self._clear_widget_selection(widget)
+    
+    def _clear_widget_selection(self, widget):
+        """递归清除控件及其子控件的选中状态"""
+        if hasattr(widget, 'selection_clear'):
+            try:
+                widget.selection_clear()
+            except tk.TclError:
+                pass
+        
+        # 处理子控件
+        for child in widget.winfo_children():
+            self._clear_widget_selection(child)
 
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
         row_frame = ttk.Frame(parent)
@@ -322,11 +449,13 @@ CRITICAL: 致命错误，程序即将崩溃
         label = ttk.Label(row_frame, text=label_text, width=15)
         label.pack(side="left")
         custom_widgets.ToolTip(label, tooltip)
-        entry = ttk.Entry(row_frame, textvariable=var)
+        entry = ttk.Entry(row_frame, textvariable=var, takefocus=False)
         entry.pack(side="left", fill="x", expand=True, padx=5)
         var.trace_add("write", lambda *args: self._save_all_settings())
         browse_cmd = lambda: ui_utils.browse_directory(var) if browse_type == "directory" else ui_utils.browse_file(var)
         ttk.Button(row_frame, text="浏览...", command=browse_cmd, bootstyle="primary-outline").pack(side="left")
+        # 防止自动选中文本
+        entry.after_idle(entry.selection_clear)
 
     def _create_perf_spinbox(self, parent, label_text, config_key, range_val, tooltip, is_float=False):
         container = ttk.Frame(parent)
@@ -340,10 +469,12 @@ CRITICAL: 致命错误，程序即将崩溃
             var = tk.IntVar(value=self.config.get(config_key))
         setattr(self, f"{config_key}_var", var)
         
-        spinbox = ttk.Spinbox(container, from_=range_val[0], to=range_val[1], textvariable=var, increment=0.1 if is_float else 1)
+        spinbox = ttk.Spinbox(container, from_=range_val[0], to=range_val[1], textvariable=var, increment=0.1 if is_float else 1, takefocus=False)
         spinbox.pack(side='left', fill='x', expand=True, padx=5)
         
         var.trace_add("write", self._save_all_settings)
+        # 防止自动选中文本
+        spinbox.after_idle(spinbox.selection_clear)
         return container
 
     def _on_text_change(self, event=None):
@@ -404,6 +535,30 @@ CRITICAL: 致命错误，程序即将崩溃
             ui_utils.show_info("成功", f"成功获取 {len(model_list)} 个模型！列表已保存")
         else:
             ui_utils.show_error("失败", "未能获取到任何可用模型\n请检查密钥、网络或服务器地址")
+    
+    def _reset_settings(self):
+        """
+        将所有设置重置为默认值
+        """
+        from tkinter import messagebox
+        result = messagebox.askyesnocancel(
+            "重置设置",
+            "警告：此操作将清除所有自定义设置，包括API密钥、路径设置和AI参数等。\n\n是否确定要重置所有设置？",
+            icon="warning"
+        )
+        
+        if result:
+            try:
+                # 加载默认配置
+                default_config = config_manager.DEFAULT_CONFIG
+                # 保存默认配置
+                config_manager.save_config(default_config)
+                # 刷新UI
+                self.config = default_config
+                self._refresh_ui_from_config()
+                ui_utils.show_info("重置成功", "所有设置已恢复为默认值")
+            except Exception as e:
+                ui_utils.show_error("重置失败", f"重置设置时发生错误：{str(e)}")
 
     def _check_and_update_dict_async(self):
         self.download_dict_button.config(state="disabled", text="检查中...")

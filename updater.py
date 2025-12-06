@@ -20,11 +20,14 @@ def main():
             except psutil.NoSuchProcess:
                 pass
         time.sleep(1)
+        if os.path.exists(old_exe_backup_path):
+            os.remove(old_exe_backup_path)
         os.rename(current_exe_path, old_exe_backup_path)
         os.rename(new_exe_path, current_exe_path)
         subprocess.Popen([current_exe_path])
+        # 删除旧版本备份文件和更新器自身
         subprocess.Popen(
-            f'ping 127.0.0.1 -n 2 > nul & del "{sys.executable}"',
+            f'ping 127.0.0.1 -n 2 > nul & del "{old_exe_backup_path}" & del "{sys.executable}"',
             shell=True,
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
         )

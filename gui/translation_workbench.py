@@ -995,12 +995,24 @@ class TranslationWorkbench(ttk.Frame):
     def _set_dirty(self, is_dirty: bool):
         self.is_dirty = is_dirty
         self.save_button.config(bootstyle="primary" if is_dirty else "primary-outline")
+        
+        # 取消之前的延迟保存定时器
+        if hasattr(self, '_session_save_timer') and self._session_save_timer:
+            self.after_cancel(self._session_save_timer)
+        
         if self.main_window and self.is_dirty:
-            self.main_window._save_current_session()
+            # 添加延迟保存机制，避免过于频繁的会话保存
+            # 1秒后执行保存，期间有新的修改会取消之前的定时器
+            self._session_save_timer = self.after(1000, self._save_session_with_delay)
         
         # 实现自动保存项目数据
         if self.is_dirty and self.current_project_path:
             self._perform_save(self.current_project_path)
+    
+    def _save_session_with_delay(self):
+        """延迟保存会话"""
+        if self.main_window and self.is_dirty:
+            self.main_window._save_current_session()
 
     def _perform_save(self, save_path) -> bool:
         self._save_current_edit()

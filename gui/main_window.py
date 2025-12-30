@@ -12,6 +12,7 @@ import re
 import sys
 
 from gui import ui_utils
+from gui.dialogs import PackPresetDialog, DownloadProgressDialog
 from utils import config_manager, session_manager
 from core.orchestrator import Orchestrator
 from _version import __version__
@@ -472,7 +473,6 @@ class ProjectTab:
             self._reset_ui_after_workflow("cancelled")
             return
 
-        from gui.dialogs import PackPresetDialog
         dialog = PackPresetDialog(self.root, presets)
         chosen_preset_name = dialog.result
 
@@ -712,7 +712,6 @@ class MainWindow:
         import subprocess
         import sys
         from pathlib import Path
-        from gui.dialogs import DownloadProgressDialog
         
         try:
             # 创建临时目录保存下载文件

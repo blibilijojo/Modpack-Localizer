@@ -108,7 +108,8 @@ def check_for_updates(current_version_str: str) -> dict | None:
             return None
     except Exception as e:
         logging.error(f"直接连接GitHub API进行程序版本检测失败: {e}")
-        return None
+        # 重新抛出异常，让调用者知道检查失败
+        raise
 
 def _download_chunk(url, start, end, session, save_path, chunk_index, chunk_size):
     headers = {'Range': f'bytes={start}-{end}'}

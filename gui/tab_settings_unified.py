@@ -3,6 +3,7 @@ from tkinter import filedialog, scrolledtext, messagebox
 from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 from gui import ui_utils, custom_widgets
+from gui.dialogs import DownloadProgressDialog
 from gui.tab_pack_settings import TabPackSettings
 from services.ai_translator import AITranslator
 from utils import config_manager
@@ -747,7 +748,6 @@ CRITICAL: 致命错误，程序即将崩溃
                 return
             
             # 创建进度对话框
-            from gui.dialogs import DownloadProgressDialog
             progress_dialog = DownloadProgressDialog(self, title="创建术语库")
             
             # 定义创建线程函数

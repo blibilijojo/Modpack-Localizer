@@ -920,17 +920,18 @@ class TranslationWorkbench(ttk.Frame):
         ns, idx = self._get_ns_idx_from_iid(row_id)
         if ns is None: return
         
-        # 先获取当前编辑器的内容
+        # 先获取当前编辑器的内容和当前选择信息
         current_zh_text = self.zh_text_input.get("1.0", "end-1c").strip()
+        current_selection = self.current_selection_info
+        
+        # 检查是否有当前选择，并且编辑器内容与当前选择的译文不同
+        if current_selection and current_zh_text != self.translation_data[current_selection['ns']]['items'][current_selection['idx']].get('zh', '').strip():
+            # 如果不同，则保存当前编辑的内容
+            self._save_current_edit()
         
         # 更新当前选择信息
         self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': row_id}
         item_data = self.translation_data[ns]['items'][idx]
-        
-        # 检查编辑器内容是否与当前项目的译文不同
-        if current_zh_text != item_data.get('zh', '').strip():
-            # 如果不同，则保存当前编辑的内容
-            self._save_current_edit()
         
         # 更新编辑器内容
         self.zh_text_input.edit_modified(False)
@@ -1766,10 +1767,6 @@ class TranslationWorkbench(ttk.Frame):
         self.zh_text_input.config(state="normal")
         self.zh_text_input.delete("1.0", "end")
         self.zh_text_input.insert("1.0", zh_text)
-        
-        # 修复文字右边可选中的问题：确保只插入实际文本，不包含多余的空白
-        # 移除文本末尾可能存在的换行符
-        self.zh_text_input.delete("end-1c", "end")
         
         # 确保译文栏只显示实际文本，不允许在文字右边选中
         self.zh_text_input.config(height=3, wrap="word")

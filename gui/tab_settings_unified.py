@@ -191,13 +191,7 @@ class UnifiedSettingsTab(ttk.Frame):
         ttk.Entry(add_proxy_frame, textvariable=self.new_proxy_var).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         ttk.Button(add_proxy_frame, text="添加", command=self._add_proxy, bootstyle="success-outline").grid(row=0, column=2, padx=5, pady=5, sticky="ew")
     
-    def _refresh_ui_from_config(self):
-        """从配置中刷新UI"""
-        super()._refresh_ui_from_config()
-        
-        # 重新加载代理列表
-        if hasattr(self, 'proxy_tree'):
-            self._load_proxy_list()
+    # 移除重复的方法定义，避免调用不存在的父类方法
     
     def _clear_proxies(self):
         """清空所有代理"""

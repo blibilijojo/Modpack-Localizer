@@ -646,7 +646,7 @@ class MainWindow:
                             activebackground=active_bg, activeforeground=active_fg)
         self.menu_bar.add_cascade(label="帮助", menu=self.help_menu)
         self.help_menu.add_command(label="项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
-        self.help_menu.add_command(label="检查更新", command=self._check_for_updates)
+        self.help_menu.add_command(label="检查更新", command=lambda: self.start_update_check(user_initiated=True))
         self.help_menu.add_separator()
         self.help_menu.add_command(label="关于", command=self._show_about)
     
@@ -677,103 +677,113 @@ class MainWindow:
         if self.find_replace_window and self.find_replace_window.winfo_exists():
             self.find_replace_window.lift()
     
-    def _check_for_updates(self):
-        """检查程序更新"""
-        self._dispatch_log_to_active_tab("正在检查更新...", "INFO")
-        from utils import update_checker
-        threading.Thread(target=lambda: self._check_update_worker(update_checker), daemon=True).start()
-    
-    def _check_update_worker(self, update_checker):
+    def start_update_check(self, user_initiated=False):
+        """启动更新检查"""
+        if not getattr(sys, 'frozen', False):
+            if user_initiated:
+                self._dispatch_log_to_active_tab("当前为开发模式，无法使用更新功能", "INFO")
+            return
+
+        threading.Thread(target=self._check_for_updates_thread, args=(user_initiated,), daemon=True).start()
+
+    def _check_for_updates_thread(self, user_initiated):
         """检查更新的工作线程"""
-        try:
-            from _version import __version__
-            update_info = update_checker.check_for_updates(__version__)
-            if update_info:
-                self._dispatch_log_to_active_tab(f"发现新版本: {update_info['version']}（当前版本: {__version__}）", "INFO")
-                # 询问用户是否下载更新
-                self.after(0, lambda info=update_info: self._ask_update_download(info))
-            else:
-                self._dispatch_log_to_active_tab("当前已是最新版本。", "INFO")
-        except Exception as e:
-            self._dispatch_log_to_active_tab(f"检查更新失败: {str(e)}", "ERROR")
-    
-    def _ask_update_download(self, update_info):
-        """询问用户是否下载更新"""
-        from tkinter import messagebox
+        from utils import update_checker
         from _version import __version__
         
-        msg = f"发现新版本 {update_info['version']}（当前版本: {__version__}），是否立即下载更新？\n\n更新日志:\n{update_info['notes'][:300]}{'...' if len(update_info['notes']) > 300 else ''}"
-        if messagebox.askyesno("更新提示", msg, parent=self.root):
-            self.after(0, lambda info=update_info: self._download_and_update(info))
-    
-    def _download_and_update(self, update_info):
-        """下载并更新应用程序"""
-        import tempfile
-        import subprocess
-        import sys
-        from pathlib import Path
+        update_info = update_checker.check_for_updates(__version__)
+        if update_info:
+            self.after(0, self._show_update_dialog, update_info)
+        elif user_initiated:
+            self.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，您使用的已是最新版本！"))
+
+    def _show_update_dialog(self, update_info: dict):
+        """显示更新对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"发现新版本: {update_info['version']}")
+        dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
+
+        message_frame = ttk.Frame(dialog, padding=20)
+        message_frame.pack(fill="x")
         
+        message_text = (f"一个新版本 ({update_info['version']}) 可用！\n\n""是否立即下载并安装更新？")
+        ttk.Label(message_frame, text=message_text, justify="left").pack(anchor="w")
+
+        progress_frame = ttk.Frame(dialog, padding=(20, 10))
+        progress_frame.pack(fill="x")
+        self.status_label = ttk.Label(progress_frame, text="准备就绪")
+        self.status_label.pack(fill="x")
+        self.progress_bar = ttk.Progressbar(progress_frame, length=300, mode='determinate')
+        self.progress_bar.pack(fill="x", pady=5)
+
+        btn_frame = ttk.Frame(dialog, padding=10)
+        btn_frame.pack(fill="x")
+        
+        def on_update():
+            self.update_btn.config(state="disabled"); self.later_btn.config(state="disabled")
+            threading.Thread(target=self._start_update_process, args=(update_info,), daemon=True).start()
+
+        self.update_btn = ttk.Button(btn_frame, text="立即更新", command=on_update, bootstyle="success")
+        self.update_btn.pack(side="right", padx=5)
+        self.later_btn = ttk.Button(btn_frame, text="稍后提醒", command=dialog.destroy)
+        self.later_btn.pack(side="right")
+        
+    def _update_progress_ui(self, status, percentage, speed):
+        """更新进度UI"""
+        self.status_label.config(text=f"{status}... {int(percentage)}% ({speed})")
+        self.progress_bar['value'] = percentage
+
+    def _start_update_process(self, update_info: dict):
+        """开始更新过程"""
+        import sys
+        import subprocess
+        import os
+        from pathlib import Path
+        from utils import update_checker
+        
+        current_exe_path = Path(sys.executable)
+        exe_dir = current_exe_path.parent
+        
+        new_exe_temp_path = current_exe_path.with_suffix(current_exe_path.suffix + ".new")
+        old_exe_backup_path = current_exe_path.with_suffix(current_exe_path.suffix + ".old")
+
+        # 1. 下载新版本
+        download_ok = update_checker.download_update(update_info["asset_url"], new_exe_temp_path,
+                                                     lambda s, p, sp: self.root.after(0, self._update_progress_ui, s, p, sp))
+        if not download_ok:
+            self.root.after(0, lambda: messagebox.showerror("更新失败", "下载新版本失败，请检查网络或稍后重试。", parent=self.root))
+            self.root.after(0, self.later_btn.master.master.destroy)
+            return
+
+        # 2. 定位并释放内置的 updater.exe
         try:
-            # 创建临时目录保存下载文件
-            temp_dir = Path(tempfile.gettempdir())
-            exe_filename = Path(update_info['asset_url']).name
-            dest_file = temp_dir / exe_filename
-            
-            self._dispatch_log_to_active_tab(f"开始下载更新: {update_info['version']}", "INFO")
-            
-            # 创建下载进度对话框
-            progress_dialog = DownloadProgressDialog(self.root, title="下载更新")
-            
-            # 下载更新文件
-            from utils import update_checker
-            success = update_checker.download_update(
-                update_info['asset_url'], 
-                dest_file, 
-                lambda s, p, sp: progress_dialog.update_progress(s, p, sp),
-                update_info.get('sha256_url')
-            )
-            
-            progress_dialog.close_dialog()
-            
-            if success:
-                self._dispatch_log_to_active_tab("下载完成，准备更新应用程序", "INFO")
-                
-                # 获取当前可执行文件路径
-                current_exe = Path(sys.executable)
-                
-                # 检查是否是PyInstaller打包的可执行文件
-                if current_exe.suffix == '.exe':
-                    # 使用updater.py进行更新
-                    updater_script = Path(__file__).parent.parent / "updater.py"
-                    
-                    if updater_script.exists():
-                        # 准备更新命令
-                        old_exe_backup = current_exe.with_suffix('.old.exe')
-                        
-                        # 启动更新器并退出当前应用
-                        subprocess.Popen([
-                            sys.executable,
-                            str(updater_script),
-                            str(os.getpid()),
-                            str(current_exe),
-                            str(dest_file),
-                            str(old_exe_backup)
-                        ])
-                        
-                        # 退出当前应用
-                        self.root.quit()
-                    else:
-                        self._dispatch_log_to_active_tab("更新器脚本不存在，无法自动更新", "ERROR")
-                else:
-                    # 不是打包的可执行文件，提示用户手动更新
-                    self._dispatch_log_to_active_tab(f"下载完成，文件保存到: {dest_file}", "INFO")
-                    self._dispatch_log_to_active_tab("当前为开发模式，无法自动更新，请手动替换文件", "INFO")
-            else:
-                self._dispatch_log_to_active_tab("下载更新失败", "ERROR")
-        except Exception as e:
-            self._dispatch_log_to_active_tab(f"更新过程中发生错误: {str(e)}", "ERROR")
-            import traceback
-            traceback.print_exc()
+            # sys._MEIPASS 只有在打包后的exe中才存在
+            updater_path = Path(sys._MEIPASS) / "updater.exe"
+            if not updater_path.exists():
+                 raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
+        except AttributeError:
+            # 如果是直接运行 .py 文件进行开发调试，则无法使用此功能
+            self.root.after(0, lambda: messagebox.showerror("开发模式", "更新功能只能在打包后的 .exe 程序中使用。"))
+            return
+        except FileNotFoundError as e:
+            self.root.after(0, lambda: messagebox.showerror("更新错误", str(e)))
+            return
+
+        # 3. 准备启动更新器所需的所有命令行参数
+        pid = os.getpid()
+        command = [
+            str(updater_path),
+            str(pid),                # 参数1: 主程序的进程ID
+            str(current_exe_path),   # 参数2: 当前(旧版)exe的完整路径
+            str(new_exe_temp_path),  # 参数3: 已下载的新版exe的完整路径
+            str(old_exe_backup_path) # 参数4: 用于备份旧版的路径
+        ]
+
+        # 4. 启动 updater.exe 作为一个完全分离的、独立的进程
+        subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+
+        # 5. 主程序安排自己退出，将控制权完全交给更新器
+        self.root.after(100, self.root.destroy)
     
     def _show_about(self):
         """显示关于对话框"""

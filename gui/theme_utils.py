@@ -15,11 +15,8 @@ def set_title_bar_theme(window, style_instance):
         is_dark_theme = style_instance.theme_use() == "darkly"
         value = c_int(1 if is_dark_theme else 0)
         windll.dwmapi.DwmSetWindowAttribute(HWND, DWMWA_USE_IMMERSIVE_DARK_MODE, byref(value), sizeof(value))
-        
-        SW_HIDE = 0
-        SW_SHOW = 5
-        windll.user32.ShowWindow(HWND, SW_HIDE)
-        windll.user32.ShowWindow(HWND, SW_SHOW)
+        # 移除ShowWindow调用，避免窗口闪烁
+        # 只需要设置DwmSetWindowAttribute就足够更新标题栏主题
 
     except Exception as e:
         logging.warning(f"无法设置Windows深色标题栏: {e}")

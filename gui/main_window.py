@@ -233,8 +233,7 @@ class ProjectTab:
             ttk.Entry(container, textvariable=self.instance_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.instance_dir_var)).grid(row=1, column=2, padx=5, pady=8)
             
-            ttk.Label(container, text="整合包名称 (英文):").grid(row=2, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.modpack_name_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
+
 
             start_command = self._setup_new_quest_project
         
@@ -267,7 +266,8 @@ class ProjectTab:
         )
         self.workbench_instance.pack(fill="both", expand=True)
         self.main_window.update_menu_state()
-        self.main_window._save_current_session()
+        # 标签页恢复过程中不保存会话，避免清除已加载的缓存
+        # 只有在用户实际操作后才保存会话
 
     def _on_workbench_finish(self, final_translations, final_workbench_data):
         self.main_window.update_menu_state()
@@ -356,16 +356,15 @@ class ProjectTab:
 
     def _setup_new_quest_project(self):
         instance_dir = self.instance_dir_var.get()
-        modpack_name = self.modpack_name_var.get().strip()
-        if not instance_dir or not modpack_name:
-            ui_utils.show_error("输入不能为空", "请同时指定实例文件夹和整合包名称。", parent=self.root)
+        if not instance_dir:
+            ui_utils.show_error("输入不能为空", "请指定实例文件夹。", parent=self.root)
             return
 
         self.project_type = "quest"
-        self.project_name = modpack_name
-        self.project_info = {"instance_dir": instance_dir, "modpack_name": modpack_name}
+        self.project_name = "任务汉化"
+        self.project_info = {"instance_dir": instance_dir}
         self.log_message("任务汉化项目已配置，开始提取文本...", "INFO")
-        self.main_window.update_tab_title(self.tab_id, modpack_name)
+        self.main_window.update_tab_title(self.tab_id, "任务汉化")
         
         self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
         
@@ -501,6 +500,10 @@ class MainWindow:
         self.project_tabs = {}
         self.close_tab_map = {}
         self.tab_counter = 0
+        # 标签拖拽相关属性
+        self.dragged_tab_index = None
+        self.dragged_tab_id = None
+        self.dragged_tab_pos = None
 
         self._create_menu()
         self._create_widgets()
@@ -541,11 +544,31 @@ class MainWindow:
         if session_data:
             self._dispatch_log_to_active_tab(f"检测到 {len(session_data)} 个未关闭的标签页，正在恢复...", "INFO")
             initial_tab_id = list(self.project_tabs.keys())[0]
-            self._close_tab_by_id(initial_tab_id, force=True)
+            # 保存初始标签页的关闭，不保存会话（避免清除已加载的缓存）
+            # 先获取关闭标签页的索引
+            project_tab_ids = [tid for tid in self.notebook.tabs() if tid in self.project_tabs]
+            try:
+                closed_project_index = project_tab_ids.index(initial_tab_id)
+            except ValueError:
+                closed_project_index = 0
             
+            # 直接移除标签页，不调用 _save_current_session()
+            self.notebook.forget(initial_tab_id)
+            del self.project_tabs[initial_tab_id]
+            
+            # 移除对应的关闭标签页
+            close_tab_id = next((cid for cid, tid in self.close_tab_map.items() if tid == initial_tab_id), None)
+            if close_tab_id:
+                self.notebook.forget(close_tab_id)
+                del self.close_tab_map[close_tab_id]
+            
+            # 恢复会话标签页
             for tab_state in session_data:
                 new_tab = self._add_new_tab()
                 new_tab.restore_from_state(tab_state)
+            
+            # 会话恢复完成后再保存会话
+            self._save_current_session()
         else:
              self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
 
@@ -579,10 +602,10 @@ class MainWindow:
                             bg=menu_bg, fg=menu_fg,
                             activebackground=active_bg, activeforeground=active_fg)
         self.menu_bar.add_cascade(label="文件", menu=self.file_menu)
-        self.file_menu.add_command(label="新建项目/标签页", command=self._add_new_tab)
-        self.file_menu.add_command(label="返回项目选择", command=self._reset_active_tab)
+        self.file_menu.add_command(label="新建项目", command=self._add_new_tab)
+        self.file_menu.add_command(label="返回欢迎页", command=self._reset_active_tab)
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="关闭当前标签页", command=lambda: self._close_tab_by_id(self.notebook.select()))
+        self.file_menu.add_command(label="关闭标签页", command=lambda: self._close_tab_by_id(self.notebook.select()))
         
         # 编辑菜单，并直接设置颜色
         self.edit_menu = Menu(self.menu_bar, tearoff=0, 
@@ -599,18 +622,14 @@ class MainWindow:
                             bg=menu_bg, fg=menu_fg,
                             activebackground=active_bg, activeforeground=active_fg)
         self.menu_bar.add_cascade(label="工具", menu=self.tools_menu)
-        self.tools_menu.add_command(label="AI 翻译所有待译项", command=lambda: self._call_workbench_method('_run_ai_translation_async'))
         self.tools_menu.add_command(label="查询词典", command=lambda: self._call_workbench_method('_open_dict_search'))
         self.tools_menu.add_separator()
-        self.tools_menu.add_command(label="存入个人词典", command=lambda: self._call_workbench_method('_add_to_user_dictionary'))
+        self.tools_menu.add_command(label="添加到个人词典", command=lambda: self._call_workbench_method('_add_to_user_dictionary'))
         
         # 全局工具菜单已整合到工具菜单中
         from gui.user_dictionary_editor import UserDictionaryEditor
-        from gui.term_database_editor import TermDatabaseEditor
         # 在工具菜单中添加编辑个人词典选项
-        self.tools_menu.add_command(label="编辑个人词典", command=lambda: UserDictionaryEditor(self.root))
-        # 添加术语库编辑器选项
-        self.tools_menu.add_command(label="术语库编辑器", command=lambda: TermDatabaseEditor(self.root))
+        self.tools_menu.add_command(label="管理个人词典", command=lambda: UserDictionaryEditor(self.root))
         
         # 视图菜单已移除，功能已整合到底栏
 
@@ -626,7 +645,7 @@ class MainWindow:
                             bg=menu_bg, fg=menu_fg,
                             activebackground=active_bg, activeforeground=active_fg)
         self.menu_bar.add_cascade(label="帮助", menu=self.help_menu)
-        self.help_menu.add_command(label="访问项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
+        self.help_menu.add_command(label="项目主页", command=lambda: webbrowser.open("https://github.com/blibilijojo/Modpack-Localizer"))
         self.help_menu.add_command(label="检查更新", command=self._check_for_updates)
         self.help_menu.add_separator()
         self.help_menu.add_command(label="关于", command=self._show_about)
@@ -651,10 +670,9 @@ class MainWindow:
         self.edit_menu.entryconfig(3, state=state)  # 查找和替换
         
         # 为工具菜单的每个命令设置状态
-        self.tools_menu.entryconfig(0, state=state)  # AI 翻译所有待译项
-        self.tools_menu.entryconfig(1, state=state)  # 查询词典
-        self.tools_menu.entryconfig(3, state=state)  # 存入个人词典
-        self.tools_menu.entryconfig(4, state="normal")  # 编辑个人词典 - 始终可用
+        self.tools_menu.entryconfig(0, state=state)  # 查询词典
+        self.tools_menu.entryconfig(2, state=state)  # 存入个人词典
+        self.tools_menu.entryconfig(3, state="normal")  # 编辑个人词典 - 始终可用
         
         if self.find_replace_window and self.find_replace_window.winfo_exists():
             self.find_replace_window.lift()

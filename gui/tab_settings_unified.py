@@ -22,18 +22,25 @@ class UnifiedSettingsTab(ttk.Frame):
         self.ai_tab_frame = ttk.Frame(self.notebook, padding=10)
         self.resource_pack_tab_frame = ttk.Frame(self.notebook, padding=10)
         self.pack_settings_tab_frame = ttk.Frame(self.notebook)
+        self.github_proxy_tab_frame = ttk.Frame(self.notebook, padding=10)
         self.advanced_tab_frame = ttk.Frame(self.notebook, padding=10)
 
         self.notebook.add(self.basic_tab_frame, text=" 基础设置 ")
-        self.notebook.add(self.ai_tab_frame, text=" AI 翻译设置 ")
-        self.notebook.add(self.resource_pack_tab_frame, text=" 资源包管理 ")
+        self.notebook.add(self.ai_tab_frame, text=" AI 翻译 ")
+        self.notebook.add(self.resource_pack_tab_frame, text=" 资源包 ")
         self.notebook.add(self.pack_settings_tab_frame, text=" 生成预案 ")
-        self.notebook.add(self.advanced_tab_frame, text=" 高级设置 ")
+        self.notebook.add(self.github_proxy_tab_frame, text=" 网络代理 ")
+        self.notebook.add(self.advanced_tab_frame, text=" 高级 ")
 
+        # AI设置相关变量初始化
+        self.api_keys_text = None
+        self.prompt_text = None
+        
         self._create_basic_tab_content(self.basic_tab_frame)
         self._create_ai_tab_content(self.ai_tab_frame)
         self._create_resource_pack_tab_content(self.resource_pack_tab_frame)
         self._create_pack_settings_tab_content(self.pack_settings_tab_frame)
+        self._create_github_proxy_tab_content(self.github_proxy_tab_frame)
         self._create_advanced_tab_content(self.advanced_tab_frame)
 
     def _create_basic_tab_content(self, parent):
@@ -109,10 +116,164 @@ class UnifiedSettingsTab(ttk.Frame):
         self.use_proxy_var.trace_add("write", lambda *args: self._save_all_settings())
         self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
 
+    def _create_github_proxy_tab_content(self, parent):
+        """创建GitHub代理设置选项卡内容"""
+        container = ttk.Frame(parent)
+        container.pack(fill="both", expand=True)
+        
+        # 初始化代理数据
+        self.proxy_data = {}
+        
+        # GitHub代理设置框架
+        frame = tk_ttk.LabelFrame(container, text="GitHub代理设置", padding="10")
+        frame.pack(fill="both", expand=True, pady=5, padx=5)
+        frame.columnconfigure(0, weight=1)
+        
+        # 说明文本
+        ttk.Label(frame, text="管理GitHub加速代理URL，用于加速GitHub资源下载。", wraplength=700).pack(anchor="w", pady=5)
+        
+        # 代理表格区域
+        table_frame = ttk.Frame(frame)
+        table_frame.pack(fill="both", expand=True, pady=5)
+        
+        # 创建Treeview表格
+        columns = ("url", "speed")
+        self.proxy_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        
+        # 设置列标题和宽度
+        self.proxy_tree.heading("url", text="代理URL", anchor="w")
+        self.proxy_tree.heading("speed", text="速度")
+        
+        self.proxy_tree.column("url", width=300, anchor="w")
+        self.proxy_tree.column("speed", width=100, anchor="center")
+        
+        # 添加滚动条
+        scrollbar_y = ttk.Scrollbar(table_frame, orient="vertical", command=self.proxy_tree.yview)
+        scrollbar_x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.proxy_tree.xview)
+        self.proxy_tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        
+        # 布局
+        scrollbar_y.pack(side="right", fill="y")
+        scrollbar_x.pack(side="bottom", fill="x")
+        self.proxy_tree.pack(side="left", fill="both", expand=True)
+        
+        # 绑定事件
+        self.proxy_tree.bind("<Double-1>", self._edit_proxy)
+        
+        # 加载代理列表
+        self._load_proxy_list()
+        
+        # 操作按钮区域
+        button_frame = ttk.LabelFrame(frame, text="操作", padding="10")
+        button_frame.pack(fill="x", pady=5)
+        button_frame.columnconfigure((0, 1, 2, 3), weight=1, uniform="button")
+        
+        # 第一行按钮：添加、删除、编辑
+        ttk.Button(button_frame, text="一键添加预设代理", command=self._add_preset_proxies, bootstyle="success").grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        ttk.Button(button_frame, text="删除选中", command=self._remove_selected_proxy, bootstyle="danger-outline").grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Button(button_frame, text="编辑选中", command=self._edit_proxy, bootstyle="warning-outline").grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+        ttk.Button(button_frame, text="清空", command=lambda: self._clear_proxies(), bootstyle="secondary-outline").grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+        
+        # 第二行按钮：测试功能
+        ttk.Button(button_frame, text="测试选中代理", command=self._test_selected_proxy, bootstyle="info-outline").grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        ttk.Button(button_frame, text="批量测试速度", command=self._batch_test_speed, bootstyle="info-outline").grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Button(button_frame, text="清空测试结果", command=self._clear_test_results, bootstyle="secondary-outline").grid(row=1, column=2, padx=5, pady=5, sticky="ew")
+        
+        # 添加新代理区域
+        add_proxy_frame = ttk.LabelFrame(frame, text="添加新代理", padding="10")
+        add_proxy_frame.pack(fill="x", pady=5)
+        add_proxy_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(add_proxy_frame, text="代理URL:", width=10).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.new_proxy_var = tk.StringVar(value="")
+        ttk.Entry(add_proxy_frame, textvariable=self.new_proxy_var).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Button(add_proxy_frame, text="添加", command=self._add_proxy, bootstyle="success-outline").grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+    
+    def _refresh_ui_from_config(self):
+        """从配置中刷新UI"""
+        super()._refresh_ui_from_config()
+        
+        # 重新加载代理列表
+        if hasattr(self, 'proxy_tree'):
+            self._load_proxy_list()
+    
+    def _clear_proxies(self):
+        """清空所有代理"""
+        if messagebox.askyesno("确认清空", "确定要清空所有代理吗？"):
+            self.proxy_tree.delete(*self.proxy_tree.get_children())
+            self.config["github_proxies"] = []
+            config_manager.save_config(self.config)
+    
+    def _load_proxy_list(self):
+        """加载代理列表"""
+        # 清除现有数据
+        for item in self.proxy_tree.get_children():
+            self.proxy_tree.delete(item)
+        
+        # 加载配置中的代理
+        proxies = self.config.get("github_proxies", [])
+        for proxy_url in proxies:
+            # 初始化速度数据
+            self.proxy_tree.insert("", tk.END, values=(proxy_url, "--"))
+    
+    def _save_proxy_list(self):
+        """保存代理列表"""
+        proxies = []
+        for item in self.proxy_tree.get_children():
+            proxy_url = self.proxy_tree.item(item)['values'][0]
+            proxies.append(proxy_url)
+        
+        self.config["github_proxies"] = proxies
+        config_manager.save_config(self.config)    
+    
+    def _add_proxy(self):
+        """添加新代理"""
+        proxy_url = self.new_proxy_var.get().strip()
+        if not proxy_url:
+            return
+        
+        # 验证URL格式
+        if not (proxy_url.startswith("http://") or proxy_url.startswith("https://")):
+            ui_utils.show_error("格式错误", "代理URL必须以http://或https://开头")
+            return
+        
+        # 检查是否已存在
+        for item in self.proxy_tree.get_children():
+            existing_proxy = self.proxy_tree.item(item)['values'][0]
+            if existing_proxy == proxy_url:
+                ui_utils.show_warning("已存在", "该代理URL已存在")
+                return
+        
+        # 添加到表格
+        self.proxy_tree.insert("", tk.END, values=(proxy_url, "--"))
+        self.new_proxy_var.set("")
+        self._save_proxy_list()
+    
+    def _remove_selected_proxy(self):
+        """删除选中的代理"""
+        selected_items = self.proxy_tree.selection()
+        if not selected_items:
+            return
+        
+        for item in selected_items:
+            self.proxy_tree.delete(item)
+        
+        self._save_proxy_list()
+    
     def _create_advanced_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="高级设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
         frame.columnconfigure(0, weight=1)
+        
+        # 重置设置分组
+        reset_frame = tk_ttk.LabelFrame(frame, text="重置设置", padding="10")
+        reset_frame.pack(fill="x", pady=5)
+        reset_frame.columnconfigure(0, weight=1)
+        
+        ttk.Label(reset_frame, text="将所有设置恢复为默认值:", wraplength=600).pack(anchor="w", pady=5)
+        reset_btn = ttk.Button(reset_frame, text="重置为默认设置", command=self._reset_settings, bootstyle="danger-outline")
+        reset_btn.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(reset_btn, "警告：此操作将清除所有自定义设置，包括API密钥和路径设置。")
         
         # 重置设置分组
         reset_frame = tk_ttk.LabelFrame(frame, text="重置设置", padding="10")
@@ -167,10 +328,24 @@ CRITICAL: 致命错误，程序即将崩溃
         # 清除选中状态的事件处理
         def on_combobox_select(event):
             self._save_all_settings()
-            # 清除选中状态
-            event.widget.after(100, lambda: event.widget.selection_clear())
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
         
+        def on_combobox_focus_in(event):
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
+        
+        def on_combobox_focus_out(event):
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
+        
+        # 绑定事件
         log_level_combobox.bind('<<ComboboxSelected>>', on_combobox_select)
+        log_level_combobox.bind('<FocusIn>', on_combobox_focus_in)
+        log_level_combobox.bind('<FocusOut>', on_combobox_focus_out)
         
         # 添加日志级别的实际影响说明
         ttk.Label(frame, text="提示：日志级别越低，生成的日志文件越大，但包含的信息越详细；级别越高，日志文件越小，但只记录重要信息。").pack(anchor="w", pady=5, padx=0, fill="x")
@@ -195,49 +370,7 @@ CRITICAL: 致命错误，程序即将崩溃
         browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline")
         browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新", command=self._check_and_update_dict_async, bootstyle="info")
-        self.download_dict_button.pack(side="left", padx=(5, 0))
-        
-        # 社区词典过滤设置
-        filter_config = self.config.get("community_dict_filter", {})
-        filter_frame = tk_ttk.LabelFrame(frame, text="社区词典导入过滤", padding="10")
-        filter_frame.pack(fill="x", pady=10)
-        filter_frame.columnconfigure(1, weight=1)
-        
-        # 最大单词数设置
-        max_word_label = ttk.Label(filter_frame, text="原文最大单词数:", width=15)
-        max_word_label.grid(row=0, column=0, sticky="w", pady=5)
-        self.max_word_count_var = tk.IntVar(value=filter_config.get("max_word_count", 0))
-        # 添加trace事件监听器，确保值变化时自动保存
-        self.max_word_count_var.trace_add("write", lambda *args: self._save_all_settings())
-        max_word_spinbox = ttk.Spinbox(
-            filter_frame, 
-            from_=0, 
-            to=20, 
-            textvariable=self.max_word_count_var,
-            increment=1,
-            width=10,
-            takefocus=False
-        )
-        max_word_spinbox.grid(row=0, column=1, sticky="w", pady=5, padx=5)
-        custom_widgets.ToolTip(max_word_spinbox, "导入社区词典时，原文单词数超过此值的条目将被过滤掉，0表示不限制")
-        # 防止自动选中文本
-        max_word_spinbox.after_idle(max_word_spinbox.selection_clear)
-        # 绑定事件，调整后立即清除选中状态
-        max_word_spinbox.bind("<ButtonRelease>", lambda e: max_word_spinbox.after_idle(max_word_spinbox.selection_clear))
-        max_word_spinbox.bind("<KeyRelease>", lambda e: max_word_spinbox.after_idle(max_word_spinbox.selection_clear))
-        
-        # 译文必须包含中文设置
-        self.require_chinese_var = tk.BooleanVar(value=filter_config.get("require_chinese_translation", True))
-        # 添加trace事件监听器，确保值变化时自动保存
-        self.require_chinese_var.trace_add("write", lambda *args: self._save_all_settings())
-        require_chinese_check = ttk.Checkbutton(
-            filter_frame, 
-            text="译文必须包含中文", 
-            variable=self.require_chinese_var,
-            bootstyle="primary"
-        )
-        require_chinese_check.grid(row=1, column=0, columnspan=2, sticky="w", pady=5, padx=5)
-        custom_widgets.ToolTip(require_chinese_check, "启用后，导入时会过滤掉译文不包含中文的条目")
+        self.download_dict_button.pack(side="left", padx=(5, 5))
 
     def _create_community_packs_list(self, parent):
         packs_frame = tk_ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
@@ -280,7 +413,13 @@ CRITICAL: 致命错误，程序即将崩溃
         # 防止自动选中文本
         api_entry.after_idle(api_entry.selection_clear)
         
-        self.api_keys_text.bind("<<Modified>>", self._on_text_change)
+        def _on_text_change(event):
+            # 重置修改标志
+            event.widget.edit_modified(False)
+            # 保存所有设置
+            self._save_all_settings()
+        
+        self.api_keys_text.bind("<<Modified>>", _on_text_change)
         self.api_endpoint_var.trace_add("write", lambda *args: self._save_all_settings())
     
     def _create_ai_parameters_settings(self, parent):
@@ -309,8 +448,7 @@ CRITICAL: 致命错误，程序即将崩溃
         perf_frame.columnconfigure(1, weight=1)
         perf_frame.columnconfigure(3, weight=1)
 
-        self._create_perf_spinbox(perf_frame, "翻译批处理大小:", "ai_batch_size", (1, 1000), "单次API请求包含的文本数量", is_float=False).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2, padx=(0,10))
-        self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", (1, 16), "同时发送API请求的最大数量", is_float=False).grid(row=0, column=2, columnspan=2, sticky="ew", pady=2)
+        self._create_perf_spinbox(perf_frame, "最大并发线程数:", "ai_max_threads", (1, 16), "同时发送API请求的最大数量", is_float=False).grid(row=0, column=0, columnspan=4, sticky="ew", pady=2)
         
         # 重试设置分组
         retry_frame = tk_ttk.LabelFrame(frame, text="重试设置", padding="10")
@@ -324,19 +462,27 @@ CRITICAL: 致命错误，程序即将崩溃
         self._create_perf_spinbox(retry_frame, "最大重试延迟(s):", "ai_retry_max_delay", (1.0, 600.0), "指数退避策略中，最长的单次等待时间上限", is_float=True).grid(row=1, column=2, columnspan=2, sticky="ew", pady=2)
         self._create_perf_spinbox(retry_frame, "延迟退避因子:", "ai_retry_backoff_factor", (1.0, 5.0), "指数退避的乘数，大于1以实现延迟递增", is_float=True).grid(row=2, column=0, columnspan=4, sticky="ew", pady=2)
         
-        # Prompt设置分组
-        prompt_frame = tk_ttk.LabelFrame(frame, text="Prompt 设置", padding="10")
-        prompt_frame.pack(fill='both', expand=True, pady=5)
-        prompt_frame.columnconfigure(0, weight=1)
+        # 清除选中状态的事件处理
+        def on_model_combobox_select(event):
+            self._save_all_settings()
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
         
-        ttk.Label(prompt_frame, text="自定义翻译提示词:", anchor="w").pack(fill="x", pady=(0, 5))
-        self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=5, wrap="word")
-        self.prompt_text.pack(fill='both', expand=True, pady=5)
-        self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
+        def on_model_combobox_focus_in(event):
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
+        
+        def on_model_combobox_focus_out(event):
+            # 立即取消文字选中状态，不使用延迟
+            event.widget.selection_clear()
+            event.widget.icursor(tk.END)
         
         # 绑定事件
-        self.model_option_menu.bind('<<ComboboxSelected>>', lambda e: (self._save_all_settings(), self.model_option_menu.selection_clear()))
-        self.prompt_text.bind("<<Modified>>", self._on_text_change)
+        self.model_option_menu.bind('<<ComboboxSelected>>', on_model_combobox_select)
+        self.model_option_menu.bind('<FocusIn>', on_model_combobox_focus_in)
+        self.model_option_menu.bind('<FocusOut>', on_model_combobox_focus_out)
 
     def _save_all_settings(self, *args):
         config = config_manager.load_config()
@@ -349,12 +495,14 @@ CRITICAL: 致命错误，程序即将崩溃
         config["pack_as_zip"] = self.pack_as_zip_var.get()
         config["log_level"] = self.log_level_var.get()
         
-        # 保存社区词典过滤设置
-        config["community_dict_filter"] = {
-            "max_word_count": self.max_word_count_var.get(),
-            "require_chinese_translation": self.require_chinese_var.get()
-        }
-
+        # 保存代理列表
+        proxies = []
+        if hasattr(self, 'proxy_tree'):
+            for item in self.proxy_tree.get_children():
+                proxy_url = self.proxy_tree.item(item)['values'][0]
+                proxies.append(proxy_url)
+            config["github_proxies"] = proxies
+        
         raw_text = self.api_keys_text.get("1.0", "end-1c")
         text_with_newlines = raw_text.replace(',', '\n')
         config["api_keys"] = [key.strip() for key in text_with_newlines.split('\n') if key.strip()]
@@ -363,10 +511,9 @@ CRITICAL: 致命错误，程序即将崩溃
 
         config["model"] = self.model_var.get()
         config["model_list"] = self.current_model_list
-        config["prompt"] = self.prompt_text.get("1.0", tk.END).strip()
         
         spinbox_keys = [
-            "ai_batch_size", "ai_max_threads", "ai_max_retries", 
+            "ai_max_threads", "ai_max_retries", 
             "ai_retry_rate_limit_cooldown", "ai_retry_initial_delay", 
             "ai_retry_max_delay", "ai_retry_backoff_factor"
         ]
@@ -390,10 +537,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
         self.log_level_var.set(self.config.get("log_level", "INFO"))
         
-        # 更新社区词典过滤设置
-        filter_config = self.config.get("community_dict_filter", {})
-        self.max_word_count_var.set(filter_config.get("max_word_count", 0))
-        self.require_chinese_var.set(filter_config.get("require_chinese_translation", True))
+
         
         self.api_keys_text.delete("1.0", tk.END)
         self.api_keys_text.insert(tk.END, self.config.get("api_keys_raw", ""))
@@ -403,17 +547,22 @@ CRITICAL: 致命错误，程序即将崩溃
         self.current_model_list = self.config.get("model_list", [])
         self.model_option_menu.config(values=self.current_model_list)
         
-        self.prompt_text.delete("1.0", tk.END)
-        self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
+        if hasattr(self, 'prompt_text'):
+            self.prompt_text.delete("1.0", tk.END)
+            self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
         
         # 更新社区包列表
         self.packs_listbox.delete(0, tk.END)
         for path in self.config.get("community_pack_paths", []):
             self.packs_listbox.insert(tk.END, path)
         
+        # 更新GitHub代理列表
+        if hasattr(self, 'proxy_tree'):
+            self._load_proxy_list()
+        
         # 更新AI参数spinbox值
         spinbox_keys = [
-            "ai_batch_size", "ai_max_threads", "ai_max_retries", 
+            "ai_max_threads", "ai_max_retries", 
             "ai_retry_rate_limit_cooldown", "ai_retry_initial_delay", 
             "ai_retry_max_delay", "ai_retry_backoff_factor"
         ]
@@ -476,11 +625,6 @@ CRITICAL: 致命错误，程序即将崩溃
         # 防止自动选中文本
         spinbox.after_idle(spinbox.selection_clear)
         return container
-
-    def _on_text_change(self, event=None):
-        if event.widget.edit_modified():
-            self._save_all_settings()
-            event.widget.edit_modified(False)
 
     def _add_packs(self):
         paths = filedialog.askopenfilenames(title="选择一个或多个第三方汉化包", filetypes=[("ZIP压缩包", "*.zip"), ("所有文件", "*.*")] )
@@ -576,6 +720,516 @@ CRITICAL: 致命错误，程序即将崩溃
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
 
+    def _create_term_database(self):
+        """
+        从社区词典创建术语库
+        """
+        import sqlite3
+        from core.term_database import TermDatabase
+        import threading
+        import concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor
+        import re
+        from collections import deque
+        import time
+        import os
+        import math
+        
+        community_dict_path = self.community_dict_var.get()
+        if not community_dict_path:
+            ui_utils.show_error("错误", "请先配置社区词典文件路径。")
+            return
+        
+        try:
+            # 显示确认对话框
+            if not messagebox.askyesno("确认创建", 
+                                      "确定要从社区词典创建术语库吗？\n这将导入单词数量为1-2个的术语到术语库中。", 
+                                      parent=self):
+                return
+            
+            # 创建进度对话框
+            from gui.dialogs import DownloadProgressDialog
+            progress_dialog = DownloadProgressDialog(self, title="创建术语库")
+            
+            # 定义创建线程函数
+            def create_thread_func():
+                try:
+                    # 步骤1: 连接社区词典数据库
+                    progress_dialog.update_progress("连接数据库", 0, "")
+                    
+                    with sqlite3.connect(f"file:{community_dict_path}?mode=ro", uri=True) as conn:
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.cursor()
+                        
+                        # 步骤2: 加载术语库和现有术语
+                        progress_dialog.update_progress("加载术语库", 10, "")
+                        
+                        term_db = TermDatabase()
+                        existing_terms = term_db.get_all_terms()
+                        existing_originals = {term["original"].lower() for term in existing_terms}
+                        
+                        # 步骤3: 查询总条目数，用于进度显示
+                        progress_dialog.update_progress("获取总条目数", 20, "")
+                        
+                        # 先查询总条目数，让用户知道要处理多少数据
+                        cursor.execute("SELECT COUNT(*) FROM dict WHERE ORIGIN_NAME IS NOT NULL AND TRANS_NAME IS NOT NULL")
+                        total_dict_entries = cursor.fetchone()[0]
+                        progress_dialog.update_progress("准备数据", 30, f"共 {total_dict_entries} 条数据")
+                        
+                        # 步骤4: 配置多线程参数
+                        progress_dialog.update_progress("配置线程", 40, "")
+                        
+                        # 优化1: 根据系统CPU核心数动态调整线程数量
+                        num_threads = os.cpu_count() or 4
+                        # 限制最大线程数为8，避免过多线程导致系统资源竞争
+                        num_threads = min(num_threads, 8)
+                        # 确保至少有2个线程
+                        num_threads = max(num_threads, 2)
+                        
+                        # 优化2: 根据线程数和数据量计算最佳批次大小
+                        # 每个批次大小在1000-5000条之间，平衡内存使用和并行效率
+                        batch_size = math.ceil(total_dict_entries / num_threads)
+                        batch_size = max(1000, min(5000, batch_size))
+                        
+                        # 优化3: 预编译SQL查询，避免重复编译
+                        sql = "SELECT ORIGIN_NAME, TRANS_NAME FROM dict WHERE ORIGIN_NAME IS NOT NULL AND TRANS_NAME IS NOT NULL"
+                        
+                        # 简化验证逻辑，使用更高效的实现
+                        def is_valid_term(original):
+                            """快速验证术语是否为1-2个单词"""
+                            if not original:
+                                return False
+                            # 使用更快的字符串操作替代split()
+                            space_count = original.count(' ')
+                            return 0 <= space_count <= 1
+                        
+                        # 定义线程处理函数
+                        def process_batch(batch_rows, batch_id, result_queue):
+                            """处理数据批次"""
+                            batch_import_count = 0
+                            batch_skipped_count = 0
+                            batch_terms = []
+                            
+                            # 每个线程都有自己的临时去重集合，避免全局锁
+                            thread_skipped = set()
+                            thread_skipped.update(existing_originals)  # 预先加载现有术语
+                            
+                            for row in batch_rows:
+                                original = row["ORIGIN_NAME"].strip()
+                                translation = row["TRANS_NAME"].strip()
+                                
+                                if original and translation:
+                                    if is_valid_term(original):
+                                        original_lower = original.lower()
+                                        # 检查是否已存在（使用局部集合快速判断）
+                                        if original_lower not in thread_skipped:
+                                            batch_terms.append((original, translation))
+                                            batch_import_count += 1
+                                            thread_skipped.add(original_lower)
+                                        else:
+                                            batch_skipped_count += 1
+                                    else:
+                                        batch_skipped_count += 1
+                                else:
+                                    batch_skipped_count += 1
+                            
+                            # 将结果放入队列
+                            result_queue.append((batch_id, batch_terms, batch_import_count, batch_skipped_count))
+                        
+                        # 步骤5: 执行多线程处理
+                        progress_dialog.update_progress("多线程处理", 50, f"使用 {num_threads} 线程")
+                        
+                        # 结果队列，用于收集各线程结果
+                        result_queue = deque()
+                        
+                        # 使用线程池执行多线程处理
+                        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                            # 执行SQL查询，获取所有数据
+                            cursor.execute(sql)
+                            all_rows = cursor.fetchall()
+                            
+                            # 将数据分成多个批次
+                            batches = [all_rows[i:i+batch_size] for i in range(0, len(all_rows), batch_size)]
+                            
+                            # 提交所有批次任务
+                            futures = []
+                            for i, batch in enumerate(batches):
+                                future = executor.submit(process_batch, batch, i, result_queue)
+                                futures.append(future)
+                            
+                            # 监控进度
+                            completed_batches = 0
+                            total_batches = len(futures)
+                            
+                            while completed_batches < total_batches:
+                                completed_batches = sum(1 for f in futures if f.done())
+                                current_progress = 50 + (35 * completed_batches // total_batches)  # 50%-85%
+                                progress_dialog.update_progress("处理数据", current_progress, f"已完成 {completed_batches}/{total_batches} 个批次")
+                                time.sleep(0.2)  # 更频繁的进度更新，让用户感觉更流畅
+                            
+                            # 等待所有任务完成
+                            concurrent.futures.wait(futures)
+                        
+                        # 步骤6: 合并结果
+                        progress_dialog.update_progress("合并结果", 85, "")
+                        
+                        import_count = 0
+                        skipped_count = 0
+                        all_terms_to_add = []
+                        
+                        # 按批次ID排序，确保顺序正确
+                        sorted_results = sorted(result_queue, key=lambda x: x[0])
+                        
+                        # 合并所有结果
+                        for batch_id, batch_terms, batch_import, batch_skip in sorted_results:
+                            all_terms_to_add.extend(batch_terms)
+                            import_count += batch_import
+                            skipped_count += batch_skip
+                        
+                        # 步骤7: 优化的分批次导入
+                        progress_dialog.update_progress("导入术语", 90, "")
+                        
+                        if all_terms_to_add:
+                            # 优化4: 根据数据量动态调整导入批次大小
+                            # 数据量越大，批次越大，减少IO操作次数
+                            import_batch_size = min(1000, max(200, len(all_terms_to_add) // 10))
+                            
+                            # 优化5: 预创建所有批次，减少循环内计算
+                            import_batches = [all_terms_to_add[i:i+import_batch_size] for i in range(0, len(all_terms_to_add), import_batch_size)]
+                            
+                            for i, batch in enumerate(import_batches):
+                                # 直接调用批量导入方法，避免创建临时字典
+                                term_db.add_terms_batch([{"original": orig, "translation": trans} for orig, trans in batch])
+                                # 更新进度
+                                batch_progress = (i / len(import_batches)) * 10
+                                progress_dialog.update_progress("导入术语", 90 + int(batch_progress), f"已导入 {min((i + 1) * import_batch_size, len(all_terms_to_add))}/{len(all_terms_to_add)} 个术语")
+                        
+                        # 关闭进度对话框
+                        self.after(0, progress_dialog.close_dialog)
+                        
+                        # 显示结果
+                        self.after(0, lambda: ui_utils.show_info(
+                            "创建成功", 
+                            f"术语库创建完成！\n成功导入 {import_count} 个术语，跳过 {skipped_count} 个条目。\n使用 {num_threads} 线程并行处理，大幅提高了导入速度。"
+                        ))
+                        
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    self.after(0, progress_dialog.close_dialog)
+                    self.after(0, lambda: ui_utils.show_error(
+                        "创建失败", 
+                        f"创建术语库时发生错误：{str(e)}"
+                    ))
+            
+            # 启动创建线程
+            threading.Thread(target=create_thread_func, daemon=True).start()
+            
+        except Exception as e:
+            ui_utils.show_error("错误", f"创建术语库时发生错误：{str(e)}")
+
+    def _load_proxy_list(self):
+        """加载代理列表"""
+        # 清除现有数据
+        for item in self.proxy_tree.get_children():
+            self.proxy_tree.delete(item)
+        
+        # 加载配置中的代理
+        proxies = self.config.get("github_proxies", [])
+        for proxy_url in proxies:
+            # 初始化速度数据
+            self.proxy_tree.insert("", tk.END, values=(proxy_url, "--"))
+    
+    def _save_proxy_list(self):
+        """保存代理列表"""
+        proxies = []
+        for item in self.proxy_tree.get_children():
+            proxy_url = self.proxy_tree.item(item)['values'][0]
+            proxies.append(proxy_url)
+        
+        self.config["github_proxies"] = proxies
+        config_manager.save_config(self.config)
+    
+    def _add_preset_proxies(self):
+        """一键添加预设的四个GitHub加速代理"""
+        preset_proxies = [
+            "https://gh-proxy.org/",
+            "https://hk.gh-proxy.org/",
+            "https://cdn.gh-proxy.org/",
+            "https://edgeone.gh-proxy.org/"
+        ]
+        
+        added_count = 0
+        existing_proxies = [self.proxy_tree.item(item)['values'][0] for item in self.proxy_tree.get_children()]
+        
+        for proxy_url in preset_proxies:
+            if proxy_url not in existing_proxies:
+                # 添加到表格
+                self.proxy_tree.insert("", tk.END, values=(proxy_url, "--"))
+                added_count += 1
+                existing_proxies.append(proxy_url)
+        
+        if added_count > 0:
+            self._save_proxy_list()
+            ui_utils.show_info("添加成功", f"已添加 {added_count} 个预设代理")
+        else:
+            ui_utils.show_warning("已存在", "所有预设代理已存在")
+    
+    def _edit_proxy(self, event=None):
+        """编辑选中的代理"""
+        selected_items = self.proxy_tree.selection()
+        if not selected_items:
+            return
+        
+        item = selected_items[0]
+        current_proxy = self.proxy_tree.item(item)['values'][0]
+        
+        # 创建编辑对话框
+        edit_window = ttk.Toplevel(self)
+        edit_window.title("编辑代理")
+        edit_window.geometry("500x150")
+        edit_window.resizable(False, False)
+        edit_window.transient(self)
+        edit_window.grab_set()
+        
+        # 设置对话框位置
+        x = self.winfo_rootx() + self.winfo_width() // 2 - 250
+        y = self.winfo_rooty() + self.winfo_height() // 2 - 75
+        edit_window.geometry(f"500x150+{x}+{y}")
+        
+        # 代理URL输入
+        ttk.Label(edit_window, text="代理URL:", font=('', 10, 'bold')).pack(pady=10)
+        edit_var = tk.StringVar(value=current_proxy)
+        edit_entry = ttk.Entry(edit_window, textvariable=edit_var, width=60)
+        edit_entry.pack(pady=5)
+        edit_entry.focus_set()
+        edit_entry.select_range(0, tk.END)
+        
+        # 按钮框架
+        btn_frame = ttk.Frame(edit_window)
+        btn_frame.pack(pady=10)
+        
+        def save_edit():
+            new_proxy = edit_var.get().strip()
+            if not new_proxy:
+                ui_utils.show_error("错误", "代理URL不能为空")
+                return
+            
+            # 验证URL格式
+            if not (new_proxy.startswith("http://") or new_proxy.startswith("https://")):
+                ui_utils.show_error("格式错误", "代理URL必须以http://或https://开头")
+                return
+            
+            # 检查是否已存在（排除当前编辑项）
+            existing_proxies = [self.proxy_tree.item(i)['values'][0] for i in self.proxy_tree.get_children() if i != item]
+            if new_proxy in existing_proxies:
+                ui_utils.show_warning("已存在", "该代理URL已存在")
+                return
+            
+            # 更新表格项
+            current_values = self.proxy_tree.item(item)['values']
+            self.proxy_tree.item(item, values=(new_proxy, current_values[1]))
+            self._save_proxy_list()
+            edit_window.destroy()
+        
+        ttk.Button(btn_frame, text="保存", command=save_edit, bootstyle="success").pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="取消", command=edit_window.destroy, bootstyle="danger-outline").pack(side="left", padx=10)
+    
+
+    
+    def _test_proxy_speed(self, proxy_url):
+        """测试单个代理的速度，使用多线程下载"""
+        try:
+            import time
+            import concurrent.futures
+            
+            # 使用最新版本的社区词典文件作为测试资源，修复URL格式
+            test_url = proxy_url.rstrip('/') + "/github.com/VM-Chinese-translate-group/i18n-Dict-Extender/releases/latest/download/Dict-Sqlite.db"
+            
+            total_bytes = 0
+            start_time = time.time()
+            max_download = 10 * 1024 * 1024  # 10MB
+            timeout = 10  # 10秒超时
+            
+            # 获取文件大小和初始响应
+            response = requests.get(test_url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            # 计算每个线程要下载的数据范围
+            file_size = int(response.headers.get('content-length', max_download))
+            file_size = min(file_size, max_download)  # 限制最大下载量
+            response.close()
+            
+            # 定义每个线程的下载范围
+            num_threads = 4
+            chunk_size = max(8192, file_size // num_threads)
+            
+            def download_chunk(start, end):
+                """下载文件的一个块"""
+                nonlocal total_bytes
+                headers = {'Range': f'bytes={start}-{end}'}
+                try:
+                    with requests.get(test_url, headers=headers, timeout=timeout, stream=True) as r:
+                        r.raise_for_status()
+                        chunk_total = 0
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                chunk_total += len(chunk)
+                                # 检查总下载量是否超过限制
+                                if total_bytes + chunk_total > max_download:
+                                    chunk_total = max_download - total_bytes
+                                    break
+                                # 检查是否超时
+                                if time.time() - start_time > timeout:
+                                    break
+                        total_bytes += chunk_total
+                except Exception:
+                    pass
+            
+            # 计算下载范围
+            ranges = []
+            for i in range(num_threads):
+                start = i * chunk_size
+                end = min((i + 1) * chunk_size - 1, file_size - 1)
+                if start < file_size:
+                    ranges.append((start, end))
+            
+            # 使用线程池进行多线程下载
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = [executor.submit(download_chunk, start, end) for start, end in ranges]
+                # 等待所有任务完成或超时
+                concurrent.futures.wait(futures, timeout=timeout - (time.time() - start_time))
+            
+            elapsed_time = time.time() - start_time
+            
+            if elapsed_time == 0 or total_bytes == 0:
+                return "--"
+            
+            speed_bps = total_bytes / elapsed_time
+            if speed_bps > 1024 * 1024:
+                return f"{speed_bps / (1024 * 1024):.2f} MB/s"
+            elif speed_bps > 1024:
+                return f"{speed_bps / 1024:.1f} KB/s"
+            else:
+                return f"{speed_bps:.0f} B/s"
+        except Exception as e:
+            logging.warning(f"速度测试失败: {e}")
+            return "--"
+    
+    def _test_selected_proxy(self):
+        """测试选中代理的速度"""
+        selected_items = self.proxy_tree.selection()
+        if not selected_items:
+            return
+        
+        # 禁用按钮
+        self._disable_proxy_buttons()
+        
+        def test_worker():
+            for item in selected_items:
+                proxy_url = self.proxy_tree.item(item)['values'][0]
+                
+                # 测试速度
+                speed = self._test_proxy_speed(proxy_url)
+                
+                # 更新UI
+                if self.winfo_exists():
+                    self.after(0, lambda i=item, url=proxy_url, s=speed: self.proxy_tree.item(i, values=(url, s)))
+            # 启用按钮
+            if self.winfo_exists():
+                self.after(0, self._enable_proxy_buttons)
+        
+        threading.Thread(target=test_worker, daemon=True).start()
+    
+
+    
+    def _batch_test_speed(self):
+        """批量测试所有代理的速度，单个代理依次测试"""
+        # 禁用按钮
+        self._disable_proxy_buttons()
+        
+        def main_worker():
+            # 首先在主线程获取代理列表
+            proxy_list = []
+            
+            def get_proxies():
+                nonlocal proxy_list
+                if hasattr(self, 'proxy_tree') and self.winfo_exists():
+                    for item in self.proxy_tree.get_children():
+                        try:
+                            proxy_url = self.proxy_tree.item(item)['values'][0]
+                            proxy_list.append((item, proxy_url))
+                        except (tk.TclError, IndexError):
+                            pass
+            
+            self.after(0, get_proxies)
+            
+            # 等待获取代理列表
+            import time
+            time.sleep(0.1)
+            
+            # 依次测试每个代理（每个代理内部是多线程下载）
+            for item, proxy_url in proxy_list:
+                # 测试速度（内部已使用多线程下载）
+                speed = self._test_proxy_speed(proxy_url)
+                
+                # 更新UI
+                if hasattr(self, 'proxy_tree') and self.winfo_exists():
+                    try:
+                        self.after(0, lambda i=item, url=proxy_url, s=speed: 
+                                 self.proxy_tree.item(i, values=(url, s)) if self.proxy_tree.exists(i) else None)
+                    except tk.TclError:
+                        pass
+            
+            # 启用按钮
+            if hasattr(self, 'proxy_tree') and self.winfo_exists():
+                self.after(0, self._enable_proxy_buttons)
+        
+        threading.Thread(target=main_worker, daemon=True).start()
+    
+    def _clear_test_results(self):
+        """清空所有测试结果"""
+        # 检查组件是否存在
+        if not hasattr(self, 'proxy_tree') or not self.proxy_tree.winfo_exists():
+            return
+        
+        try:
+            for item in self.proxy_tree.get_children():
+                if self.proxy_tree.exists(item):
+                    proxy_url = self.proxy_tree.item(item)['values'][0]
+                    self.proxy_tree.item(item, values=(proxy_url, "--"))
+        except tk.TclError:
+            # 组件可能已被销毁
+            pass
+    
+    def _disable_proxy_buttons(self):
+        """禁用代理操作按钮"""
+        if hasattr(self, 'proxy_tree'):
+            for widget in self.winfo_children():
+                self._disable_widget_buttons(widget)
+    
+    def _enable_proxy_buttons(self):
+        """启用代理操作按钮"""
+        if hasattr(self, 'proxy_tree'):
+            for widget in self.winfo_children():
+                self._enable_widget_buttons(widget)
+    
+    def _disable_widget_buttons(self, widget):
+        """递归禁用控件及其子控件中的按钮"""
+        if isinstance(widget, ttk.Button):
+            widget.config(state="disabled")
+        
+        for child in widget.winfo_children():
+            self._disable_widget_buttons(child)
+    
+    def _enable_widget_buttons(self, widget):
+        """递归启用控件及其子控件中的按钮"""
+        if isinstance(widget, ttk.Button):
+            widget.config(state="normal")
+        
+        for child in widget.winfo_children():
+            self._enable_widget_buttons(child)
+    
     def _dict_update_worker(self):
         try:
             remote_info = self._get_remote_dict_info()
@@ -583,12 +1237,27 @@ CRITICAL: 致命错误，程序即将崩溃
                 self.after(0, lambda: ui_utils.show_error("检查失败", "无法获取远程词典版本信息。"))
                 return
 
+            # 获取本地词典路径和配置中的版本
+            local_dict_path = self.community_dict_var.get()
             local_version = self.config.get("last_dict_version", "0.0.0")
-            if local_version == remote_info["version"]:
+            
+            # 检查是否未安装词典
+            is_dict_installed = local_dict_path and Path(local_dict_path).exists()
+            
+            # 比较版本
+            remote_version = remote_info["version"]
+            if is_dict_installed and local_version == remote_version:
                 self.after(0, lambda: ui_utils.show_info("检查完成", f"社区词典已是最新版本 ({local_version})。"))
                 return
-
-            if not messagebox.askyesno("发现新版本", f"发现新词典版本: {remote_info['version']} (当前: {local_version})。\n是否立即下载更新？"):
+            
+            # 显示更新提示
+            msg = f"发现新词典版本: {remote_version}"
+            if not is_dict_installed:
+                msg += "\n您尚未安装社区词典，是否立即下载？"
+            else:
+                msg += f" (当前: {local_version})\n是否立即下载更新？"
+                
+            if not messagebox.askyesno("更新提示", msg):
                 return
             
             from gui.dialogs import DownloadProgressDialog
@@ -604,11 +1273,12 @@ CRITICAL: 致命错误，程序即将崩溃
             progress_dialog.close_dialog()
 
             if ok:
-                self.config["last_dict_version"] = remote_info["version"]
+                # 下载成功，更新配置
+                self.config["last_dict_version"] = remote_version
                 self.config["community_dict_path"] = str(DEST_FILE)
                 config_manager.save_config(self.config)
                 self.after(0, lambda: self.community_dict_var.set(str(DEST_FILE)))
-                self.after(0, lambda: ui_utils.show_info("更新成功", f"社区词典已更新到版本 {remote_info['version']}！"))
+                self.after(0, lambda: ui_utils.show_info("更新成功", f"社区词典已更新到版本 {remote_version}！"))
             else:
                 self.after(0, lambda: ui_utils.show_error("下载失败", "下载新版词典时发生错误。"))
         finally:

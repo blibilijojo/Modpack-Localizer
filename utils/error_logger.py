@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 LOG_DIR = Path("error_logs")
 AI_ERROR_LOG_DIR = LOG_DIR / "ai"
 GENERAL_ERROR_LOG_DIR = LOG_DIR / "general"
-MAX_LOG_DAYS = 7
+MAX_LOG_DAYS = 10
 
 class ErrorLogger:
     @staticmethod

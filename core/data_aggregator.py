@@ -14,15 +14,20 @@ class DataAggregator:
         self.community_dict_path = Path(community_dict_path) if community_dict_path else None
         self.raw_english_files = {}
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
-        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"([^"]*)"')
+        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> dict:
         data = {}
         if file_format == 'json':
-            # 使用正则表达式解析JSON，兼容某些格式不严格的JSON文件
-            for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
-                key = match.group(1)
-                value = match.group(2)
-                data[key] = value
+            try:
+                # 使用标准JSON解析库解析JSON文件
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                # 如果标准解析失败，回退到正则表达式解析
+                logging.warning(f"标准JSON解析失败，回退到正则表达式解析: {file_path_for_log}")
+                for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
+                    key = match.group(1)
+                    value = match.group(2)
+                    data[key] = value
             return data
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
@@ -59,7 +64,10 @@ class DataAggregator:
                 for key, origin_name, trans_name, version in cur.fetchall():
                     if key: community_dict_by_key[key] = trans_name
                     if origin_name and trans_name:
-                        community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
+                        # 仅导入单词数量为1到2个的条目
+                        word_count = len(origin_name.split())
+                        if 1 <= word_count <= 2:
+                            community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
         except sqlite3.Error as e:
             logging.error(f"  - 读取社区词典数据库时发生错误: {e}")
         logging.info(f"  - 社区词典加载成功: {len(community_dict_by_key)} 条 [Key] 规则, {len(community_dict_by_origin)} 条 [原文] 规则")

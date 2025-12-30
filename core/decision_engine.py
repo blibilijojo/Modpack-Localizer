@@ -4,13 +4,13 @@ from packaging.version import parse as parse_version
 import re
 import json
 from typing import List, Dict, Any, Tuple
-from core.term_database import TermDatabase
+
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 class DecisionEngine:
     def __init__(self):
-        self.term_db = TermDatabase()
+        pass
     def _resolve_origin_name_conflict(self, candidates: list[dict]) -> str | None:
         if not candidates: return None
         if len(candidates) == 1: return candidates[0]["trans"]
@@ -54,7 +54,6 @@ class DecisionEngine:
                 data = json.loads(content)
                 return list(data.keys())
             except json.JSONDecodeError:
-                logging.warning(f"为决策引擎解析JSON以获取有序键时失败。此文件的顺序可能不被保留。")
                 return []
         elif file_format == 'lang':
             lang_kv_pattern = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
@@ -96,6 +95,14 @@ class DecisionEngine:
             ordered_keys = self._get_ordered_keys(raw_content, file_format)
         else:
             ordered_keys = list(english_dict.keys())
+        
+        # 确保所有英文词典中的键都被包含
+        all_keys = set(english_dict.keys())
+        ordered_keys_set = set(ordered_keys)
+        missing_keys = all_keys - ordered_keys_set
+        
+        # 将缺失的键添加到有序键列表末尾
+        ordered_keys.extend(list(missing_keys))
         
         for key in ordered_keys:
             english_value = english_dict.get(key)
@@ -203,5 +210,5 @@ class DecisionEngine:
             logging.info(f"  ▷ {source}: {count} 条 ({percentage:.2f}%)")
         logging.info("--------------------------")
         
-        logging.info("决策引擎运行完毕。")
+        logging.info("翻译决策引擎运行完毕。")
         return workbench_data

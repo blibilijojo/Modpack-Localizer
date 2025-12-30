@@ -1,24 +1,33 @@
 import logging
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 import tempfile
 import shutil
 import zipfile
 import os
 import json
 
-class PackBuilder:
+from .models import (
+    TranslationResult, ExtractionResult, NamespaceInfo,
+    PackSettings
+)
+
+class Builder:
+    """资源包构建器"""
+    
+    def __init__(self):
+        # 保持原有正则表达式规则不变
+        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+        self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+    
     def _build_json_file(self, template_content: str, translations: Dict[str, str]) -> str:
         """
         基于正则表达式的JSON语言文件逆向生成
         """
-        # 使用与提取时相同的正则表达式模式
-        JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
-        
         # 提取模板中的所有键值对信息
         key_info = []
-        for match in JSON_KEY_VALUE_PATTERN.finditer(template_content):
+        for match in self.JSON_KEY_VALUE_PATTERN.finditer(template_content):
             key = match.group(1)
             original_value = match.group(2)
             start, end = match.span()
@@ -61,12 +70,9 @@ class PackBuilder:
         """
         基于正则表达式的lang语言文件逆向生成
         """
-        # 使用与提取时相同的正则表达式模式
-        LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
-        
         # 提取模板中的所有键值对信息
         key_info = []
-        for match in LANG_KV_PATTERN.finditer(template_content):
+        for match in self.LANG_KV_PATTERN.finditer(template_content):
             key = match.group(1)
             original_value = match.group(2)
             start, end = match.span()
@@ -120,13 +126,9 @@ class PackBuilder:
         """
         健壮的JSON文件构建，处理各种特殊情况
         """
-        # 使用与提取时相同的正则表达式
-        from core.data_aggregator import DataAggregator
-        agg = DataAggregator(None, [], None)
-        
         # 提取模板中所有的键值对位置信息
         key_positions = []
-        for match in agg.JSON_KEY_VALUE_PATTERN.finditer(template_content):
+        for match in self.JSON_KEY_VALUE_PATTERN.finditer(template_content):
             key = match.group(1)
             start, end = match.span()
             key_positions.append((key, start, end))
@@ -183,12 +185,14 @@ class PackBuilder:
         return output_content
     
     def _sanitize_filename(self, text: str) -> str:
+        """清理文件名"""
         first_line = text.splitlines()[0] if text else ""
         if not first_line.strip():
             return "GeneratedPack"
         return re.sub(r'[\\/*?:"<>|]', "", first_line).strip()
     
     def _get_unique_path(self, target_path: Path) -> Path:
+        """获取唯一路径"""
         if not target_path.exists():
             return target_path
         parent = target_path.parent
@@ -206,21 +210,47 @@ class PackBuilder:
                 return new_path
             counter += 1
     
-    def run(self, output_dir: Path, final_translations_lookup_by_ns: dict, pack_settings: dict, namespace_formats: dict, raw_english_files: dict):
-        logging.info(f"--- 开始资源包构建流程 (正则替换模式) ---")
-        pack_as_zip = pack_settings.get('pack_as_zip', False)
-        pack_description = pack_settings.get('pack_description', 'A Modpack Localization Pack')
-        base_name_raw = pack_settings.get('pack_base_name', 'Generated_Pack')
+    def run(
+        self, 
+        output_dir: Path, 
+        translation_result: TranslationResult,
+        extraction_result: ExtractionResult,
+        pack_settings: PackSettings
+    ) -> tuple[bool, str]:
+        """
+        执行资源包构建流程
+        """
+        logging.info(f"=== 阶段 3: 开始资源包构建流程 (正则替换模式) ===")
+        
+        pack_as_zip = pack_settings.pack_as_zip
+        pack_description = pack_settings.pack_description
+        base_name_raw = pack_settings.pack_base_name
         base_name = self._sanitize_filename(base_name_raw)
+        
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = Path(temp_dir_str)
-            logging.info(f"在临时目录中构建资源包内容: {temp_dir}")
+            logging.debug(f"在临时目录中构建资源包内容: {temp_dir}")
+            
+            # 准备翻译数据，转换为适合构建的格式
+            final_translations_lookup_by_ns = {}
+            for namespace, entries in translation_result.workbench_data.items():
+                ns_translations = {}
+                for key, entry in entries.items():
+                    if entry.zh and entry.zh.strip():
+                        ns_translations[key] = entry.zh
+                final_translations_lookup_by_ns[namespace] = ns_translations
+            
+            # 构建每个命名空间的语言文件
             for namespace, translations in final_translations_lookup_by_ns.items():
-                template_content = raw_english_files.get(namespace, '{\n}')
+                template_content = extraction_result.raw_english_files.get(namespace, '{\n}')
+                
                 try:
                     lang_dir = temp_dir / "assets" / namespace / "lang"
                     lang_dir.mkdir(parents=True, exist_ok=True)
-                    file_format = namespace_formats.get(namespace, 'json')
+                    
+                    # 获取命名空间信息
+                    namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
+                    file_format = namespace_info.file_format
                     
                     if file_format == 'json':
                         output_content = self._build_json_file(template_content, translations)
@@ -235,10 +265,12 @@ class PackBuilder:
                 except Exception as e:
                     logging.error(f"为 '{namespace}' 构建文件时出错: {e}", exc_info=True)
                     return False, f"构建 '{namespace}' 文件时出错: {e}"
+            
+            # 写入pack.mcmeta文件
             try:
                 pack_mcmeta_data = {
                     "pack": {
-                        "pack_format": pack_settings["pack_format"],
+                        "pack_format": pack_settings.pack_format,
                         "description": pack_description
                     }
                 }
@@ -246,17 +278,21 @@ class PackBuilder:
                     json.dumps(pack_mcmeta_data, indent=4, ensure_ascii=False),
                     encoding='utf-8'
                 )
-                icon_path_str = pack_settings.get('pack_icon_path', '')
-                if icon_path_str and Path(icon_path_str).is_file():
-                    shutil.copy(icon_path_str, temp_dir / "pack.png")
+                
+                # 复制图标文件
+                if pack_settings.pack_icon_path and Path(pack_settings.pack_icon_path).is_file():
+                    shutil.copy(pack_settings.pack_icon_path, temp_dir / "pack.png")
             except Exception as e:
                 logging.error(f"写入元数据时出错: {e}", exc_info=True)
                 return False, f"写入元数据时出错: {e}"
+            
+            # 生成最终资源包
             try:
                 if pack_as_zip:
                     final_zip_path = output_dir / (base_name + '.zip')
                     final_unique_path = self._get_unique_path(final_zip_path)
                     temp_zip_path = final_unique_path.with_suffix('.zip.tmp')
+                    
                     try:
                         with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                             for file_path in temp_dir.rglob('*'):
@@ -264,19 +300,20 @@ class PackBuilder:
                                     arcname = file_path.relative_to(temp_dir)
                                     zf.write(file_path, arcname)
                         os.rename(temp_zip_path, final_unique_path)
-                        logging.info(f"成功将资源包压缩到: {final_unique_path}")
+                        final_output_path = final_unique_path
                     finally:
                         if temp_zip_path.exists():
                             os.remove(temp_zip_path)
-                    final_output_path = final_unique_path
                 else:
                     final_folder_path = output_dir / base_name
                     final_unique_path = self._get_unique_path(final_folder_path)
                     shutil.move(str(temp_dir), str(final_unique_path))
                     final_output_path = final_unique_path
-                logging.info(f"成功创建资源包: {final_output_path.name}")
+                    
+                logging.info(f"成功创建资源包: {final_output_path}")
             except Exception as e:
                 logging.error(f"完成最终资源包时出错: {e}", exc_info=True)
                 return False, f"完成最终资源包时出错: {e}"
-        logging.info("--- 资源包构建成功！ ---")
-        return True, "资源包构建成功！"
+        
+        logging.info("=== 资源包构建成功完成 ===")
+        return True, f"资源包构建成功！输出位置: {final_output_path}"

@@ -68,7 +68,7 @@ class QuestWorkflowManager:
             conversion_manager = ConversionManager(converter)
             
             self.converted_quest_data, self.source_lang_dict = conversion_manager(
-                self.project_info['modpack_name'], quest_files_io, {}
+                "quest", quest_files_io, {}
             )
             
             if not self.source_lang_dict:
@@ -107,7 +107,7 @@ class QuestWorkflowManager:
             finish_button_text="完成并生成汉化文件",
             finish_callback=self._on_workbench_finish,
             cancel_callback=self._on_workbench_cancel,
-            project_name=self.project_info['modpack_name'],
+            project_name="任务汉化",
             main_window_instance=self.main_window
         )
         
@@ -131,23 +131,14 @@ class QuestWorkflowManager:
                 final_lang_dict[item['key']] = item['en']
 
         threading.Thread(target=self._run_build_phase, args=(final_lang_dict,), daemon=True).start()
-        self.main_window._show_welcome_view()
 
     def _on_workbench_cancel(self):
         self.main_window.update_menu_state()
         self._log("任务汉化流程已取消。", "WARNING")
-        self.main_window._show_welcome_view()
 
     def _run_build_phase(self, translated_dict: dict):
         try:
             instance_path = self.instance_path
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = instance_path / f".localizer_backups_{timestamp}"
-            backup_path.mkdir(parents=True, exist_ok=True)
-            self._log(f"正在备份原始文件到: {backup_path}", "INFO")
-
-            for original_file_path_str in self.quest_files_map.values():
-                shutil.copy(original_file_path_str, backup_path)
             
             if self.quest_type == 'ftb':
                 self._log("开始写回已转换的 FTB Quests 文件...", "INFO")
@@ -201,14 +192,14 @@ class QuestWorkflowManager:
                     self._log(f"已将 BQM 中文语言文件写入: {lang_path / zh_lang_filename}", "INFO")
 
             self._log("--- 任务汉化流程全部完成！ ---", "SUCCESS")
-            self._show_final_instructions(backup_path)
+            self._show_final_instructions()
 
         except Exception as e:
             logging.error(f"生成任务文件失败: {e}", exc_info=True)
             self._log(f"错误: {e}", "CRITICAL")
             self.main_window.root.after(0, lambda err=e: ui_utils.show_error("生成失败", f"生成最终文件时发生错误:\n{err}"))
 
-    def _show_final_instructions(self, backup_path: Path):
+    def _show_final_instructions(self):
         title = "任务汉化成功！"
         message = ""
         if self.quest_type == 'ftb':
@@ -218,19 +209,16 @@ class QuestWorkflowManager:
                 "1. **任务文件**已被修改，其中的英文文本已替换为翻译键。\n"
                 f"2. **语言文件**已在以下目录生成：\n   {lang_dir}\n\n"
                 "您需要将 `kubejs` 文件夹放入一个资源包中才能在游戏内加载翻译。\n\n"
-                f"为安全起见，所有原始文件都已备份至:\n{backup_path}\n"
             )
         else: # bqm
             lang_file_path = self.instance_path / 'config' / 'betterquesting' / 'zh_cn.lang'
             message = (
                 "Better Questing 汉化文件已成功生成！\n\n"
-                f"为安全起见，所有原始文件都已备份至:\n{backup_path}\n\n"
                 "---您还需要最后一步手动操作---\n"
                 "Better Questing 的语言文件需要放入资源包才能加载。\n\n"
                 f"1. 我们已为您生成了语言文件:\n   {lang_file_path}\n\n"
                 "2. 请将这个 zh_cn.lang 文件**移动**到您自己的一个资源包内，路径为：\n"
                 "   [你的资源包]/assets/betterquesting/lang/\n\n"
-                "3. 在游戏中启用该资源包即可看到效果！"
             )
         
         self.main_window.root.after(0, lambda t=title, m=message: ui_utils.show_info(t, m))

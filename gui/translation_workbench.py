@@ -21,7 +21,7 @@ from gui.find_replace_dialog import FindReplaceDialog
 from core.term_database import TermDatabase
 
 class TranslationWorkbench(ttk.Frame):
-    def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None):
+    def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None, undo_history: dict = None):
         super().__init__(parent_frame)
         self.translation_data = initial_data
         self.namespace_formats = namespace_formats
@@ -43,6 +43,11 @@ class TranslationWorkbench(ttk.Frame):
         
         # 术语匹配结果缓存
         self._term_match_cache = {}
+        
+        # 术语搜索线程控制
+        self._current_term_thread = None
+        self._term_search_cancelled = False
+        self._current_search_id = 0
 
         self.final_translations = None
         self.current_selection_info = None
@@ -67,8 +72,16 @@ class TranslationWorkbench(ttk.Frame):
         self._double_click_to_approve = self.current_settings.get('double_click_to_approve', True)
         self._enter_to_navigate = self.current_settings.get('enter_to_navigate', True)
         self._focus_on_translate = self.current_settings.get('focus_on_translate', True)
+        
+        # 翻译控制台功能整合相关变量
+        self._current_mode = "workbench"  # "workbench" 或 "comprehensive"
+        self._comprehensive_ui = None
 
         self._create_widgets()
+        
+        # 立即设置初始sash位置，确保在所有情况下都能保持1:3的比例
+        self._set_initial_sash_position()
+        # 同时在idle时再次检查，确保窗口完全初始化后比例正确
         self.after_idle(self._set_initial_sash_position)
         
         self._record_action(target_iid=None) 
@@ -94,7 +107,8 @@ class TranslationWorkbench(ttk.Frame):
         try:
             self.update_idletasks()
             width = self.winfo_width()
-            initial_pos = int(width * 0.3)
+            # 设置为窗口宽度的25%，保持1:3的比例，但不小于330像素，确保能显示所有列
+            initial_pos = max(int(width * 0.25), 330)
             if initial_pos > 50:
                 self.main_pane.sashpos(0, initial_pos)
         except tk.TclError:
@@ -106,22 +120,55 @@ class TranslationWorkbench(ttk.Frame):
 
         self.left_frame = ttk.Frame(self.main_pane, padding=5)
         ttk.Label(self.left_frame, text="模组/任务列表", bootstyle="primary").pack(anchor="w", pady=(0, 5))
+        
+        # 创建左侧项目列表
         self.ns_tree = ttk.Treeview(self.left_frame, columns=("pending", "completed"), show="tree headings")
-        columns_to_sort = {"#0": "项目", "pending": "待翻译", "completed": "已翻译"}
-        for col, text in columns_to_sort.items():
-            self.original_headings[col] = text
-            self.ns_tree.heading(col, text=text, command=lambda c=col: self._sort_by_column(c))
-        self.ns_tree.column("#0", width=220, minwidth=160, stretch=True)
-        self.ns_tree.column("pending", width=60, stretch=False, anchor="center")
-        self.ns_tree.column("completed", width=60, stretch=False, anchor="center")
-        self.ns_tree.pack(fill="both", expand=True)
+        
+        # 添加垂直滚动条
+        v_scrollbar = ttk.Scrollbar(self.left_frame, orient=tk.VERTICAL, command=self.ns_tree.yview)
+        self.ns_tree.configure(yscrollcommand=v_scrollbar.set)
+        
+        # 定义列配置，调整项目列宽度，让已翻译列能正常显示
+        column_config = {
+            "#0": {"text": "项目", "width": 150, "minwidth": 120, "stretch": True},
+            "pending": {"text": "待翻译", "width": 80, "minwidth": 80, "stretch": False, "anchor": "center"},
+            "completed": {"text": "已翻译", "width": 80, "minwidth": 80, "stretch": False, "anchor": "center"}
+        }
+        
+        # 配置列标题和属性
+        for col, config in column_config.items():
+            self.original_headings[col] = config["text"]
+            self.ns_tree.heading(col, text=config["text"], command=lambda c=col: self._sort_by_column(c))
+            column_kwargs = {
+                'minwidth': config["minwidth"],
+                'stretch': config["stretch"],
+                'anchor': config.get("anchor", "w")
+            }
+            if config.get("width") is not None:
+                column_kwargs['width'] = config["width"]
+            self.ns_tree.column(col, **column_kwargs)
+        
+        # 布局Treeview和滚动条
+        self.ns_tree.pack(side="left", fill="both", expand=True)
+        v_scrollbar.pack(side="right", fill="y")
+        
+        # 初始绑定事件处理函数
         self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
+        
+        # 添加到主面板
         self.main_pane.add(self.left_frame, weight=1)
 
         right_frame_container = ttk.Frame(self.main_pane)
         self.main_pane.add(right_frame_container, weight=3)
-
-        right_pane = ttk.PanedWindow(right_frame_container, orient=tk.VERTICAL)
+        
+        # 保存右侧容器引用，用于切换
+        self.right_frame_container = right_frame_container
+        
+        # 创建工作区UI容器
+        self.workbench_ui_container = ttk.Frame(right_frame_container)
+        self.workbench_ui_container.pack(fill="both", expand=True)
+        
+        right_pane = ttk.PanedWindow(self.workbench_ui_container, orient=tk.VERTICAL)
         right_pane.pack(fill="both", expand=True)
 
         table_container = ttk.Frame(right_pane, padding=5)
@@ -194,19 +241,7 @@ class TranslationWorkbench(ttk.Frame):
         self.zh_text_input.bind("<KeyRelease>", self._update_term_suggestions, add="+")
         editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="e", pady=(5,0))
         
-        self.export_btn = ttk.Button(editor_btn_frame, text="导出待译文本", command=self._show_export_menu, state="disabled", bootstyle="primary-outline")
-        self.export_btn.pack(side="left", padx=(0, 10))
-        ToolTip(self.export_btn, "导出待翻译的文本到文件或剪贴板")
-        
-        self.import_btn = ttk.Button(editor_btn_frame, text="导入翻译结果", command=self._show_import_menu, state="disabled", bootstyle="primary-outline")
-        self.import_btn.pack(side="left", padx=(0, 10))
-        ToolTip(self.import_btn, "从文件或剪贴板导入翻译结果")
-        
-        self.ai_translate_btn = ttk.Button(editor_btn_frame, text="AI翻译所有待译项", command=self._run_ai_translation_async, state="disabled", bootstyle="primary-outline")
-        self.ai_translate_btn.pack(side="left", padx=(0, 10))
-        ToolTip(self.ai_translate_btn, "使用AI翻译当前项目中所有待翻译的条目")
-        
-        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="存入个人词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
+        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="添加到词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
         self.add_to_dict_btn.pack(side="left", padx=(0, 10))
         
         self.undo_btn = ttk.Button(editor_btn_frame, text="撤销", command=self.undo, bootstyle="info-outline")
@@ -217,12 +252,22 @@ class TranslationWorkbench(ttk.Frame):
         ToolTip(self.redo_btn, "重做已撤销的操作 (Ctrl+Y)")
 
         right_pane.add(editor_frame, weight=1)
+        
+        # 创建翻译控制台UI容器，初始隐藏
+        self.comprehensive_ui_container = ttk.Frame(self.right_frame_container)
+        self.comprehensive_ui_container.pack(fill="both", expand=True)
+        self.comprehensive_ui_container.pack_forget()
 
         btn_frame = ttk.Frame(self, padding=10)
         btn_frame.pack(fill="x")
         self.status_label = ttk.Label(btn_frame, text="请选择一个项目以开始")
         self.status_label.pack(side="left", fill="x", expand=True)
 
+        # 功能切换按钮 - 放到最右边
+        self.mode_switch_btn = ttk.Button(btn_frame, text="切换到翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
+        self.mode_switch_btn.pack(side="right")
+        ToolTip(self.mode_switch_btn, "在翻译工作台和翻译控制台功能之间切换")
+        
         self.save_button = ttk.Button(btn_frame, text="保存项目", command=self._save_project, bootstyle="primary-outline")
         self.save_button.pack(side="right", padx=5)
         self.finish_button = ttk.Button(btn_frame, text=self.finish_button_text, command=self._on_finish, bootstyle="success")
@@ -339,21 +384,31 @@ class TranslationWorkbench(ttk.Frame):
                         found = True
 
             if found:
+                # 保存当前编辑
+                self._save_current_edit()
+                
                 # 切换到对应的命名空间
                 current_ns_selection = self.ns_tree.selection()
                 if not current_ns_selection or current_ns_selection[0] != ns:
+                    # 切换命名空间并重新填充条目
                     self.ns_tree.selection_set(ns)
                     self.ns_tree.focus(ns)
                     self.ns_tree.see(ns)
                     self.update_idletasks()
+                    self._populate_item_list()
                 
-                # 选择并滚动到找到的项目
-                self.trans_tree.selection_set(iid)
-                self.trans_tree.focus(iid)
-                self.trans_tree.see(iid)
+                # 直接使用_iid重新构建当前模组下的正确ID
+                current_mod_items = self.trans_tree.get_children()
+                target_iid = f"{ns}___{idx}"
                 
-                # 触发项目选中事件以更新编辑器
-                self._on_item_selected(None)
+                # 选中并滚动到找到的项目
+                if target_iid in current_mod_items:
+                    self.trans_tree.selection_set(target_iid)
+                    self.trans_tree.focus(target_iid)
+                    self.trans_tree.see(target_iid)
+                    
+                    # 触发项目选中事件，更新编辑器内容
+                    self._on_item_selected()
                 return
 
         # 如果没有找到匹配项
@@ -391,41 +446,45 @@ class TranslationWorkbench(ttk.Frame):
         target_text = None
         target_field = None
 
-        if search_column == "en" or search_column == "all":
-            if match_case:
-                if find_text in en_text:
-                    found = True
-                    target_text = en_text
-                    target_field = "en"
-            else:
-                if find_text.lower() in en_text.lower():
-                    found = True
-                    target_text = en_text
-                    target_field = "en"
-        
-        if not found and (search_column == "zh" or search_column == "all"):
-            if match_case:
-                if find_text in zh_text:
-                    found = True
-                    target_text = zh_text
-                    target_field = "zh"
-            else:
-                if find_text.lower() in zh_text.lower():
-                    found = True
-                    target_text = zh_text
-                    target_field = "zh"
-        
-        if not found and search_column == "all":
-            if match_case:
-                if find_text in key:
-                    found = True
-                    target_text = key
-                    target_field = "key"
-            else:
-                if find_text.lower() in key.lower():
-                    found = True
-                    target_text = key
-                    target_field = "key"
+        # 先检查当前选中字段是否包含要查找的内容
+        current_selection = self.trans_tree.selection()
+        if current_selection:
+            # 检查每个可能的字段
+            if search_column == "en" or search_column == "all":
+                if match_case:
+                    if find_text in en_text:
+                        found = True
+                        target_text = en_text
+                        target_field = "en"
+                else:
+                    if find_text.lower() in en_text.lower():
+                        found = True
+                        target_text = en_text
+                        target_field = "en"
+            
+            if not found and (search_column == "zh" or search_column == "all"):
+                if match_case:
+                    if find_text in zh_text:
+                        found = True
+                        target_text = zh_text
+                        target_field = "zh"
+                else:
+                    if find_text.lower() in zh_text.lower():
+                        found = True
+                        target_text = zh_text
+                        target_field = "zh"
+            
+            if not found and search_column == "all":
+                if match_case:
+                    if find_text in key:
+                        found = True
+                        target_text = key
+                        target_field = "key"
+                else:
+                    if find_text.lower() in key.lower():
+                        found = True
+                        target_text = key
+                        target_field = "key"
 
         if not found:
             # 如果当前项目不包含要查找的内容，直接查找下一个
@@ -433,14 +492,20 @@ class TranslationWorkbench(ttk.Frame):
             return
 
         # 执行替换
-        flags = 0 if match_case else re.IGNORECASE
-        new_text = re.sub(find_text, replace_text, target_text, flags=flags)
+        new_text = None
+        if match_case:
+            new_text = target_text.replace(find_text, replace_text)
+        else:
+            # 不区分大小写替换
+            new_text = re.sub(re.escape(find_text), replace_text, target_text, flags=re.IGNORECASE)
 
         if new_text != target_text:
             # 保存原始状态用于撤销
             self._record_action(target_iid=iid)
             
             # 更新项目数据
+            original_item = copy.deepcopy(item)
+            
             if target_field == "en":
                 item['en'] = new_text
             elif target_field == "zh":
@@ -452,10 +517,15 @@ class TranslationWorkbench(ttk.Frame):
             
             # 更新UI
             self._update_item_in_tree(iid, item)
+            
+            # 如果替换的是当前编辑的字段，更新编辑器内容
             if target_field == "zh":
-                # 如果替换的是译文，更新编辑器内容
                 self.zh_text_input.delete("1.0", tk.END)
                 self.zh_text_input.insert("1.0", new_text)
+            elif target_field == "en":
+                # 更新原文显示
+                self.en_text_display.delete("1.0", tk.END)
+                self.en_text_display.insert("1.0", new_text)
             
             self._set_dirty(True)
 
@@ -478,24 +548,16 @@ class TranslationWorkbench(ttk.Frame):
             return
 
         # 保存当前编辑
-        self._save_current_edit()
-        
-        # 记录初始状态用于撤销
-        self._record_action(target_iid=None)
+        self._save_current_edit(record_undo=False)
         
         # 保存当前选中信息
         saved_selection = self.current_selection_info.copy() if self.current_selection_info else None
-        
-        # 取消当前选中状态，避免替换结果被覆盖
-        self.trans_tree.selection_set()
-        self.current_selection_info = None
+        saved_ns_selection = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
         
         # 获取替换参数
         match_case = params["match_case"]
         scope = params["scope"]
         search_column = params.get("search_column", "all")
-        flags = 0 if match_case else re.IGNORECASE
-        compiled_re = re.compile(find_text, flags)
         
         # 获取要搜索的命名空间
         namespaces_to_search = []
@@ -510,6 +572,14 @@ class TranslationWorkbench(ttk.Frame):
             messagebox.showwarning("范围错误", "请先在左侧选择一个项目以确定替换范围。", parent=self)
             return
         
+        # 保存当前状态用于撤销（使用copy.deepcopy确保状态被正确保存）
+        target_iid = saved_selection['row_id'] if saved_selection else None
+        self.undo_stack.append(copy.deepcopy(self.translation_data))
+        self.undo_targets.append(target_iid)
+        self.redo_stack.clear()
+        self.redo_targets.clear()
+        self._update_history_buttons()
+        
         replacement_count = 0
         
         # 执行替换
@@ -522,6 +592,11 @@ class TranslationWorkbench(ttk.Frame):
                 # 检查是否匹配
                 found = False
                 fields_to_replace = []
+
+                # 编译正则表达式（带转义）
+                escaped_find = re.escape(find_text)
+                flags = 0 if match_case else re.IGNORECASE
+                compiled_re = re.compile(escaped_find, flags)
 
                 # 根据搜索列检查匹配
                 if search_column == "en" or search_column == "all":
@@ -552,13 +627,13 @@ class TranslationWorkbench(ttk.Frame):
                     if changed:
                         item['source'] = '手动校对'
                         replacement_count += 1
-                        
-                        # 更新树视图中的项目
-                        iid = f"{ns}___{idx}"
-                        self._update_item_in_tree(iid, item)
-
+        
         # 更新UI状态
         self._set_dirty(True)
+        
+        # 更新树视图
+        self._populate_namespace_tree()
+        self._populate_item_list()
         
         # 显示替换结果
         messagebox.showinfo("替换完成", f"已完成 {replacement_count} 处替换。", parent=self)
@@ -567,14 +642,33 @@ class TranslationWorkbench(ttk.Frame):
         if saved_selection:
             ns = saved_selection['ns']
             idx = saved_selection['idx']
-            iid = saved_selection['row_id']
-            if self.trans_tree.exists(iid):
-                # 直接更新编辑器内容，避免调用_save_current_edit()
-                item = self.translation_data[ns]['items'][idx]
-                self.current_selection_info = saved_selection
-                self._set_editor_content(item['en'], item.get('zh', ''))
+            
+            # 确保左侧模组树选中正确的模组
+            if saved_ns_selection and self.ns_tree.exists(saved_ns_selection):
+                self.ns_tree.selection_set(saved_ns_selection)
+                self.ns_tree.focus(saved_ns_selection)
+                self.ns_tree.see(saved_ns_selection)
+            
+            # 重新构建正确的ID
+            new_iid = f"{ns}___{idx}"
+            
+            if self.trans_tree.exists(new_iid):
                 # 重新选择项目
-                self.trans_tree.selection_set(iid)
+                self.trans_tree.selection_set(new_iid)
+                self.trans_tree.focus(new_iid)
+                self.trans_tree.see(new_iid)
+                
+                # 更新当前选择信息
+                self.current_selection_info = {
+                    'ns': ns,
+                    'idx': idx,
+                    'row_id': new_iid
+                }
+                
+                # 更新编辑器内容
+                item = self.translation_data[ns]['items'][idx]
+                self._set_editor_content(item['en'], item.get('zh', ''))
+                
                 # 更新UI状态
                 self._update_ui_state(interactive=True, item_selected=True)
     
@@ -597,10 +691,15 @@ class TranslationWorkbench(ttk.Frame):
 
     def undo(self, event=None):
         if len(self.undo_stack) > 1:
-            self.redo_stack.append(self.undo_stack.pop())
+            # 深拷贝当前状态，添加到重做栈
+            self.redo_stack.append(copy.deepcopy(self.translation_data))
             target_to_reselect = self.undo_targets.pop()
             self.redo_targets.append(target_to_reselect)
             
+            # 从撤销栈弹出最后一个状态
+            self.undo_stack.pop()
+            
+            # 深拷贝恢复的状态，避免引用问题
             self.translation_data = copy.deepcopy(self.undo_stack[-1])
             
             self._set_dirty(True)
@@ -609,10 +708,15 @@ class TranslationWorkbench(ttk.Frame):
 
     def redo(self, event=None):
         if self.redo_stack:
-            self.undo_stack.append(self.redo_stack.pop())
+            # 深拷贝当前状态，添加到撤销栈
+            self.undo_stack.append(copy.deepcopy(self.redo_stack[-1]))
             target_to_reselect = self.redo_targets.pop()
             self.undo_targets.append(target_to_reselect)
             
+            # 从重做栈弹出最后一个状态
+            self.redo_stack.pop()
+            
+            # 深拷贝恢复的状态，避免引用问题
             self.translation_data = copy.deepcopy(self.undo_stack[-1])
             
             self._set_dirty(True)
@@ -628,30 +732,38 @@ class TranslationWorkbench(ttk.Frame):
             return
         
         try:
-            ns, _ = iid.rsplit('___', 1)
+            ns, idx_str = iid.rsplit('___', 1)
+            idx = int(idx_str)
             
-            if self.ns_tree.exists(ns) and (not self.ns_tree.selection() or self.ns_tree.selection()[0] != ns):
+            # 先获取命名空间，然后刷新项目列表
+            if self.ns_tree.exists(ns):
                 self.ns_tree.selection_set(ns)
                 self.ns_tree.focus(ns)
                 self.ns_tree.see(ns)
+                
+                # 刷新项目列表
                 self._populate_item_list()
-            
-            if self.trans_tree.exists(iid):
-                self.trans_tree.selection_set(iid)
-                self.trans_tree.focus(iid)
-                self.trans_tree.see(iid)
+                
+                # 重新构建iid，因为项目列表已经刷新了
+                new_iid = f"{ns}___{idx}"
+                
+                # 选择新构建的iid
+                if self.trans_tree.exists(new_iid):
+                    self.trans_tree.selection_set(new_iid)
+                    self.trans_tree.focus(new_iid)
+                    self.trans_tree.see(new_iid)
         except Exception as e:
             logging.warning(f"在撤销/重做后尝试自动选择条目 '{iid}' 时出错: {e}")
     
+
+    
     def _full_ui_refresh(self, target_to_select: str | None = None):
-        self._save_current_edit(record_undo=False) 
-        
-        selected_ns = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
+        saved_ns = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
         
         self._populate_namespace_tree()
         
-        if selected_ns and self.ns_tree.exists(selected_ns):
-            self.ns_tree.selection_set(selected_ns)
+        if saved_ns and self.ns_tree.exists(saved_ns):
+            self.ns_tree.selection_set(saved_ns)
         
         self._populate_item_list()
 
@@ -678,7 +790,13 @@ class TranslationWorkbench(ttk.Frame):
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_column = col_id
-            self.sort_reverse = False
+            # 根据列类型设置默认排序方向
+            if col_id == 'completed':
+                self.sort_reverse = True  # 已翻译列默认降序，已翻译多的项目显示在前面
+            elif col_id == 'pending':
+                self.sort_reverse = False  # 待翻译列默认升序，待翻译少的项目显示在前面
+            else:
+                self.sort_reverse = False  # 其他列默认升序
         
         items.sort(key=lambda t: t[1], reverse=self.sort_reverse)
         
@@ -686,7 +804,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#0000cd" }
+        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#0000cd", "空": "#808080" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
         self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'bold'))
 
@@ -696,12 +814,29 @@ class TranslationWorkbench(ttk.Frame):
             items = data.get('items', [])
             if not items: continue
             
-            untranslated_count = sum(1 for item in items if not item.get('zh', '').strip() and item.get('en', '').strip())
+            # 分类统计
             total_count = len(items)
-            completed_count = total_count - untranslated_count
+            
+            # 计算已翻译和待翻译数量
+            display_completed = 0
+            display_untranslated = 0
+            
+            for item in items:
+                en_text = item.get('en', '').strip()
+                zh_text = item.get('zh', '').strip()
+                source = item.get('source', '')
+                
+                # 检查是否已翻译
+                if zh_text:
+                    # 任何有译文的条目都算已翻译
+                    display_completed += 1
+                elif en_text:
+                    # 原文不为空但译文为空的算待翻译
+                    display_untranslated += 1
+                # 原文和译文都为空的不统计到待翻译
             
             display_text = data.get('display_name', f"{ns} ({data.get('jar_name', 'Unknown')})")
-            self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(untranslated_count, completed_count))
+            self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(display_untranslated, display_completed))
 
     def _update_namespace_summary(self, ns: str):
         if not self.ns_tree.exists(ns):
@@ -713,13 +848,25 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.set(ns, "completed", 0)
             return
 
-        untranslated_count = sum(1 for item in items if not item.get('zh', '').strip() and item.get('en', '').strip())
+        # 计算已翻译和待翻译数量
+        display_completed = 0
+        display_untranslated = 0
         
-        total_count = len(items)
-        completed_count = total_count - untranslated_count
+        for item in items:
+            en_text = item.get('en', '').strip()
+            zh_text = item.get('zh', '').strip()
+            
+            # 检查是否已翻译
+            if zh_text:
+                # 任何有译文的条目都算已翻译
+                display_completed += 1
+            elif en_text:
+                # 原文不为空但译文为空的算待翻译
+                display_untranslated += 1
+            # 原文和译文都为空的不统计到待翻译
         
-        self.ns_tree.set(ns, "pending", untranslated_count)
-        self.ns_tree.set(ns, "completed", completed_count)
+        self.ns_tree.set(ns, "pending", display_untranslated)
+        self.ns_tree.set(ns, "completed", display_completed)
 
     def _populate_item_list(self):
         self.trans_tree.delete(*self.trans_tree.get_children())
@@ -727,14 +874,35 @@ class TranslationWorkbench(ttk.Frame):
         if not selection or not self.ns_tree.exists(selection[0]): return
         ns = selection[0]
         for idx, item_data in enumerate(self.translation_data.get(ns, {}).get('items', [])):
-            if item_data.get('en', '').strip():
-                source = item_data.get('source', '')
-                self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                       values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
-                                       tags=(source,))
+            # 确定条目的source标签
+            en_text = item_data.get('en', '').strip()
+            zh_text = item_data.get('zh', '').strip()
+            source = item_data.get('source', '')
+            
+            # 如果没有source标签或者source标签为默认值，根据内容自动确定
+            if not source or source == '待翻译' and not en_text:
+                if not en_text:
+                    if zh_text:
+                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
+                    else:
+                        source = '空'  # 原文为空且没有译文，标记为空
+                elif not zh_text:
+                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
+                else:
+                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
+            
+            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
+                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                   tags=(source,))
 
     def _on_namespace_selected(self, event=None):
         self._save_current_edit()
+        
+        # 处理正常模式下的模组选择
+        if hasattr(self, '_current_mode') and self._current_mode == 'comprehensive':
+            return
+        
+        # 处理正常模式下的模组选择
         selection = self.ns_tree.selection()
         if not selection or not self.ns_tree.exists(selection[0]): return
         
@@ -745,7 +913,6 @@ class TranslationWorkbench(ttk.Frame):
         self.status_label.config(text=f"已选择项目: {selection[0]}")
 
     def _on_item_selected(self, event=None):
-        self._save_current_edit()
         selection = self.trans_tree.selection()
         if not selection: return
 
@@ -753,9 +920,19 @@ class TranslationWorkbench(ttk.Frame):
         ns, idx = self._get_ns_idx_from_iid(row_id)
         if ns is None: return
         
+        # 先获取当前编辑器的内容
+        current_zh_text = self.zh_text_input.get("1.0", "end-1c").strip()
+        
+        # 更新当前选择信息
         self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': row_id}
         item_data = self.translation_data[ns]['items'][idx]
         
+        # 检查编辑器内容是否与当前项目的译文不同
+        if current_zh_text != item_data.get('zh', '').strip():
+            # 如果不同，则保存当前编辑的内容
+            self._save_current_edit()
+        
+        # 更新编辑器内容
         self.zh_text_input.edit_modified(False)
         self._set_editor_content(item_data['en'], item_data.get('zh', ''))
         self.zh_text_input.edit_modified(False)
@@ -784,15 +961,34 @@ class TranslationWorkbench(ttk.Frame):
             self._set_dirty(True)
             item['zh'] = new_zh_text
             
-            is_now_pending = not new_zh_text and item.get('en', '').strip()
-            new_source = '手动校对' if not is_now_pending else '待翻译'
+            # 只有译文变化时才更新来源字段
+            # 分类逻辑
+            if not item.get('en', '').strip():
+                # 原文为空的条目
+                if new_zh_text:
+                    # 原文为空但手动添加了译文，标记为手动校对（已翻译）
+                    new_source = '手动校对'
+                else:
+                    # 原文为空且没有译文，标记为"空"状态
+                    new_source = '空'
+            else:
+                # 原文不为空的条目
+                is_now_pending = not new_zh_text
+                new_source = '手动校对' if not is_now_pending else '待翻译'
             item['source'] = new_source
             
             if record_undo:
                 self._record_action(target_iid=info['row_id'])
+        else:
+            # 译文未变化，保持原有来源不变
+            new_source = item.get('source', '')
 
-        current_source = item.get('source', '待翻译')
-        self.trans_tree.item(info['row_id'], values=(item['key'], item['en'], item['zh'], current_source), tags=(current_source,))
+        current_source = new_source
+        
+        # 检查项目是否存在于树视图中，避免Tkinter错误
+        if self.trans_tree.exists(info['row_id']):
+            self.trans_tree.item(info['row_id'], values=(item['key'], item['en'], item['zh'], current_source), tags=(current_source,))
+        
         self._update_namespace_summary(info['ns'])
 
     def _set_dirty(self, is_dirty: bool):
@@ -800,6 +996,10 @@ class TranslationWorkbench(ttk.Frame):
         self.save_button.config(bootstyle="primary" if is_dirty else "primary-outline")
         if self.main_window and self.is_dirty:
             self.main_window._save_current_session()
+        
+        # 实现自动保存项目数据
+        if self.is_dirty and self.current_project_path:
+            self._perform_save(self.current_project_path)
 
     def _perform_save(self, save_path) -> bool:
         self._save_current_edit()
@@ -908,10 +1108,13 @@ class TranslationWorkbench(ttk.Frame):
                 self.trans_tree.see(next_row_id)
         except (ValueError, IndexError): pass
 
-    def _update_ui_state(self, interactive: bool, item_selected: bool):
+    def _update_ui_state(self, interactive: bool, item_selected: bool, ns_select_mode=None):
         if interactive:
             base_state = "normal"
-            self.ns_tree.config(selectmode="browse")
+            # 根据当前模式决定选中模式
+            if ns_select_mode is None:
+                ns_select_mode = "extended" if self._current_mode == "comprehensive" else "browse"
+            self.ns_tree.config(selectmode=ns_select_mode)
             self.trans_tree.config(selectmode="browse")
             self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
             self.trans_tree.bind("<<TreeviewSelect>>", self._on_item_selected)
@@ -927,13 +1130,8 @@ class TranslationWorkbench(ttk.Frame):
         self.finish_button.config(state=base_state)
         self.save_button.config(state=base_state)
         
-        # 更新导出导入按钮状态
-        self.export_btn.config(state=base_state)
-        self.import_btn.config(state=base_state)
-        
-        # 更新AI翻译按钮状态
-        ai_translate_state = base_state if interactive else "disabled"
-        self.ai_translate_btn.config(state=ai_translate_state)
+        # 更新功能切换按钮状态
+        self.mode_switch_btn.config(state=base_state)
         
         if item_selected and interactive:
             self.add_to_dict_btn.config(state="normal")
@@ -942,6 +1140,110 @@ class TranslationWorkbench(ttk.Frame):
             self.add_to_dict_btn.config(state="disabled")
             self.zh_text_input.config(state="disabled", cursor="")
             
+    def _toggle_mode(self):
+        """在翻译工作台和翻译控制台功能之间切换"""
+        # 保存当前编辑
+        self._save_current_edit()
+        
+        if self._current_mode == "workbench":
+            # 保存翻译工作台模式的选中状态
+            if not hasattr(self, '_workbench_selection'):
+                self._workbench_selection = []
+            self._workbench_selection = list(self.ns_tree.selection())
+            
+            # 切换到翻译控制台模式
+            self._current_mode = "comprehensive"
+            
+            # 隐藏工作区UI
+            self.workbench_ui_container.pack_forget()
+            
+            # 先更新模组列表为多选模式
+            self.ns_tree.config(selectmode="extended")
+            
+            # 然后恢复翻译控制台模式的选中状态
+            if hasattr(self, '_comprehensive_selection'):
+                self.ns_tree.selection_set(self._comprehensive_selection)
+            else:
+                self.ns_tree.selection_clear()
+            
+            # 显示翻译控制台UI
+            self.comprehensive_ui_container.pack(fill="both", expand=True)
+            if self._comprehensive_ui is None:
+                # 创建翻译控制台UI组件
+                from gui.enhanced_comprehensive_processing import EnhancedComprehensiveProcessing
+                self._comprehensive_ui = EnhancedComprehensiveProcessing(self.comprehensive_ui_container, self)
+                self._comprehensive_ui.pack(fill="both", expand=True)
+                # 初始化时更新批次预览
+                self.after(0, lambda: self._comprehensive_ui._update_batch_preview())
+            
+            # 更新按钮文本
+            self.mode_switch_btn.config(text="返回翻译工作台")
+            
+            # 更新状态栏
+            self.status_label.config(text="翻译控制台模式 - 可多选模组进行批量操作")
+            # 确保在翻译控制台模式下，只有翻译控制台的事件处理函数被绑定
+            self.ns_tree.unbind("<<TreeviewSelect>>")
+            # 绑定翻译控制台模式的事件处理函数
+            self.ns_tree.bind("<<TreeviewSelect>>", self._comprehensive_ui._on_module_selection_change)
+            self.ns_tree.bind("<Button-1>", self._comprehensive_ui._on_module_click)
+            self.ns_tree.bind("<ButtonPress-1>", self._comprehensive_ui._on_module_press)
+            self.ns_tree.bind("<B1-Motion>", self._comprehensive_ui._on_module_drag)
+            self.ns_tree.bind("<ButtonRelease-1>", self._comprehensive_ui._on_module_release)
+            # 更新批次预览（确保在选择状态恢复后调用）
+            self.after(0, lambda: self._comprehensive_ui._update_batch_preview() if hasattr(self, '_comprehensive_ui') else None)
+        else:
+            # 保存翻译控制台模式的选中状态
+            if not hasattr(self, '_comprehensive_selection'):
+                self._comprehensive_selection = []
+            self._comprehensive_selection = list(self.ns_tree.selection())
+            
+            # 切换回翻译工作台模式
+            self._current_mode = "workbench"
+            
+            # 隐藏翻译控制台UI
+            self.comprehensive_ui_container.pack_forget()
+            
+            # 显示工作区UI
+            self.workbench_ui_container.pack(fill="both", expand=True)
+            
+            # 1. 首先将选择模式改为单选
+            self.ns_tree.config(selectmode="browse")
+            
+            # 2. 清除所有选中状态
+            self.ns_tree.selection_clear()
+            
+            # 3. 恢复翻译工作台模式的选中状态
+            if hasattr(self, '_workbench_selection') and self._workbench_selection:
+                # 翻译工作台模式只允许选中一个模组，所以只取第一个
+                self.ns_tree.selection_set(self._workbench_selection[0])
+            
+            # 4. 确保只有一个选中项（防止任何可能的多选残留）
+            current_selection = self.ns_tree.selection()
+            if len(current_selection) > 1:
+                # 如果仍然有多个选中，只保留第一个
+                self.ns_tree.selection_clear()
+                self.ns_tree.selection_set(current_selection[0])
+            
+            # 切换回翻译工作台模式时，重新绑定事件处理函数
+            self.ns_tree.unbind("<<TreeviewSelect>>")
+            self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
+            
+            # 更新按钮文本
+            self.mode_switch_btn.config(text="切换到翻译控制台")
+            
+            # 更新状态栏
+            selection = self.ns_tree.selection()
+            if selection:
+                self.status_label.config(text=f"已选择项目: {selection[0]}")
+            else:
+                self.status_label.config(text="未选择任何项目")
+            
+            # 重新填充项目列表
+            self._populate_item_list()
+            
+            # 更新UI状态
+            self._update_ui_state(interactive=True, item_selected=bool(selection))
+    
     def _show_export_menu(self):
         """显示导出菜单"""
         export_menu = tk.Menu(self, tearoff=0)
@@ -1136,74 +1438,238 @@ class TranslationWorkbench(ttk.Frame):
         Args:
             en_text: 原文文本
         """
-        # 1. 检查缓存，避免重复计算
+        # 1. 增加搜索ID，标记当前请求
+        current_search_id = self._current_search_id + 1
+        self._current_search_id = current_search_id
+        
+        # 2. 检查缓存，避免重复计算
         cache_key = en_text
         if cache_key in self._term_match_cache:
-            display_terms = self._term_match_cache[cache_key]
-            self._update_term_display(display_terms)
+            # 检查是否为最新请求，只有最新请求才更新UI
+            if current_search_id == self._current_search_id:
+                display_terms = self._term_match_cache[cache_key]
+                self._update_term_display(display_terms)
             return
         
         # 2. 防抖机制：取消之前的更新任务
         if self._term_update_id:
             self.after_cancel(self._term_update_id)
         
-        # 3. 延迟执行术语匹配，减少UI阻塞
+        # 3. 取消当前正在运行的术语搜索
+        self._term_search_cancelled = True
+        
+        # 4. 立即显示"正在搜索"提示
+        self.term_text.config(state="normal")
+        self.term_text.delete("1.0", tk.END)
+        self.term_text.insert(tk.END, "正在搜索...")
+        self.term_text.config(state="disabled")
+        self.term_text.yview_moveto(0.0)
+        
+        # 5. 延迟执行术语匹配，减少UI阻塞
         def delayed_term_match():
-            # 使用优化后的find_matching_terms方法
-            matching_terms = self.term_db.find_matching_terms(en_text)
+            import threading
+            from utils.dictionary_searcher import DictionarySearcher
             
-            # 不区分大小写合并相同术语
-            merged_terms = {}
-            for term in matching_terms:
-                term_lower = term['original'].lower()
-                if term_lower not in merged_terms:
-                    merged_terms[term_lower] = []
-                merged_terms[term_lower].append(term)
+            # 重置取消标志
+            self._term_search_cancelled = False
             
-            # 从原文中提取实际的术语版本，并准备显示数据
-            term_with_positions = []
-            for term_lower, term_list in merged_terms.items():
-                # 在原文中查找实际的术语版本（保持大小写）和位置
-                pattern = re.compile(rf'\b{re.escape(term_lower)}\b', re.IGNORECASE)
-                match = pattern.search(en_text)
-                if match:
-                    actual_term = match.group(0)  # 原文中实际的术语版本
-                    position = match.start()  # 记录首次出现的位置
-                else:
-                    actual_term = term_list[0]['original']  # 否则使用术语库中的版本
-                    position = float('inf')  # 未找到的术语放在最后
+            # 定义后台线程执行的函数
+            def background_term_match():
+                # 检查是否已被取消
+                if self._term_search_cancelled:
+                    return
+                    
+                matching_terms = []
+                matched_terms_set = set()  # 避免重复匹配
                 
-                # 按术语长度排序，选择最长的术语（可能有不同长度的变体）
-                term_list.sort(key=lambda x: len(x['original']), reverse=True)
-                primary_term = term_list[0]
+                # 快速检查：如果文本为空，直接返回空列表
+                if not en_text:
+                    display_terms = []
+                    self._term_match_cache[cache_key] = display_terms
+                    # 检查是否为最新请求，只有最新请求才更新UI
+                    if current_search_id == self._current_search_id:
+                        try:
+                            # 检查主窗口是否仍然存在
+                            if self.winfo_exists():
+                                self.after(0, lambda: self._update_term_display(display_terms))
+                        except RuntimeError:
+                            # 捕获主线程不在主循环中的错误
+                            pass
+                    return
                 
-                # 合并所有译文（去重）
-                all_translations = set()
-                for t in term_list:
-                    if isinstance(t['translation'], list):
-                        all_translations.update(t['translation'])
+                # 提取文本中的所有单词，用于快速过滤
+                text_words = set(re.findall(r'\b[a-zA-Z0-9_]+\b', en_text.lower()))
+                
+                # 1. 处理个人词典中的术语
+                user_dict = config_manager.load_user_dict()
+                user_dict_origin_terms = user_dict.get("by_origin_name", {})
+                
+                for original, translation in user_dict_origin_terms.items():
+                    # 检查是否已被取消
+                    if self._term_search_cancelled:
+                        return
+                        
+                    original_lower = original.lower()
+                    if original_lower in text_words:
+                        # 检查是否在文本中完整匹配
+                        if re.search(rf'\b{re.escape(original)}\b', en_text, re.IGNORECASE):
+                            temp_term = {
+                                "id": f"user_dict_{original_lower}",
+                                "original": original,
+                                "translation": [translation],
+                                "comment": "",
+                                "domain": "",
+                                "created_at": "",
+                                "updated_at": ""
+                            }
+                            matching_terms.append(temp_term)
+                            matched_terms_set.add(original)
+                
+                # 2. 处理社区词典中的术语
+                config = config_manager.load_config()
+                community_dict_path = config.get("community_dict_path", "")
+                
+                if community_dict_path:
+                    searcher = DictionarySearcher(community_dict_path)
+                    if searcher.is_available():
+                        # 优化1：只排除已匹配的术语
+                        filtered_words = [word for word in text_words if word not in matched_terms_set]
+                        
+                        # 优化2：如果过滤后的单词数量太多，限制查询数量
+                        if len(filtered_words) > 15:
+                            filtered_words = sorted(filtered_words, key=lambda x: len(x), reverse=True)[:15]
+                        
+                        # 只查询过滤后的单词
+                        for word in filtered_words:
+                            # 检查是否已被取消
+                            if self._term_search_cancelled:
+                                searcher.close()
+                                return
+                                
+                            if word not in matched_terms_set:
+                                # 在社区词典中查询该单词，限制结果数量
+                                results = searcher.search_by_english(word, limit=3)
+                                for result in results:
+                                    # 检查是否已被取消
+                                    if self._term_search_cancelled:
+                                        searcher.close()
+                                        return
+                                        
+                                    original = result.get("ORIGIN_NAME", "").strip()
+                                    trans_name = result.get("TRANS_NAME", "").strip()
+                                    
+                                    if original and trans_name:
+                                        # 过滤条件1：单词数不大于2
+                                        word_count = len(original.split())
+                                        if word_count > 2:
+                                            continue
+                                    
+                                    # 过滤条件2：译文必须包含中文
+                                    if not re.search('[一-鿿]', trans_name):
+                                        continue
+                                    
+                                    original_lower = original.lower()
+                                    # 检查是否在文本中完整匹配
+                                    if original_lower in text_words and re.search(rf'\b{re.escape(original)}\b', en_text, re.IGNORECASE):
+                                        # 检查是否已经存在该术语
+                                        existing_term = next((t for t in matching_terms if t['original'].lower() == original_lower), None)
+                                        if existing_term:
+                                            # 如果存在，添加译文到现有术语
+                                            if trans_name not in existing_term['translation']:
+                                                existing_term['translation'].append(trans_name)
+                                        else:
+                                            # 如果不存在，创建新术语
+                                            temp_term = {
+                                                "id": f"community_dict_{original_lower}",
+                                                "original": original,
+                                                "translation": [trans_name],
+                                                "comment": "",
+                                                "domain": "",
+                                                "created_at": "",
+                                                "updated_at": ""
+                                            }
+                                            matching_terms.append(temp_term)
+                                            matched_terms_set.add(original)
+                        searcher.close()
+                
+                # 检查是否已被取消
+                if self._term_search_cancelled:
+                    return
+                    
+                # 3. 不区分大小写合并相同术语
+                merged_terms = {}
+                for term in matching_terms:
+                    # 检查是否已被取消
+                    if self._term_search_cancelled:
+                        return
+                        
+                    term_lower = term['original'].lower()
+                    if term_lower not in merged_terms:
+                        merged_terms[term_lower] = []
+                    merged_terms[term_lower].append(term)
+                
+                # 4. 从原文中提取实际的术语版本，并准备显示数据
+                term_with_positions = []
+                for term_lower, term_list in merged_terms.items():
+                    # 检查是否已被取消
+                    if self._term_search_cancelled:
+                        return
+                        
+                    # 在原文中查找实际的术语版本（保持大小写）和位置
+                    pattern = re.compile(rf'\b{re.escape(term_lower)}\b', re.IGNORECASE)
+                    match = pattern.search(en_text)
+                    if match:
+                        actual_term = match.group(0)  # 原文中实际的术语版本
+                        position = match.start()  # 记录首次出现的位置
                     else:
-                        all_translations.add(t['translation'])
+                        actual_term = term_list[0]['original']  # 否则使用术语库中的版本
+                        position = float('inf')  # 未找到的术语放在最后
+                    
+                    # 按术语长度排序，选择最长的术语（可能有不同长度的变体）
+                    term_list.sort(key=lambda x: len(x['original']), reverse=True)
+                    primary_term = term_list[0]
+                    
+                    # 合并所有译文（去重）
+                    all_translations = set()
+                    for t in term_list:
+                        if isinstance(t['translation'], list):
+                            all_translations.update(t['translation'])
+                        else:
+                            all_translations.add(t['translation'])
+                    
+                    # 创建显示用的术语对象，移除来源信息
+                    display_term = {
+                        'actual_original': actual_term,
+                        'original': primary_term['original'],
+                        'translation': list(all_translations),
+                        'domain': '',
+                        'comment': '',  # 移除来源信息
+                        'position': position
+                    }
+                    term_with_positions.append(display_term)
                 
-                # 创建显示用的术语对象
-                display_term = {
-                    'actual_original': actual_term,
-                    'original': primary_term['original'],
-                    'translation': list(all_translations),
-                    'domain': primary_term['domain'],
-                    'comment': primary_term['comment'],
-                    'position': position
-                }
-                term_with_positions.append(display_term)
+                # 检查是否已被取消
+                if self._term_search_cancelled:
+                    return
+                    
+                # 按照术语在原文中首次出现的位置排序
+                display_terms = sorted(term_with_positions, key=lambda x: x['position'])
+                
+                # 缓存结果
+                self._term_match_cache[cache_key] = display_terms
+                
+                # 检查是否为最新请求，只有最新请求才更新UI
+                if current_search_id == self._current_search_id:
+                    try:
+                        # 检查主窗口是否仍然存在
+                        if self.winfo_exists():
+                            self.after(0, lambda: self._update_term_display(display_terms))
+                    except RuntimeError:
+                        # 捕获主线程不在主循环中的错误
+                        pass
             
-            # 按照术语在原文中首次出现的位置排序
-            display_terms = sorted(term_with_positions, key=lambda x: x['position'])
-            
-            # 缓存结果
-            self._term_match_cache[cache_key] = display_terms
-            
-            # 更新UI
-            self._update_term_display(display_terms)
+            # 启动后台线程执行术语匹配
+            threading.Thread(target=background_term_match, daemon=True).start()
         
         # 延迟执行术语匹配
         self._term_update_id = self.after(self._term_update_delay, delayed_term_match)
@@ -1220,10 +1686,8 @@ class TranslationWorkbench(ttk.Frame):
         
         if display_terms:
             for i, term in enumerate(display_terms):
-                # 使用原文中的实际版本显示
-                term_info = f"{term['actual_original']} → {', '.join(term['translation'])} [{term['domain']}]"
-                if term['comment']:
-                    term_info += f" - {term['comment']}"
+                # 使用原文中的实际版本显示，多个译文用分号分隔
+                term_info = f"{term['actual_original']} → {'; '.join(term['translation'])}"
                 # 只在不是最后一个术语时添加换行符
                 if i < len(display_terms) - 1:
                     self.term_text.insert(tk.END, term_info + "\n")
@@ -1344,24 +1808,12 @@ class TranslationWorkbench(ttk.Frame):
         if not translation:
             messagebox.showwarning("操作无效", "译文不能为空！", parent=self); return
         
-        prompt_message = (
-            f"请选择存入个人词典的方式：\n\n"
-            f"[是] = 按 Key 保存\n"
-            f"[否] = 按 原文 保存\n\n"
-            f"按Key保存具有最高匹配优先级。"
-        )
-        save_by_key = messagebox.askyesnocancel("选择保存模式", prompt_message, parent=self)
-        
-        if save_by_key is None: return
         user_dict = config_manager.load_user_dict()
-        if save_by_key: 
-            user_dict["by_key"][key] = translation
-            mode_str = f"Key: {key}"
-        else: 
-            user_dict["by_origin_name"][origin_name] = translation
-            mode_str = f"原文: {origin_name}"
+        # 同时保存Key和原文到个人词典
+        user_dict["by_key"][key] = translation
+        user_dict["by_origin_name"][origin_name] = translation
         config_manager.save_user_dict(user_dict)
-        self.status_label.config(text=f"成功！已将“{translation}”存入个人词典 ({mode_str})")
+        self.status_label.config(text=f"成功！已将“{translation}”存入个人词典")
         self._set_dirty(True)
 
     def _open_dict_search(self):
@@ -1383,7 +1835,11 @@ class TranslationWorkbench(ttk.Frame):
         try:
             items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip() and item.get('en', '').strip()]
             if not items_to_translate_info:
-                self.after(0, lambda: self.status_label.config(text="没有需要AI翻译的空缺条目。"))
+                try:
+                    if self.winfo_exists():
+                        self.after(0, lambda: self.status_label.config(text="没有需要AI翻译的空缺条目。"))
+                except RuntimeError:
+                    pass
                 self.log_callback("没有需要AI翻译的空缺条目。", "INFO"); return
             
             texts_to_translate = [info['en'] for info in items_to_translate_info]
@@ -1398,19 +1854,34 @@ class TranslationWorkbench(ttk.Frame):
                     batch_idx = future_map[future]
                     translations_nested[batch_idx] = future.result()
                     msg = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
-                    self.after(0, lambda m=msg: self.status_label.config(text=m)); self.log_callback(msg, "INFO")
+                    try:
+                        if self.winfo_exists():
+                            self.after(0, lambda m=msg: self.status_label.config(text=m))
+                    except RuntimeError:
+                        pass
+                    self.log_callback(msg, "INFO")
             
             translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
             if len(translations) != len(texts_to_translate): raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
-            self.after(0, self._update_ui_after_ai, items_to_translate_info, translations)
+            try:
+                if self.winfo_exists():
+                    self.after(0, self._update_ui_after_ai, items_to_translate_info, translations)
+            except RuntimeError:
+                pass
             
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}", parent=self)); self.log_callback(f"AI翻译失败: {e}", "ERROR")
+            try:
+                if self.winfo_exists():
+                    self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}", parent=self))
+            except RuntimeError:
+                pass
+            self.log_callback(f"AI翻译失败: {e}", "ERROR")
         finally:
             try:
                 if self.winfo_exists():
                     self.after(0, self._update_ui_state, True, bool(self.current_selection_info))
-            except tk.TclError:
+            except (tk.TclError, RuntimeError):
+                # 捕获tk.TclError和主线程不在主循环中的错误
                 pass
 
     def _is_valid_translation(self, text: str | None) -> bool:
@@ -1419,9 +1890,20 @@ class TranslationWorkbench(ttk.Frame):
         return True
 
     def _update_ui_after_ai(self, translated_info, translations):
+        """更新UI以反映AI翻译结果
+        
+        Args:
+            translated_info: 翻译信息列表，包含每个翻译条目的命名空间和索引
+            translations: AI返回的翻译结果列表
+        """
+        # 保存当前选中状态
+        saved_selection = self.current_selection_info.copy() if self.current_selection_info else None
+        
+        # 应用AI翻译结果
         valid_translation_count = 0
         for info, translation in zip(translated_info, translations):
             if self._is_valid_translation(translation):
+                # 获取对应条目并更新
                 item = self.translation_data[info['ns']]['items'][info['idx']]
                 item['zh'] = translation
                 item['source'] = 'AI翻译'
@@ -1429,23 +1911,73 @@ class TranslationWorkbench(ttk.Frame):
             else:
                 logging.warning(f"AI为 '{info['en']}' 返回的译文 '{translation}' 无效，已忽略。")
         
-        self._record_action(target_iid=None)
+        # 直接将当前状态（AI翻译后的状态）添加到撤销栈
+        # 这样撤销时可以恢复到上一个状态，当前状态是AI翻译后的状态
+        self.undo_stack.append(copy.deepcopy(self.translation_data))
+        target_iid = saved_selection['row_id'] if saved_selection else None
+        self.undo_targets.append(target_iid)
+        
+        # 清空重做栈，因为执行了新的操作
+        self.redo_stack.clear()
+        self.redo_targets.clear()
+        
+        # 更新按钮状态
+        self._update_history_buttons()
+        
+        # 更新UI状态
         self._set_dirty(True)
+        
+        # 显示翻译结果统计
         total_returned = len(translations)
         msg = f"AI翻译完成！共收到 {total_returned} 条结果，其中 {valid_translation_count} 条为有效译文。"
         self.status_label.config(text=msg)
         self.log_callback(msg, "SUCCESS")
         
+        # 刷新树视图
         self._populate_namespace_tree()
         self._populate_item_list()
-        self._clear_editor()
-        self.current_selection_info = None
-        self._update_ui_state(interactive=True, item_selected=False)
+        
+        # 恢复选中状态
+        if saved_selection:
+            ns = saved_selection['ns']
+            idx = saved_selection['idx']
+            iid = f"{ns}___{idx}"
+            
+            # 检查条目是否存在
+            if self.trans_tree.exists(iid):
+                # 重新选择条目
+                self.trans_tree.selection_set(iid)
+                self.trans_tree.focus(iid)
+                self.trans_tree.see(iid)
+                
+                # 更新当前选择信息
+                item = self.translation_data[ns]['items'][idx]
+                self.current_selection_info = {
+                    'ns': ns,
+                    'idx': idx,
+                    'row_id': iid
+                }
+                
+                # 更新编辑器内容
+                self._set_editor_content(item['en'], item.get('zh', ''))
+                
+                # 更新UI状态
+                self._update_ui_state(interactive=True, item_selected=True)
+            else:
+                # 条目不存在，清除编辑器
+                self._clear_editor()
+                self.current_selection_info = None
+                self._update_ui_state(interactive=True, item_selected=False)
+        else:
+            # 没有选中状态，清除编辑器
+            self._clear_editor()
+            self.current_selection_info = None
+            self._update_ui_state(interactive=True, item_selected=False)
 
     def _on_finish(self):
         self._save_current_edit()
         final_lookup = defaultdict(dict)
-        latest_data = self.undo_stack[-1] if self.undo_stack else self.translation_data
+        latest_data = self.translation_data
         for ns, data in latest_data.items():
             for item in data.get('items', []):
                 if item.get('zh', '').strip():

@@ -11,7 +11,6 @@ class DictionarySearcher:
                 self.conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
                 self.conn.row_factory = sqlite3.Row
                 self.conn.execute("PRAGMA query_only = ON;")
-                logging.info(f"词典查询器成功连接到数据库: {self.db_path}")
             except sqlite3.Error as e:
                 logging.error(f"无法以只读模式连接到词典数据库: {self.db_path}. 错误: {e}")
                 self.conn = None
@@ -23,22 +22,17 @@ class DictionarySearcher:
         return self.conn is not None
     def _execute_query(self, sql: str, params: tuple) -> List[Dict[str, Any]]:
         if not self.is_available():
-            logging.warning("尝试在词典不可用时执行查询。")
             return []
         results = []
-        logging.info(f"执行词典查询: SQL='{sql.strip()}', PARAMS={params}")
         try:
             cursor = self.conn.cursor()
             cursor.execute(sql, params)
-            rows = [dict(row) for row in cursor.fetchall()]
-            logging.info(f"查询成功，获取到 {len(rows)} 条原始记录。")
-            return rows
+            return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
             logging.error(f"执行词典查询时发生致命错误: {e}", exc_info=True)
         return []
     def search_by_english(self, query: str, limit: int = 100) -> List[Dict[str, Any]]:
         if not query.strip(): return []
-        logging.info(f"开始按原文搜索: '{query}'")
         search_term = f"%{query.strip()}%"
         sql = """
         SELECT KEY, ORIGIN_NAME, TRANS_NAME, VERSION
@@ -55,7 +49,6 @@ class DictionarySearcher:
         return self._execute_query(sql, params)
     def search_by_chinese(self, query: str, limit: int = 100) -> List[Dict[str, Any]]:
         if not query.strip(): return []
-        logging.info(f"开始按译文搜索: '{query}'")
         search_term = f"%{query.strip()}%"
         sql = """
         SELECT KEY, ORIGIN_NAME, TRANS_NAME, VERSION
@@ -71,6 +64,5 @@ class DictionarySearcher:
         return self._execute_query(sql, params)
     def close(self):
         if self.conn:
-            logging.info("关闭词典查询器的数据库连接。")
             self.conn.close()
             self.conn = None

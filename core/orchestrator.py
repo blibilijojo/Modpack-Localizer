@@ -2,10 +2,10 @@ import logging
 from pathlib import Path
 from tkinter import messagebox
 from datetime import datetime
-from core.data_aggregator import DataAggregator
-from core.decision_engine import DecisionEngine
-from core.pack_builder import PackBuilder
 from gui.translation_workbench import TranslationWorkbench
+from core.workflow import Workflow
+from core.models import PackSettings
+
 DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
 DEFAULT_DESC_TEMPLATE = (
     "整合包汉化数据分析 (共 {total} 条):\n"
@@ -24,6 +24,8 @@ class Orchestrator:
         self.final_workbench_data = None
         self.raw_english_files = {}
         self.namespace_formats = {}
+        # 初始化工作流
+        self.workflow = Workflow()
     def run_translation_phase(self):
         try:
             self.log("阶段 1/3: 开始聚合语言数据...", "INFO")
@@ -37,50 +39,63 @@ class Orchestrator:
             if not mods_path.exists() or not mods_path.is_dir():
                 raise ValueError(f"配置的Mods目录不存在或不是目录: {mods_path}")
             
-            aggregator = DataAggregator(
-                mods_dir=mods_path,
-                zip_paths=[Path(p) for p in self.settings.get('zip_paths', []) if Path(p).exists()],
-                community_dict_path=self.settings['community_dict_path']
+            # 创建工作流上下文
+            context = self.workflow.create_context(
+                settings=self.settings,
+                progress_callback=lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
             )
             
             try:
-                (user_dict, comm_dict_key, comm_dict_origin, 
-                 en_dicts, internal_zh, pack_zh, 
-                 ns_formats, ns_to_jar, raw_en_files) = aggregator.run(
-                    lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
-                )
+                # 执行数据提取
+                extraction_result = self.workflow.run_extraction(context)
             except Exception as agg_error:
-                logging.error(f"数据聚合失败: {agg_error}", exc_info=True)
-                raise Exception(f"数据聚合失败: {agg_error}")
+                logging.error(f"数据提取失败: {agg_error}", exc_info=True)
+                raise Exception(f"数据提取失败: {agg_error}")
             
             self.update_progress("数据聚合完成", 50)
-            self.raw_english_files = raw_en_files
-            self.namespace_formats = ns_formats
+            
+            # 保存提取结果
+            self.raw_english_files = extraction_result.raw_english_files
+            # 转换namespace_info为namespace_formats
+            self.namespace_formats = {}
+            for ns, info in extraction_result.namespace_info.items():
+                self.namespace_formats[ns] = info.file_format
             
             self.log("阶段 2/3: 执行翻译决策...", "INFO")
             self.update_progress("正在应用翻译规则...", 60)
             
-            engine = DecisionEngine()
             try:
-                workbench_data = engine.run(
-                    user_dictionary=user_dict,
-                    community_dict_by_key=comm_dict_key,
-                    community_dict_by_origin=comm_dict_origin,
-                    master_english_dicts=en_dicts,
-                    internal_chinese_dicts=internal_zh,
-                    pack_chinese_dict=pack_zh,
-                    use_origin_name_lookup=self.settings.get('use_origin_name_lookup', True),
-                    namespace_to_jar=ns_to_jar,
-                    raw_english_files=raw_en_files,
-                    namespace_formats=ns_formats
-                )
+                # 执行翻译决策
+                translation_result = self.workflow.run_translation(context)
             except Exception as dec_error:
                 logging.error(f"翻译决策失败: {dec_error}", exc_info=True)
                 raise Exception(f"翻译决策失败: {dec_error}")
             
             # 验证决策结果
-            if not workbench_data:
+            if not translation_result.workbench_data:
                 raise Exception("翻译决策未生成任何数据")
+            
+            # 转换为旧格式的workbench_data
+            workbench_data = {}
+            for ns, entries in translation_result.workbench_data.items():
+                items = []
+                for key, entry in entries.items():
+                    items.append({
+                        'key': entry.key,
+                        'en': entry.en,
+                        'zh': entry.zh,
+                        'source': entry.source
+                    })
+                
+                # 获取jar_name
+                jar_name = extraction_result.namespace_info.get(ns, None)
+                jar_name = jar_name.jar_name if jar_name else 'Unknown'
+                
+                workbench_data[ns] = {
+                    'jar_name': jar_name,
+                    'display_name': f"{ns} ({jar_name})",
+                    'items': items
+                }
             
             self.update_progress("决策完成，准备打开工作台", 90)
             self.log("阶段 3/3: 启动翻译工作台...", "INFO")
@@ -93,7 +108,7 @@ class Orchestrator:
             logging.error(f"翻译处理阶段失败: {e}", exc_info=True)
             self.root.after(0, lambda: messagebox.showerror("处理失败", f"在处理文件时发生错误:\n{e}\n请查看日志获取更多详细信息。"))
             self.update_progress(f"错误: {e}", -1)
-    def _launch_workbench(self, workbench_data):
+    def _launch_workbench(self, workbench_data, undo_history=None):
         workbench = TranslationWorkbench(
             parent=self.root,
             initial_data=workbench_data,
@@ -102,7 +117,8 @@ class Orchestrator:
             current_settings=self.settings,
             log_callback=self.log,
             project_path=self.project_path,
-            finish_button_text="完成并生成资源包"
+            finish_button_text="完成并生成资源包",
+            undo_history=undo_history
         )
         self.root.wait_window(workbench)
         if workbench.final_translations is not None:
@@ -169,15 +185,57 @@ class Orchestrator:
             else:
                 name_template = DEFAULT_NAME_TEMPLATE
             final_name = self._replace_placeholders(name_template, metadata_values)
+            
+            # 准备资源包设置
             pack_settings['pack_description'] = final_description
             pack_settings['pack_base_name'] = final_name
-            builder = PackBuilder()
-            success, message = builder.run(
+            
+            # 转换为PackSettings模型
+            builder_pack_settings = PackSettings(
+                pack_as_zip=pack_settings.get('pack_as_zip', False),
+                pack_description=final_description,
+                pack_base_name=final_name,
+                pack_format=pack_settings.get('pack_format', 7),
+                pack_icon_path=pack_settings.get('pack_icon_path', '')
+            )
+            
+            # 创建工作流上下文
+            context = self.workflow.create_context(settings=self.settings)
+            
+            # 手动构建提取结果对象（简化版）
+            from core.models import ExtractionResult, NamespaceInfo
+            extraction_result = ExtractionResult()
+            extraction_result.raw_english_files = self.raw_english_files
+            # 转换namespace_formats为namespace_info
+            for ns, fmt in self.namespace_formats.items():
+                extraction_result.namespace_info[ns] = NamespaceInfo(
+                    name=ns,
+                    file_format=fmt,
+                    raw_content=self.raw_english_files.get(ns, '')
+                )
+            
+            # 手动构建翻译结果对象（简化版）
+            from core.models import TranslationResult, LanguageEntry
+            translation_result = TranslationResult()
+            # 转换final_workbench_data为TranslationResult格式
+            for ns, ns_data in self.final_workbench_data.items():
+                translation_result.workbench_data[ns] = {}
+                for item in ns_data.get('items', []):
+                    entry = LanguageEntry(
+                        key=item['key'],
+                        en=item['en'],
+                        zh=item.get('zh', ''),
+                        source=item.get('source', '待翻译'),
+                        namespace=ns
+                    )
+                    translation_result.workbench_data[ns][item['key']] = entry
+            
+            # 使用新的Builder构建资源包
+            success, message = self.workflow.builder.run(
                 output_dir=Path(self.settings['output_dir']),
-                final_translations_lookup_by_ns=self.final_translations,
-                pack_settings=pack_settings,
-                namespace_formats=self.namespace_formats,
-                raw_english_files=self.raw_english_files
+                translation_result=translation_result,
+                extraction_result=extraction_result,
+                pack_settings=builder_pack_settings
             )
             if success:
                 self.log(f"资源包生成成功！", "SUCCESS")
@@ -198,6 +256,7 @@ class Orchestrator:
         self.raw_english_files = self.save_data.get('raw_english_files', {})
         self.namespace_formats = self.save_data.get('namespace_formats', {})
         workbench_data = self.save_data.get('workbench_data', {})
+        
         if not all([self.raw_english_files, self.namespace_formats, workbench_data]):
             self.log("存档文件不完整，缺少核心数据。", "ERROR")
             self.update_progress("错误: 存档文件不完整", -1)

@@ -4,6 +4,7 @@ import json
 import time
 import threading
 import queue
+from pathlib import Path
 from itertools import cycle
 from utils.error_logger import log_ai_error
 class KeyManager:
@@ -80,6 +81,7 @@ class AITranslator:
         else:
             batch_index_inner, batch_inner, model_name, prompt_template = batch_info
             ai_stream_timeout = 30  # 默认超时时间
+        
         attempt = 0
         while True:
             api_key = self.key_manager.get_key()
@@ -88,7 +90,9 @@ class AITranslator:
                 effective_model_name = model_name
                 client = self._get_client(api_key, timeout=ai_stream_timeout)
                 input_dict = dict(enumerate(batch_inner))
-                prompt_content = prompt_template.replace('{input_data_json}', json.dumps(input_dict, ensure_ascii=False))
+                input_json = json.dumps(input_dict, ensure_ascii=False)
+                # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
+                prompt_content = f"{prompt_template}\n\n输入: {input_json}"
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
                 response = client.chat.completions.create(**request_params)
                 response_text = response.choices[0].message.content
@@ -139,7 +143,8 @@ class AITranslator:
                     index = int(key)
                     if 0 <= index < expected_length:
                         if isinstance(value, str):
-                            reconstructed_list[index] = value
+                            # 将实际换行符转换为转义形式，确保在界面上正确显示
+                            reconstructed_list[index] = value.replace('\n', '\\n')
                         else:
                              logging.warning(f"AI为键'{key}'返回了非字符串类型的值，将使用原文回填。")
                              return None

@@ -64,7 +64,18 @@ DEFAULT_CONFIG = {
     "community_dict_filter": {
         "max_word_count": 0,  # 原文最大单词数，0表示不限制
         "require_chinese_translation": True  # 译文必须包含中文
-    }
+    },
+    "github_proxies": [
+        "https://gh-proxy.org/",
+        "https://hk.gh-proxy.org/",
+        "https://cdn.gh-proxy.org/",
+        "https://edgeone.gh-proxy.org/"
+    ],
+    
+    # AI翻译批次处理默认值
+    "ai_batch_count": 10,       # 批次数默认值
+    "ai_batch_items": 200,      # 每批次条目数默认值
+    "ai_batch_words": 2000       # 每批次单词数默认值
 }
 
 def load_config() -> dict:
@@ -102,9 +113,6 @@ def load_config() -> dict:
                 logging.warning(f"配置文件中缺少 '{key}' 项目，将使用默认值进行补充。")
                 config[key] = value
                 config_updated = True
-        if "github_proxies" in config:
-            del config["github_proxies"]
-            config_updated = True
         if '数字键' not in config.get("prompt", ""):
             logging.warning("检测到旧版AI提示词，已自动更新为最稳健的键值对模式。")
             config["prompt"] = DEFAULT_PROMPT.strip()
@@ -122,8 +130,34 @@ def save_config(config_data: dict):
     try:
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
             json.dump(config_data, f, indent=4, ensure_ascii=False)
+        logging.debug("配置已自动保存")
     except Exception as e:
         logging.error(f"保存配置文件时出错: {e}")
+
+# 添加自动保存功能，包装原有的config_manager.save_config函数
+def auto_save_config(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        # 自动保存配置
+        save_config(args[0])
+        return result
+    return wrapper
+
+# 为配置更新操作添加自动保存
+def update_config(key, value):
+    """更新配置项并自动保存"""
+    config = load_config()
+    config[key] = value
+    save_config(config)
+    return config
+
+# 批量更新配置项并自动保存
+def update_config_batch(updates):
+    """批量更新配置项并自动保存"""
+    config = load_config()
+    config.update(updates)
+    save_config(config)
+    return config
 
 def load_user_dict() -> dict:
     if not USER_DICT_PATH.exists():

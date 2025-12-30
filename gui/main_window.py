@@ -686,14 +686,95 @@ class MainWindow:
     def _check_update_worker(self, update_checker):
         """检查更新的工作线程"""
         try:
-            latest_version = update_checker.check_for_updates()
             from _version import __version__
-            if latest_version and latest_version > __version__:
-                self._dispatch_log_to_active_tab(f"发现新版本: {latest_version}（当前版本: {__version__}），请访问项目主页下载更新。", "INFO")
+            update_info = update_checker.check_for_updates(__version__)
+            if update_info:
+                self._dispatch_log_to_active_tab(f"发现新版本: {update_info['version']}（当前版本: {__version__}）", "INFO")
+                # 询问用户是否下载更新
+                self.after(0, lambda info=update_info: self._ask_update_download(info))
             else:
                 self._dispatch_log_to_active_tab("当前已是最新版本。", "INFO")
         except Exception as e:
             self._dispatch_log_to_active_tab(f"检查更新失败: {str(e)}", "ERROR")
+    
+    def _ask_update_download(self, update_info):
+        """询问用户是否下载更新"""
+        from tkinter import messagebox
+        from _version import __version__
+        
+        msg = f"发现新版本 {update_info['version']}（当前版本: {__version__}），是否立即下载更新？\n\n更新日志:\n{update_info['notes'][:300]}{'...' if len(update_info['notes']) > 300 else ''}"
+        if messagebox.askyesno("更新提示", msg, parent=self.root):
+            self.after(0, lambda info=update_info: self._download_and_update(info))
+    
+    def _download_and_update(self, update_info):
+        """下载并更新应用程序"""
+        import tempfile
+        import subprocess
+        import sys
+        from pathlib import Path
+        from gui.dialogs import DownloadProgressDialog
+        
+        try:
+            # 创建临时目录保存下载文件
+            temp_dir = Path(tempfile.gettempdir())
+            exe_filename = Path(update_info['asset_url']).name
+            dest_file = temp_dir / exe_filename
+            
+            self._dispatch_log_to_active_tab(f"开始下载更新: {update_info['version']}", "INFO")
+            
+            # 创建下载进度对话框
+            progress_dialog = DownloadProgressDialog(self.root, title="下载更新")
+            
+            # 下载更新文件
+            from utils import update_checker
+            success = update_checker.download_update(
+                update_info['asset_url'], 
+                dest_file, 
+                lambda s, p, sp: progress_dialog.update_progress(s, p, sp),
+                update_info.get('sha256_url')
+            )
+            
+            progress_dialog.close_dialog()
+            
+            if success:
+                self._dispatch_log_to_active_tab("下载完成，准备更新应用程序", "INFO")
+                
+                # 获取当前可执行文件路径
+                current_exe = Path(sys.executable)
+                
+                # 检查是否是PyInstaller打包的可执行文件
+                if current_exe.suffix == '.exe':
+                    # 使用updater.py进行更新
+                    updater_script = Path(__file__).parent.parent / "updater.py"
+                    
+                    if updater_script.exists():
+                        # 准备更新命令
+                        old_exe_backup = current_exe.with_suffix('.old.exe')
+                        
+                        # 启动更新器并退出当前应用
+                        subprocess.Popen([
+                            sys.executable,
+                            str(updater_script),
+                            str(os.getpid()),
+                            str(current_exe),
+                            str(dest_file),
+                            str(old_exe_backup)
+                        ])
+                        
+                        # 退出当前应用
+                        self.root.quit()
+                    else:
+                        self._dispatch_log_to_active_tab("更新器脚本不存在，无法自动更新", "ERROR")
+                else:
+                    # 不是打包的可执行文件，提示用户手动更新
+                    self._dispatch_log_to_active_tab(f"下载完成，文件保存到: {dest_file}", "INFO")
+                    self._dispatch_log_to_active_tab("当前为开发模式，无法自动更新，请手动替换文件", "INFO")
+            else:
+                self._dispatch_log_to_active_tab("下载更新失败", "ERROR")
+        except Exception as e:
+            self._dispatch_log_to_active_tab(f"更新过程中发生错误: {str(e)}", "ERROR")
+            import traceback
+            traceback.print_exc()
     
     def _show_about(self):
         """显示关于对话框"""

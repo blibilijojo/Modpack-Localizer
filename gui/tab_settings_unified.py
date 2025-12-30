@@ -3,6 +3,8 @@ from tkinter import filedialog, scrolledtext, messagebox
 from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 from gui import ui_utils, custom_widgets
+from gui.tab_pack_settings import TabPackSettings
+from services.ai_translator import AITranslator
 from utils import config_manager
 import threading
 import requests
@@ -69,7 +71,6 @@ class UnifiedSettingsTab(ttk.Frame):
     def _create_pack_settings_tab_content(self, parent):
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True)
-        from gui.tab_pack_settings import TabPackSettings
         self.pack_settings_manager = TabPackSettings(container)
 
     def _create_basic_settings(self, parent):
@@ -649,7 +650,6 @@ CRITICAL: 致命错误，程序即将崩溃
         self._save_all_settings()
         
     def _fetch_models_async(self):
-        from services.ai_translator import AITranslator
         service_config = config_manager.load_config()
         api_keys = service_config.get('api_keys', [])
         if not api_keys or not any(api_keys):
@@ -660,7 +660,6 @@ CRITICAL: 致命错误，程序即将崩溃
         threading.Thread(target=self._fetch_worker, daemon=True).start()
 
     def _fetch_worker(self):
-        from services.ai_translator import AITranslator
         try:
             service_config = config_manager.load_config()
             translator = AITranslator(service_config['api_keys'], service_config.get('api_endpoint'))
@@ -1269,7 +1268,7 @@ CRITICAL: 致命错误，程序即将崩溃
             final_url = f"{STABLE_PROXY_URL}{remote_info['url']}" if use_proxy else remote_info["url"]
             
             from utils import update_checker
-            ok = update_checker.download_update(final_url, DEST_FILE, lambda s, p, sp: progress_dialog.update_progress(s, p, sp))
+            ok = update_checker.download_update(final_url, DEST_FILE, lambda s, p, sp: progress_dialog.update_progress(s, p, sp), None)
             progress_dialog.close_dialog()
 
             if ok:

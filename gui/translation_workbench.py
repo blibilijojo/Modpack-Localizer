@@ -196,6 +196,7 @@ class TranslationWorkbench(ttk.Frame):
         en_container = ttk.Frame(content_frame)
         en_container.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         en_container.rowconfigure(1, weight=1)
+        en_container.columnconfigure(0, weight=1)
         
         ttk.Label(en_container, text="原文:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=0, pady=0)
         
@@ -203,7 +204,7 @@ class TranslationWorkbench(ttk.Frame):
         theme_bg_color = style.lookup('TFrame', 'background')
         theme_fg_color = style.lookup('TLabel', 'foreground')
         self.en_text_display = scrolledtext.ScrolledText(
-            en_container, height=5, wrap="word", relief="flat",
+            en_container, height=5, wrap=tk.WORD, relief="flat",
             background=theme_bg_color, foreground=theme_fg_color
         )
         self.en_text_display.bind("<KeyPress>", lambda e: "break")
@@ -213,11 +214,12 @@ class TranslationWorkbench(ttk.Frame):
         term_container = ttk.Frame(content_frame)
         term_container.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         term_container.rowconfigure(1, weight=1)
+        term_container.columnconfigure(0, weight=1)
         
         ttk.Label(term_container, text="术语提示:", anchor="nw").grid(row=0, column=0, sticky="nw", padx=0, pady=0)
         
         self.term_text = scrolledtext.ScrolledText(
-            term_container, height=5, wrap="word", relief="flat",
+            term_container, height=5, wrap=tk.WORD, relief="flat",
             background=theme_bg_color, foreground=theme_fg_color, state="disabled"
         )
         self.term_text.grid(row=1, column=0, sticky="nsew", padx=0, pady=5)
@@ -227,7 +229,7 @@ class TranslationWorkbench(ttk.Frame):
         ttk.Label(zh_header_frame, text="译文:", anchor="nw").pack(side="left")
         shortcut_info_label = ttk.Label(zh_header_frame, text="快捷键: Enter 跳转到下一条, Ctrl+Enter 跳转到下一条待翻译")
         shortcut_info_label.pack(side="right")
-        self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=5, wrap="word", state="disabled")
+        self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=5, wrap=tk.WORD, state="disabled")
         # 确保译文栏水平填充整个可用空间
         self.zh_text_input.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
         self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
@@ -1147,10 +1149,33 @@ class TranslationWorkbench(ttk.Frame):
         self.mode_switch_btn.config(state=base_state)
         
         if item_selected and interactive:
-            self.add_to_dict_btn.config(state="normal")
+            # 检查当前条目是否已存在于个人词典中
+            from utils import config_manager
+            user_dict = config_manager.load_user_dict()
+            info = self.current_selection_info
+            item_data = self.translation_data[info['ns']]['items'][info['idx']]
+            key, origin_name = item_data['key'], item_data['en']
+            translation = self.zh_text_input.get("1.0", "end-1c").strip()
+            
+            # 检查key和origin_name是否都在词典中，且译文相同
+            key_in_dict = key in user_dict["by_key"]
+            origin_in_dict = origin_name in user_dict["by_origin_name"]
+            
+            # 如果key和origin_name都在词典中，且译文相同
+            if key_in_dict and origin_in_dict:
+                key_trans = user_dict["by_key"][key]
+                origin_trans = user_dict["by_origin_name"][origin_name]
+                if key_trans == translation and origin_trans == translation:
+                    # 已添加到词典，禁用按钮并更改文本
+                    self.add_to_dict_btn.config(state="disabled", text="已添加到词典")
+                    self.zh_text_input.config(state="normal", cursor="xterm")
+                    return
+            
+            # 否则，启用按钮并显示正常文本
+            self.add_to_dict_btn.config(state="normal", text="添加到词典")
             self.zh_text_input.config(state="normal", cursor="xterm")
         else:
-            self.add_to_dict_btn.config(state="disabled")
+            self.add_to_dict_btn.config(state="disabled", text="添加到词典")
             self.zh_text_input.config(state="disabled", cursor="")
             
     def _toggle_mode(self):
@@ -1696,6 +1721,8 @@ class TranslationWorkbench(ttk.Frame):
         # 更新术语提示区域
         self.term_text.config(state="normal")
         self.term_text.delete("1.0", tk.END)
+        # 确保术语提示区域正确换行
+        self.term_text.config(height=5, wrap=tk.WORD)
         
         if display_terms:
             for i, term in enumerate(display_terms):
@@ -1774,16 +1801,19 @@ class TranslationWorkbench(ttk.Frame):
         # 设置原文显示
         self.en_text_display.delete("1.0", "end")
         self.en_text_display.insert("1.0", en_text)
+        # 确保原文栏正确换行并只显示实际文本
+        self.en_text_display.config(height=5, wrap=tk.WORD)
+        # 重置原文栏滚动条位置
+        self.en_text_display.yview_moveto(0.0)
+        self.en_text_display.xview_moveto(0.0)
         
         # 设置译文输入，确保文本末尾没有额外的换行符
         self.zh_text_input.config(state="normal")
         self.zh_text_input.delete("1.0", "end")
         self.zh_text_input.insert("1.0", zh_text)
-        
-        # 确保译文栏只显示实际文本，不允许在文字右边选中
-        self.zh_text_input.config(height=3, wrap="word")
-        
-        # 重置滚动条位置，确保文本从顶部开始显示
+        # 确保译文栏正确换行并只显示实际文本
+        self.zh_text_input.config(height=5, wrap=tk.WORD)
+        # 重置译文栏滚动条位置
         self.zh_text_input.yview_moveto(0.0)
         self.zh_text_input.xview_moveto(0.0)
         
@@ -1824,6 +1854,8 @@ class TranslationWorkbench(ttk.Frame):
         config_manager.save_user_dict(user_dict)
         self.status_label.config(text=f"成功！已将“{translation}”存入个人词典")
         self._set_dirty(True)
+        # 更新按钮状态
+        self._update_ui_state(interactive=True, item_selected=True)
 
     def _open_dict_search(self):
         from gui.dictionary_search_window import DictionarySearchWindow

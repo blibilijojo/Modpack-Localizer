@@ -16,11 +16,11 @@ from gui.dialogs import PackPresetDialog, DownloadProgressDialog
 from utils import config_manager, session_manager
 from core.orchestrator import Orchestrator
 from _version import __version__
-from gui.tab_settings_unified import UnifiedSettingsTab
 from gui.quest_workflow_manager import QuestWorkflowManager
 from gui.translation_workbench import TranslationWorkbench
 from gui.find_replace_dialog import FindReplaceDialog
 from gui.theme_utils import set_title_bar_theme
+from gui.settings_window import SettingsWindow
 
 class ProjectTab:
     def __init__(self, parent_notebook, root_window, main_window_instance):
@@ -117,7 +117,7 @@ class ProjectTab:
         self.log_container_frame = tk_ttk.LabelFrame(self.frame, text="状态与日志", padding="10")
         self.log_container_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(0, 5))
         
-        self.log_text = scrolledtext.ScrolledText(self.log_container_frame, height=8, state="disabled", wrap="word", font=("Consolas", 9), relief="flat")
+        self.log_text = scrolledtext.ScrolledText(self.log_container_frame, height=8, state="disabled", wrap=tk.WORD, font=("Consolas", 9), relief="flat")
         self.log_text.pack(fill="both", expand=True, pady=5)
         
         self._update_log_tag_colors()
@@ -676,29 +676,28 @@ class MainWindow:
         
         if self.find_replace_window and self.find_replace_window.winfo_exists():
             self.find_replace_window.lift()
-    
+
     def start_update_check(self, user_initiated=False):
-        """启动更新检查"""
         if not getattr(sys, 'frozen', False):
             if user_initiated:
-                self._dispatch_log_to_active_tab("当前为开发模式，无法使用更新功能", "INFO")
+                messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。")
             return
 
-        threading.Thread(target=self._check_for_updates_thread, args=(user_initiated,), daemon=True).start()
+        logging.info("准备启动后台更新检查线程...")
+        update_thread = threading.Thread(target=self._check_for_updates_thread, args=(user_initiated,), daemon=True)
+        update_thread.start()
 
     def _check_for_updates_thread(self, user_initiated):
-        """检查更新的工作线程"""
-        from utils import update_checker
+        import utils.update_checker as update_checker
         from _version import __version__
         
         update_info = update_checker.check_for_updates(__version__)
         if update_info:
-            self.after(0, self._show_update_dialog, update_info)
+            self.root.after(0, self._show_update_dialog, update_info)
         elif user_initiated:
-            self.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，您使用的已是最新版本！"))
+            self.root.after(0, lambda: messagebox.showinfo("检查更新", "恭喜，您使用的已是最新版本！"))
 
     def _show_update_dialog(self, update_info: dict):
-        """显示更新对话框"""
         dialog = tk.Toplevel(self.root)
         dialog.title(f"发现新版本: {update_info['version']}")
         dialog.transient(self.root); dialog.grab_set(); dialog.resizable(False, False)
@@ -706,7 +705,7 @@ class MainWindow:
         message_frame = ttk.Frame(dialog, padding=20)
         message_frame.pack(fill="x")
         
-        message_text = (f"一个新版本 ({update_info['version']}) 可用！\n\n""是否立即下载并安装更新？")
+        message_text = (f"一个新版本 ({update_info['version']}) 可用！\n\n" "是否立即下载并安装更新？")
         ttk.Label(message_frame, text=message_text, justify="left").pack(anchor="w")
 
         progress_frame = ttk.Frame(dialog, padding=(20, 10))
@@ -729,17 +728,15 @@ class MainWindow:
         self.later_btn.pack(side="right")
         
     def _update_progress_ui(self, status, percentage, speed):
-        """更新进度UI"""
         self.status_label.config(text=f"{status}... {int(percentage)}% ({speed})")
         self.progress_bar['value'] = percentage
 
     def _start_update_process(self, update_info: dict):
-        """开始更新过程"""
         import sys
         import subprocess
         import os
         from pathlib import Path
-        from utils import update_checker
+        import utils.update_checker as update_checker
         
         current_exe_path = Path(sys.executable)
         exe_dir = current_exe_path.parent
@@ -784,7 +781,7 @@ class MainWindow:
 
         # 5. 主程序安排自己退出，将控制权完全交给更新器
         self.root.after(100, self.root.destroy)
-    
+
     def _show_about(self):
         """显示关于对话框"""
         from _version import __version__
@@ -844,15 +841,8 @@ class MainWindow:
             self.settings_window.focus_set()
             return
 
-        self.settings_window = ttk.Toplevel(self.root)
-        self.settings_window.title("设置")
-        self.settings_window.geometry("800x700")
-        self.settings_window.minsize(700, 600)
+        self.settings_window = SettingsWindow(self.root)
         self.settings_window.transient(self.root)
-        set_title_bar_theme(self.settings_window, self.root.style)
-
-        settings_frame = UnifiedSettingsTab(self.settings_window)
-        settings_frame.pack(fill="both", expand=True)
 
     def _create_widgets(self):
         self.notebook = ttk.Notebook(self.root, padding=(5, 5, 0, 0))
@@ -877,7 +867,8 @@ class MainWindow:
             clicked_tab_index = self.notebook.index(f"@{event.x},{event.y}")
             clicked_tab_id = self.notebook.tabs()[clicked_tab_index]
         except tk.TclError:
-            return
+            # 当鼠标在按钮边缘时，index调用可能失败，此时直接返回break阻止后续处理
+            return "break"
 
         add_tab_id = self.notebook.tabs()[-1]
 

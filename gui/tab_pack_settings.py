@@ -29,6 +29,8 @@ class TabPackSettings:
         self.preset_combo = ttk.Combobox(preset_frame, textvariable=self.preset_var, state="readonly")
         self.preset_combo.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.preset_combo.bind('<<ComboboxSelected>>', self._on_preset_selected)
+        self.preset_combo.bind('<FocusIn>', lambda e: e.widget.selection_clear())
+        self.preset_combo.bind('<FocusOut>', lambda e: e.widget.selection_clear())
         
         preset_btn_frame = ttk.Frame(preset_frame)
         preset_btn_frame.pack(side="left")
@@ -49,6 +51,8 @@ class TabPackSettings:
         ttk.Label(metadata_frame, text="游戏版本:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         format_combo = ttk.Combobox(metadata_frame, textvariable=self.pack_format_var, values=list(PACK_FORMATS.keys()), state="readonly")
         format_combo.grid(row=0, column=1, sticky="ew", padx=5)
+        format_combo.bind('<FocusIn>', lambda e: e.widget.selection_clear())
+        format_combo.bind('<FocusOut>', lambda e: e.widget.selection_clear())
 
         ttk.Label(metadata_frame, text="资源包简介:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
         desc_entry = ttk.Entry(metadata_frame, textvariable=self.pack_desc_var)

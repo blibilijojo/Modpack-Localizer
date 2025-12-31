@@ -7,8 +7,38 @@ class ToolTip:
         self.text = text
         self.width = width
         self.tooltip = None
-        self.widget.bind("<Enter>", self.show_tip)
-        self.widget.bind("<Leave>", self.hide_tip)
+        self.hovering = False  # 状态变量：是否正在悬停
+        self.widget.bind("<Enter>", self._on_enter_widget)
+        self.widget.bind("<Leave>", self._on_leave_widget)
+
+    def _on_enter_widget(self, event=None):
+        """当鼠标进入控件时"""
+        self.hovering = True
+        self.show_tip()
+
+    def _on_leave_widget(self, event=None):
+        """当鼠标离开控件时"""
+        # 立即设置hovering为False，因为鼠标已经离开控件
+        self.hovering = False
+        # 如果tooltip存在，检查鼠标是否进入了tooltip
+        if self.tooltip:
+            # 延迟检查鼠标是否进入了tooltip
+            self.widget.after(100, self._check_hover_status)
+
+    def _on_enter_tooltip(self, event=None):
+        """当鼠标进入tooltip时"""
+        self.hovering = True
+
+    def _on_leave_tooltip(self, event=None):
+        """当鼠标离开tooltip时"""
+        self.hovering = False
+        self.hide_tip()
+
+    def _check_hover_status(self):
+        """检查鼠标悬停状态，决定是否隐藏tooltip"""
+        # 如果tooltip仍然存在且hovering为False，说明鼠标已经离开控件和tooltip
+        if self.tooltip and not self.hovering:
+            self.hide_tip()
 
     def show_tip(self, event=None):
         if self.tooltip: return
@@ -29,12 +59,15 @@ class ToolTip:
                           wraplength=self.width, font=("Microsoft YaHei UI", 9, "normal"),
                           padding=(5, 5, 5, 5))
         label.pack(ipadx=1)
-        self.tooltip.bind("<Leave>", self.hide_tip)
+        # 添加tooltip的鼠标事件绑定
+        self.tooltip.bind("<Enter>", self._on_enter_tooltip)
+        self.tooltip.bind("<Leave>", self._on_leave_tooltip)
 
     def hide_tip(self, event=None):
         if self.tooltip:
             self.tooltip.destroy()
-        self.tooltip = None
+            self.tooltip = None
+        self.hovering = False
 
 class ScrollableFrame(ttk.Frame):
     def __init__(self, container, *args, **kwargs):

@@ -398,7 +398,7 @@ CRITICAL: 致命错误，程序即将崩溃
         frame.pack(fill="x", pady=(0, 5), padx=5)
         
         ttk.Label(frame, text="API 密钥 (多个密钥可用 换行 或 , 分隔):").pack(anchor="w")
-        self.api_keys_text = scrolledtext.ScrolledText(frame, height=3, width=60)
+        self.api_keys_text = scrolledtext.ScrolledText(frame, height=3, wrap=tk.WORD)
         self.api_keys_text.pack(fill="x", expand=True, pady=2)
         self.api_keys_text.insert(tk.END, self.config.get("api_keys_raw", ""))
 

@@ -1,9 +1,34 @@
 import json
+import sqlite3
 from pathlib import Path
 import logging
 
 CONFIG_FILE_PATH = Path("config.json")
-USER_DICT_PATH = Path("user_dict.json")
+USER_DICT_PATH = Path("Dict-User.db")
+
+# 数据库初始化函数
+def _init_user_dict_db():
+    conn = sqlite3.connect(USER_DICT_PATH)
+    cursor = conn.cursor()
+    
+    # 创建表：by_key表存储以key为索引的翻译
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS by_key (
+        key TEXT PRIMARY KEY,
+        translation TEXT NOT NULL
+    )
+    ''')
+    
+    # 创建表：by_origin_name表存储以原文为索引的翻译
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS by_origin_name (
+        origin_name TEXT PRIMARY KEY,
+        translation TEXT NOT NULL
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
 DEFAULT_PROMPT = """
 你是一个只输出JSON的翻译AI。
@@ -59,6 +84,8 @@ DEFAULT_CONFIG = {
     "use_origin_name_lookup": True,
     "translation_mode": "ai",
     "log_level": "INFO",
+    "log_retention_days": 10,
+    "max_log_count": 30,
     "theme": "litera",
     # 社区词典导入过滤设置
     "community_dict_filter": {
@@ -160,21 +187,45 @@ def update_config_batch(updates):
     return config
 
 def load_user_dict() -> dict:
-    if not USER_DICT_PATH.exists():
-        return {"by_key": {}, "by_origin_name": {}}
-    try:
-        with open(USER_DICT_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if "by_key" not in data: data["by_key"] = {}
-            if "by_origin_name" not in data: data["by_origin_name"] = {}
-            return data
-    except (json.JSONDecodeError, TypeError):
-        logging.error(f"用户个人词典 ({USER_DICT_PATH}) 格式错误或损坏，已创建新的空词典。")
-        return {"by_key": {}, "by_origin_name": {}}
+    # 确保数据库和表存在
+    _init_user_dict_db()
+    
+    conn = sqlite3.connect(USER_DICT_PATH)
+    cursor = conn.cursor()
+    
+    # 从by_key表读取数据
+    cursor.execute("SELECT key, translation FROM by_key")
+    by_key = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # 从by_origin_name表读取数据
+    cursor.execute("SELECT origin_name, translation FROM by_origin_name")
+    by_origin_name = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    conn.close()
+    
+    return {"by_key": by_key, "by_origin_name": by_origin_name}
 
 def save_user_dict(dict_data: dict):
     try:
-        with open(USER_DICT_PATH, 'w', encoding='utf-8') as f:
-            json.dump(dict_data, f, indent=4, ensure_ascii=False)
+        # 确保数据库和表存在
+        _init_user_dict_db()
+        
+        conn = sqlite3.connect(USER_DICT_PATH)
+        cursor = conn.cursor()
+        
+        # 清空现有数据
+        cursor.execute("DELETE FROM by_key")
+        cursor.execute("DELETE FROM by_origin_name")
+        
+        # 插入by_key数据
+        for key, translation in dict_data.get("by_key", {}).items():
+            cursor.execute("INSERT OR REPLACE INTO by_key (key, translation) VALUES (?, ?)", (key, translation))
+        
+        # 插入by_origin_name数据
+        for origin_name, translation in dict_data.get("by_origin_name", {}).items():
+            cursor.execute("INSERT OR REPLACE INTO by_origin_name (origin_name, translation) VALUES (?, ?)", (origin_name, translation))
+        
+        conn.commit()
+        conn.close()
     except Exception as e:
         logging.error(f"保存用户个人词典时出错: {e}")

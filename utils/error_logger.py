@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
-LOG_DIR = Path("error_logs")
+LOG_DIR = Path("logs") / "errors"
 AI_ERROR_LOG_DIR = LOG_DIR / "ai"
 GENERAL_ERROR_LOG_DIR = LOG_DIR / "general"
 MAX_LOG_DAYS = 10

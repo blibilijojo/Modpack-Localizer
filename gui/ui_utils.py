@@ -1,3 +1,4 @@
+import tkinter as tk
 from tkinter import filedialog, messagebox, Toplevel, Text, Scrollbar, Button, Label
 from tkinter import ttk as tk_ttk
 from utils.error_logger import ErrorLogger
@@ -149,11 +150,11 @@ def show_error_details(title, message, exception=None, parent=None):
     # 查看日志按钮
     def view_logs():
         import webbrowser
-        log_dir = Path("error_logs")
+        log_dir = Path("logs")
         if log_dir.exists():
             webbrowser.open(str(log_dir))
         else:
-            show_info("日志文件夹不存在", "错误日志文件夹尚未创建")
+            show_info("日志文件夹不存在", "日志文件夹尚未创建")
     
     view_logs_btn = tk_ttk.Button(button_frame, text="查看日志", command=view_logs)
     view_logs_btn.pack(side="right", padx=(0, 5))
@@ -252,3 +253,79 @@ def show_confirmation(title, message, parent=None) -> bool:
         用户的选择（是/否）
     """
     return messagebox.askyesno(title, message, parent=parent)
+
+def ask_string(title, prompt, show=None, parent=None) -> str:
+    """
+    显示输入对话框，获取用户输入的字符串
+    Args:
+        title: 对话框标题
+        prompt: 提示信息
+        show: 输入显示方式（None表示正常显示，"*"表示密码模式）
+        parent: 父窗口（可选）
+    Returns:
+        用户输入的字符串，如果用户取消则返回None
+    """
+    # 创建自定义输入对话框
+    dialog = Toplevel(parent)
+    dialog.title(title)
+    dialog.geometry("400x150")
+    dialog.resizable(False, False)
+    dialog.transient(parent)
+    dialog.grab_set()
+    
+    # 配置对话框样式
+    style = tk_ttk.Style()
+    
+    # 主框架
+    main_frame = tk_ttk.Frame(dialog, padding=10)
+    main_frame.pack(fill="both", expand=True)
+    
+    # 提示信息
+    prompt_label = tk_ttk.Label(main_frame, text=prompt, wraplength=380, justify="left")
+    prompt_label.pack(pady=(0, 10), anchor="w")
+    
+    # 输入框
+    entry_var = tk.StringVar()
+    entry = tk_ttk.Entry(main_frame, textvariable=entry_var, show=show, width=40)
+    entry.pack(fill="x", pady=(0, 10))
+    entry.focus_set()
+    
+    # 结果变量
+    result = [None]
+    
+    # 确认按钮回调
+    def on_confirm():
+        result[0] = entry_var.get()
+        dialog.destroy()
+    
+    # 取消按钮回调
+    def on_cancel():
+        result[0] = None
+        dialog.destroy()
+    
+    # 按钮框架
+    button_frame = tk_ttk.Frame(main_frame)
+    button_frame.pack(fill="x", anchor="e")
+    
+    # 取消按钮
+    cancel_btn = tk_ttk.Button(button_frame, text="取消", command=on_cancel, style="secondary.TButton")
+    cancel_btn.pack(side="right", padx=(0, 5))
+    
+    # 确认按钮
+    confirm_btn = tk_ttk.Button(button_frame, text="确认", command=on_confirm, style="primary.TButton")
+    confirm_btn.pack(side="right")
+    
+    # 绑定回车键
+    dialog.bind("<Return>", lambda event: on_confirm())
+    dialog.bind("<Escape>", lambda event: on_cancel())
+    
+    # 居中显示
+    if parent:
+        dialog.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+    
+    dialog.wait_window()
+    
+    return result[0]

@@ -7,6 +7,10 @@ import sys
 # 确保单文件打包兼容性
 base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 
+# 确保导入路径正确
+if not hasattr(sys, 'frozen'):  # 非打包环境
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import config_manager
 from gui import ui_utils
 from gui.settings_components.basic_settings import BasicSettings
@@ -40,13 +44,24 @@ class SettingsWindow(ttk.Toplevel):
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(fill="both", expand=True)
         
-        # 创建各个选项卡
-        self._create_basic_tab()
-        self._create_ai_tab()
-        self._create_resource_pack_tab()
-        self._create_pack_settings_tab()
-        self._create_github_proxy_tab()
-        self._create_advanced_tab()
+        # 创建各个选项卡，添加异常处理
+        tab_creation_methods = [
+            self._create_basic_tab,
+            self._create_ai_tab,
+            self._create_resource_pack_tab,
+            self._create_pack_settings_tab,
+            self._create_github_proxy_tab,
+            self._create_advanced_tab
+        ]
+        
+        for method in tab_creation_methods:
+            try:
+                method()
+            except Exception as e:
+                print(f"创建选项卡失败 {method.__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # 记录错误但继续执行，确保其他选项卡能正常显示
         
     def _create_basic_tab(self):
         tab = ttk.Frame(self.notebook)

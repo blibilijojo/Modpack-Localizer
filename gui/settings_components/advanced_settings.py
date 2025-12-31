@@ -6,10 +6,8 @@ from gui import custom_widgets
 from utils import config_manager
 import base64
 import json
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import os
+import hashlib
 
 class AdvancedSettings:
     def __init__(self, parent, config, save_callback):
@@ -27,12 +25,16 @@ class AdvancedSettings:
         # 日志设置
         self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
         
+        # 密钥管理设置
+        self.saved_key_var = tk.StringVar(value=self.config.get("saved_encryption_key", ""))
+        
         # 绑定变量变化事件
         self._bind_events()
     
     def _bind_events(self):
         # 绑定变量变化事件
         self.log_level_var.trace_add("write", lambda *args: self.save_callback())
+        self.saved_key_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
         # 创建主容器
@@ -149,6 +151,39 @@ class AdvancedSettings:
         import_btn.pack(side="left", padx=(0, 10))
         custom_widgets.ToolTip(import_btn, "从文件导入配置，需要输入正确的密钥")
         
+        # 密钥管理设置
+        key_management_frame = tk_ttk.LabelFrame(advanced_frame, text="加密密钥管理", padding="10")
+        key_management_frame.pack(fill="x", pady=(0, 5))
+        
+        # 密钥输入框
+        key_input_frame = ttk.Frame(key_management_frame)
+        key_input_frame.pack(fill="x", pady=5)
+        key_input_frame.columnconfigure(0, weight=1)
+        
+        ttk.Label(key_input_frame, text="保存的加密密钥:", width=15).grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        
+        # 密钥显示/隐藏切换
+        self.key_visible = False
+        
+        def toggle_key_visibility():
+            self.key_visible = not self.key_visible
+            show_char = "" if self.key_visible else "*"
+            key_entry.config(show=show_char)
+            toggle_btn.config(text="👁️" if not self.key_visible else "👁️‍🗨️")
+        
+        key_entry = ttk.Entry(key_input_frame, textvariable=self.saved_key_var, show="*", width=40)
+        key_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        
+        toggle_btn = ttk.Button(key_input_frame, text="👁️", command=toggle_key_visibility, bootstyle="secondary", width=3)
+        toggle_btn.grid(row=0, column=2, padx=5, pady=5)
+        custom_widgets.ToolTip(toggle_btn, "显示/隐藏密钥")
+        
+        # 密钥说明
+        ttk.Label(key_management_frame, 
+                 text="注意：保存密钥后，导出配置时将自动使用该密钥进行加密；清空密钥则导出未加密配置。", 
+                 wraplength=600, 
+                 bootstyle="info").pack(anchor="w", pady=5)
+        
         # 重置设置
         reset_frame = tk_ttk.LabelFrame(advanced_frame, text="重置设置", padding="10")
         reset_frame.pack(fill="x")
@@ -183,29 +218,34 @@ class AdvancedSettings:
     
     def _derive_key(self, password):
         """从密码派生加密密钥"""
+        # 使用SHA256哈希密码，生成32字节密钥
         salt = b'modpack_localizer_salt'  # 固定盐值，确保相同密码生成相同密钥
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-        return key
+        # 多次哈希增强安全性
+        key_material = password.encode() + salt
+        for _ in range(10000):
+            key_material = hashlib.sha256(key_material).digest()
+        return key_material
+    
+    def _xor_encrypt(self, data, key):
+        """使用XOR算法加密数据"""
+        encrypted = bytearray()
+        key_len = len(key)
+        for i, byte in enumerate(data):
+            encrypted.append(byte ^ key[i % key_len])
+        return bytes(encrypted)
     
     def _encrypt_config(self, config_data, password):
-        """使用密码加密配置数据"""
+        """使用自定义算法加密配置数据"""
         key = self._derive_key(password)
-        fernet = Fernet(key)
         json_data = json.dumps(config_data, indent=4, ensure_ascii=False).encode()
-        encrypted_data = fernet.encrypt(json_data)
-        return encrypted_data
+        encrypted_data = self._xor_encrypt(json_data, key)
+        return base64.urlsafe_b64encode(encrypted_data)
     
     def _decrypt_config(self, encrypted_data, password):
-        """使用密码解密配置数据"""
+        """使用自定义算法解密配置数据"""
         key = self._derive_key(password)
-        fernet = Fernet(key)
-        decrypted_data = fernet.decrypt(encrypted_data)
+        decoded_data = base64.urlsafe_b64decode(encrypted_data)
+        decrypted_data = self._xor_encrypt(decoded_data, key)
         return json.loads(decrypted_data.decode())
     
     def _export_config(self):
@@ -213,55 +253,31 @@ class AdvancedSettings:
         # 获取当前配置
         current_config = config_manager.load_config()
         
-        # 询问用户是否需要加密
-        use_encryption = messagebox.askyesno(
-            "导出配置",
-            "是否需要加密配置文件？加密后需要输入密钥才能导入。"
-        )
+        # 获取UI中最新的密钥值，确保实时反应变化
+        saved_key = self.saved_key_var.get()
         
-        password = None
+        # 根据密钥是否为空自动决定是否加密
+        use_encryption = bool(saved_key)
+        password = saved_key if use_encryption else None
+        
+        # 根据加密选择动态设置文件类型选项
         if use_encryption:
-            # 询问密码
-            password = ui_utils.ask_string(
-                "设置密钥",
-                "请输入配置文件加密密钥（至少6个字符）:",
-                show="*",
-                parent=self.parent
-            )
-            
-            # 如果用户取消，直接返回
-            if password is None:
-                return
-            
-            # 检查密钥长度
-            if len(password) < 6:
-                messagebox.showerror("错误", "密钥长度不能小于6个字符")
-                return
-            
-            # 确认密码
-            confirm_password = ui_utils.ask_string(
-                "确认密钥",
-                "请再次输入密钥以确认:",
-                show="*",
-                parent=self.parent
-            )
-            
-            # 如果用户取消，直接返回
-            if confirm_password is None:
-                return
-            
-            if password != confirm_password:
-                messagebox.showerror("错误", "两次输入的密钥不一致")
-                return
+            filetypes = [
+                ("加密配置文件", "*.mplcfg"),
+                ("所有文件", "*.*")
+            ]
+            default_extension = ".mplcfg"
+        else:
+            filetypes = [
+                ("未加密配置文件", "*.json"),
+                ("所有文件", "*.*")
+            ]
+            default_extension = ".json"
         
         # 选择保存路径
         file_path = filedialog.asksaveasfilename(
-            defaultextension=".json" if not use_encryption else ".mplcfg",
-            filetypes=[
-                ("未加密配置文件", "*.json"),
-                ("加密配置文件", "*.mplcfg"),
-                ("所有文件", "*.*")
-            ],
+            defaultextension=default_extension,
+            filetypes=filetypes,
             title="导出配置文件"
         )
         
@@ -375,5 +391,6 @@ class AdvancedSettings:
         return {
             "log_level": self.log_level_var.get(),
             "log_retention_days": self.log_retention_days_var.get(),
-            "max_log_count": self.max_log_count_var.get()
+            "max_log_count": self.max_log_count_var.get(),
+            "saved_encryption_key": self.saved_key_var.get()
         }

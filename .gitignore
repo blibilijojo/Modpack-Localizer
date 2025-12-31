@@ -48,6 +48,7 @@ pytest.xml
 config.json
 user_dict.json
 Dict-Sqlite.db
+Dict-User.db
 ModpackLocalizer.log
 updater_error.log
 error_logs/

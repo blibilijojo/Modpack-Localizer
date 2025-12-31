@@ -78,7 +78,6 @@ DEFAULT_CONFIG = {
         "direction": "down",
         "search_column": "all"
     },
-    "use_github_proxy": True,
     "pack_as_zip": False,
     "last_dict_version": "0.0.0",
     "use_origin_name_lookup": True,

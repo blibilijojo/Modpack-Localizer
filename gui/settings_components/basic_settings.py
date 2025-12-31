@@ -24,9 +24,6 @@ class BasicSettings:
         # 翻译匹配设置
         self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
         
-        # 网络设置
-        self.use_proxy_var = tk.BooleanVar(value=self.config.get("use_github_proxy", True))
-        
         # 绑定变量变化事件
         self._bind_events()
     
@@ -35,7 +32,6 @@ class BasicSettings:
         self.output_dir_var.trace_add("write", lambda *args: self.save_callback())
         self.pack_as_zip_var.trace_add("write", lambda *args: self.save_callback())
         self.use_origin_name_lookup_var.trace_add("write", lambda *args: self.save_callback())
-        self.use_proxy_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
         # 创建主容器
@@ -71,14 +67,7 @@ class BasicSettings:
         origin_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
         
-        # 网络设置分组
-        network_frame = tk_ttk.LabelFrame(frame, text="网络设置", padding="10")
-        network_frame.pack(fill="x")
-        network_frame.columnconfigure(0, weight=1)
-        
-        proxy_check = ttk.Checkbutton(network_frame, text="使用代理加速下载", variable=self.use_proxy_var, bootstyle="primary")
-        proxy_check.pack(anchor="w", pady=5, padx=5)
-        custom_widgets.ToolTip(proxy_check, "开启后，在下载社区词典或程序更新时会自动使用内置的代理服务。")
+
     
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
         row_frame = ttk.Frame(parent)
@@ -99,6 +88,5 @@ class BasicSettings:
         return {
             "output_dir": self.output_dir_var.get(),
             "pack_as_zip": self.pack_as_zip_var.get(),
-            "use_origin_name_lookup": self.use_origin_name_lookup_var.get(),
-            "use_github_proxy": self.use_proxy_var.get()
+            "use_origin_name_lookup": self.use_origin_name_lookup_var.get()
         }

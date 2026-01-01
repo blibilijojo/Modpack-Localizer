@@ -354,7 +354,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         button_container = ttk.Frame(self.button_frame)
         button_container.pack(fill="x", anchor="e")
         
-        self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-secondary", width=12)
+        self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-danger", width=12, state="disabled")
         self.cancel_button.pack(side="right", padx=(10, 0))
         
         self.start_button = ttk.Button(button_container, text="开始处理", command=self._on_start, bootstyle="success-outline", width=15)
@@ -878,7 +878,10 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         # 禁用界面
         self.processing = True
         self.start_button.config(state="disabled")
-        self.cancel_button.config(text="取消")
+        self.cancel_button.config(text="取消", state="normal", bootstyle="danger-outline")
+        
+        # 禁用切换到翻译工作台按钮
+        self.workbench.mode_switch_btn.config(state="disabled")
         
         # 获取选中的模组
         selected_modules = self.workbench.ns_tree.selection()
@@ -906,16 +909,22 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _on_cancel(self):
         """取消处理"""
         if self.processing:
-            # 这里可以添加取消逻辑
+            # 真正终止AI翻译进程
             self.processing = False
             self.workbench.status_label.config(text="处理已取消")
             self.workbench.log_callback("处理已取消", "INFO")
+            
+            # 恢复界面状态
             self.start_button.config(state="normal")
-            self.cancel_button.config(text="取消")
+            self.cancel_button.config(text="取消", state="disabled", bootstyle="outline-danger")
+            
+            # 恢复切换到翻译工作台按钮的可用状态
+            self.workbench.mode_switch_btn.config(state="normal")
         else:
             # 因为现在是Frame组件，不需要destroy，只需要重置状态
             self.workbench.status_label.config(text="准备就绪")
             self.workbench.log_callback("准备就绪", "INFO")
+            self.cancel_button.config(state="disabled", bootstyle="outline-danger")
     
     def _start_ai_translation(self, selected_modules):
         """开始AI翻译"""
@@ -1140,16 +1149,30 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:
+                        # 取消所有未完成的期货
+                        for f in future_map:
+                            f.cancel()
                         break
                     
                     batch_idx = future_map[future]
-                    translations_nested[batch_idx] = future.result()
-                    
-                    # 更新状态
-                    status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
-                    
-                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
-                    self.workbench.log_callback(status_text, "INFO")
+                    try:
+                        # 检查期货是否已被取消
+                        if not future.cancelled():
+                            translations_nested[batch_idx] = future.result()
+                            
+                            # 更新状态
+                            status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
+                            self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                            self.workbench.log_callback(status_text, "INFO")
+                    except Exception as e:
+                        if not self.processing:
+                            # 取消操作导致的异常，忽略
+                            break
+                        logging.error(f"处理批次 {batch_idx} 时出错: {e}", exc_info=True)
+                        self.after(0, lambda: self.workbench.log_callback(f"处理批次 {batch_idx} 时出错: {e}", "ERROR"))
+                        # 如果是取消操作导致的异常，终止循环
+                        if not self.processing:
+                            break
             
             if not self.processing:
                 return
@@ -1170,6 +1193,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         finally:
             self.after(0, lambda: setattr(self, "processing", False))
             self.after(0, lambda: self.start_button.config(state="normal"))
+            self.after(0, lambda: self.cancel_button.config(text="取消", state="disabled", bootstyle="outline-danger"))
+            # 恢复切换到翻译工作台按钮的可用状态
+            self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
     
     def _generate_translation_context(self, group, translated_texts):
         """为翻译组生成上下文，确保翻译风格一致性"""
@@ -1511,9 +1537,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     item['source'] = 'AI翻译'
                     updated_count += 1
         
+        # 保存当前选中的模组
+        selected_modules = self.workbench.ns_tree.selection()
+        
         # 更新UI
         self.workbench._populate_namespace_tree()
         self.workbench._populate_item_list()
+        
+        # 恢复选中的模组
+        if selected_modules:
+            self.workbench.ns_tree.selection_set(selected_modules)
         
         # 只有当有实际更新时才设置脏标志
         if updated_count > 0:

@@ -21,24 +21,44 @@ class Extractor:
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"((?:\\.|[^\\"])*)"', re.DOTALL)
     
+    def _unescape_unicode(self, text: str) -> str:
+        r"""
+        自定义unescape函数，只处理Unicode转义序列（\uXXXX），保留其他转义字符（如\n、\t等）
+        """
+        import re
+        
+        def replace_unicode(match):
+            """替换单个Unicode转义序列"""
+            hex_str = match.group(1)
+            try:
+                # 将十六进制字符串转换为整数，再转换为字符
+                return chr(int(hex_str, 16))
+            except ValueError:
+                # 如果转换失败，返回原始匹配字符串
+                return match.group(0)
+        
+        # 使用正则表达式匹配所有\uXXXX格式的Unicode转义序列
+        return re.sub(r'\\u([0-9a-fA-F]{4})', replace_unicode, text)
+    
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> Dict[str, str]:
-        """从文本内容中提取语言数据"""
+        """
+        从文本内容中提取语言数据，保持原始格式
+        """
         data = {}
         if file_format == 'json':
-            try:
-                # 使用标准JSON解析库解析JSON文件
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                # 如果标准解析失败，回退到正则表达式解析
-                logging.warning(f"标准JSON解析失败，回退到正则表达式解析: {file_path_for_log}")
-                for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
-                    key = match.group(1)
-                    value = match.group(2)
-                    data[key] = value
+            # 直接使用正则表达式解析，保留原始转义字符
+            for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
+                key = match.group(1)
+                value = match.group(2)
+                # 处理Unicode转义序列，但保留其他转义字符
+                value = self._unescape_unicode(value)
+                data[key] = value
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
                 key = match.group(1)
                 value = match.group(2).strip()
+                # 处理Unicode转义序列，但保留其他转义字符
+                value = self._unescape_unicode(value)
                 data[key] = value
         return data
     

@@ -166,7 +166,7 @@ Modpack Localizer Pro 是一款专为 Minecraft 整合包作者和汉化者设�
 ## 📁 项目结构与文件说明
 
 ```
-Modpack-Localizer-2.5.7/
+Modpack-Localizer-2.5.8/
 ├── .github/          # GitHub 相关配置
 │   └── workflows/    # CI/CD 工作流配置
 ├── core/             # 核心功能模块

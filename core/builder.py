@@ -246,15 +246,20 @@ class Builder:
             
             # 构建每个命名空间的语言文件
             for namespace, translations in final_translations_lookup_by_ns.items():
-                template_content = extraction_result.raw_english_files.get(namespace, '{\n}')
+                template_content = extraction_result.raw_english_files.get(namespace, '{}')
                 
                 try:
-                    lang_dir = temp_dir / "assets" / namespace / "lang"
-                    lang_dir.mkdir(parents=True, exist_ok=True)
+                    # Extract base namespace and format from the namespace string (e.g., "modid:lang" -> base="modid", format="lang")
+                    if ":" in namespace:
+                        base_namespace, file_format = namespace.split(":", 1)
+                    else:
+                        base_namespace = namespace
+                        # Get file format from namespace info
+                        namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
+                        file_format = namespace_info.file_format
                     
-                    # 获取命名空间信息
-                    namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
-                    file_format = namespace_info.file_format
+                    lang_dir = temp_dir / "assets" / base_namespace / "lang"
+                    lang_dir.mkdir(parents=True, exist_ok=True)
                     
                     if file_format == 'json':
                         output_content = self._build_json_file(template_content, translations)

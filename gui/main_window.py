@@ -244,10 +244,16 @@ class ProjectTab:
         elif self.project_type == "quest":
             self.main_window.update_tab_title(self.tab_id, "任务汉化设置")
             self.modpack_name_var.set("MyModpack")
+            config = config_manager.load_config()
+            self.output_dir_var.set(config.get("output_dir", ""))
 
             ttk.Label(container, text="MC 实例文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
             ttk.Entry(container, textvariable=self.instance_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.instance_dir_var)).grid(row=1, column=2, padx=5, pady=8)
+
+            ttk.Label(container, text="输出文件夹:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
             
             start_command = self._setup_new_quest_project
         
@@ -370,15 +376,21 @@ class ProjectTab:
 
     def _setup_new_quest_project(self):
         instance_dir = self.instance_dir_var.get()
+        output_dir = self.output_dir_var.get()
         if not instance_dir:
             ui_utils.show_error("输入不能为空", "请指定实例文件夹。", parent=self.root)
             return
 
         self.project_type = "quest"
         self.project_name = "任务汉化"
-        self.project_info = {"instance_dir": instance_dir}
+        self.project_info = {"instance_dir": instance_dir, "output_dir": output_dir}
         self.log_message("任务汉化项目已配置，开始提取文本...", "INFO")
         self.main_window.update_tab_title(self.tab_id, "任务汉化")
+        
+        # 保存配置
+        config = config_manager.load_config()
+        config['output_dir'] = output_dir
+        config_manager.save_config(config)
         
         self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
         

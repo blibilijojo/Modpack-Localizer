@@ -21,6 +21,7 @@ class QuestWorkflowManager:
         self.project_info = project_info
         self.main_window = main_window
         self.instance_path = Path(project_info['instance_dir'])
+        self.output_path = Path(project_info.get('output_dir', str(self.instance_path)))
         
         self.quest_files_map = {}
         self.quest_type = ""
@@ -155,7 +156,7 @@ class QuestWorkflowManager:
                     content_to_write = slib.dumps(quest_data)
                     target_path.write_text(content_to_write, encoding='utf-8')
                 
-                lang_path = self.instance_path / "kubejs" / "assets" / "ftbquests" / "lang"
+                lang_path = self.output_path / "kubejs" / "assets" / "ftbquests" / "lang"
                 lang_path.mkdir(parents=True, exist_ok=True)
                 lang_filename = "en_us.json"
                 lang_content = json.dumps(self.source_lang_dict, indent=4, ensure_ascii=False)
@@ -177,7 +178,7 @@ class QuestWorkflowManager:
                 Path(original_path_str).write_text(content_to_write, encoding='utf-8')
                 self._log("已将包含翻译键的任务文件写回原位。", "INFO")
 
-                lang_path = instance_path / "config" / "betterquesting"
+                lang_path = self.output_path / "assets" / "betterquesting" / "lang"
                 lang_path.mkdir(parents=True, exist_ok=True)
                 lang_converter = LANGConverter()
                 lang_filename = "en_us.lang"
@@ -203,22 +204,21 @@ class QuestWorkflowManager:
         title = "任务汉化成功！"
         message = ""
         if self.quest_type == 'ftb':
-            lang_dir = self.instance_path / "kubejs" / "assets" / "ftbquests" / "lang"
+            lang_dir = self.output_path / "kubejs" / "assets" / "ftbquests" / "lang"
             message = (
                 "FTB Quests 文件已成功处理！\n\n"
                 "1. **任务文件**已被修改，其中的英文文本已替换为翻译键。\n"
                 f"2. **语言文件**已在以下目录生成：\n   {lang_dir}\n\n"
-                "您需要将 `kubejs` 文件夹放入一个资源包中才能在游戏内加载翻译。\n\n"
+                "您可以直接使用生成的 `kubejs` 文件夹作为资源包，或放入现有的资源包中。\n\n"
             )
         else: # bqm
-            lang_file_path = self.instance_path / 'config' / 'betterquesting' / 'zh_cn.lang'
+            lang_file_path = self.output_path / 'assets' / 'betterquesting' / 'zh_cn.lang'
             message = (
                 "Better Questing 汉化文件已成功生成！\n\n"
-                "---您还需要最后一步手动操作---\n"
-                "Better Questing 的语言文件需要放入资源包才能加载。\n\n"
-                f"1. 我们已为您生成了语言文件:\n   {lang_file_path}\n\n"
-                "2. 请将这个 zh_cn.lang 文件**移动**到您自己的一个资源包内，路径为：\n"
-                "   [你的资源包]/assets/betterquesting/lang/\n\n"
+                "---生成完成---\n"
+                "我们已为您在输出目录中生成了完整的资源包结构。\n\n"
+                f"1. 语言文件已生成到:\n   {lang_file_path}\n\n"
+                "2. 您可以直接使用生成的资源包结构，或根据需要进行调整。\n\n"
             )
         
         self.main_window.root.after(0, lambda t=title, m=message: ui_utils.show_info(t, m))

@@ -46,7 +46,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         # 绑定事件
         self.operation_var.trace_add("write", self._on_operation_change)
         
-        # 绑定事件 - 这些绑定会在切换到翻译控制台模式时生效
+        # 绑定事件 - 这些绑定会在进入翻译控制台模式时生效
         # 选择事件用于更新开始按钮状态和批次预览
         # 点击事件用于处理翻译控制台模式下的模组选择
         # 长按拖拽事件用于处理模组的拖拽选择
@@ -997,10 +997,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                                 all_items.append((ns, idx, item))
             
             if not all_items:
-                self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
-                self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
-                self.after(0, lambda: setattr(self, "processing", False))
-                self.after(0, lambda: self.start_button.config(state="normal"))
+                # 添加安全检查
+                if self.winfo_exists():
+                    self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
+                    if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                        self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                    self.after(0, lambda: setattr(self, "processing", False))
+                    if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                        self.after(0, lambda: self.start_button.config(state="normal"))
                 return
             
             if not self.processing:
@@ -1186,13 +1190,21 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             
         except Exception as e:
             logging.error(f"AI翻译失败: {e}", exc_info=True)
-            self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}"))
-            self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
         finally:
-            self.after(0, lambda: setattr(self, "processing", False))
-            self.after(0, lambda: self.start_button.config(state="normal"))
-            self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
-            self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
+                if hasattr(self.workbench, 'mode_switch_btn') and self.workbench.mode_switch_btn.winfo_exists():
+                    self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
+                if hasattr(self, 'cancel_button') and self.cancel_button.winfo_exists():
+                    self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
     
     def _generate_translation_context(self, group, translated_texts):
         """为翻译组生成上下文，确保翻译风格一致性"""
@@ -1610,10 +1622,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     })
         
         if not export_data:
-            self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要导出。"))
-            self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
-            self.after(0, lambda: setattr(self, "processing", False))
-            self.after(0, lambda: self.start_button.config(state="normal"))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要导出。"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
             return
         
         # 根据导出方式处理
@@ -1723,10 +1739,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         all_items.append((ns, idx, item))
             
             if not all_items:
-                self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
-                self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
-                self.after(0, lambda: setattr(self, "processing", False))
-                self.after(0, lambda: self.start_button.config(state="normal"))
+                # 添加安全检查
+                if self.winfo_exists():
+                    self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
+                    if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                        self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                    self.after(0, lambda: setattr(self, "processing", False))
+                    if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                        self.after(0, lambda: self.start_button.config(state="normal"))
                 return
             
             if not self.processing:
@@ -1762,21 +1782,31 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 # 更新进度
                 processed = min(i + batch_size, total_count)
                 status_text = f"标点修正中... 已处理 {processed}/{total_count} 条"
-                self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                # 添加安全检查
+                if self.winfo_exists() and hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
             
             if not self.processing:
                 return
             
             # 更新UI
-            self.after(0, lambda: self._update_punctuation_results(corrected_count, total_count))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: self._update_punctuation_results(corrected_count, total_count))
             
         except Exception as e:
             logging.error(f"标点修正失败: {e}", exc_info=True)
-            self.after(0, lambda: messagebox.showerror("标点修正失败", f"执行标点修正时发生错误:\n{e}"))
-            self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: messagebox.showerror("标点修正失败", f"执行标点修正时发生错误:\n{e}"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
         finally:
-            self.after(0, lambda: setattr(self, "processing", False))
-            self.after(0, lambda: self.start_button.config(state="normal"))
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
     
     def _update_punctuation_results(self, corrected_count, total_count):
         """更新标点修正结果"""

@@ -92,18 +92,17 @@ DEFAULT_CONFIG = {
         "require_chinese_translation": True  # 译文必须包含中文
     },
     "github_proxies": [
-        "https://gh-proxy.org/",
+        "https://edgeone.gh-proxy.org/",
         "https://hk.gh-proxy.org/",
         "https://cdn.gh-proxy.org/",
-        "https://edgeone.gh-proxy.org/"
+        "https://gh-proxy.org/"
     ],
     
     # AI翻译批次处理默认值
     "ai_batch_count": 10,       # 批次数默认值
     "ai_batch_items": 200,      # 每批次条目数默认值
     "ai_batch_words": 2000,      # 每批次单词数默认值
-    # 配置加密密钥管理
-    "saved_encryption_key": ""          # 保存的加密密钥（加密存储）
+
 }
 
 def load_config() -> dict:

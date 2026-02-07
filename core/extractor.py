@@ -68,8 +68,13 @@ class Extractor:
         if not (is_english or is_chinese):
             return None, None, None, None, None, None
         
-        namespace = self._get_namespace_from_path(file_info.filename)
+        base_namespace = self._get_namespace_from_path(file_info.filename)
         file_format = 'lang' if path_str_lower.endswith('.lang') else 'json'
+        
+        # Check if other format already exists for this base namespace
+        # We'll need to scan through existing namespaces to check
+        # This is a simplified check - in practice, we'll handle it in extract_from_mods
+        namespace = base_namespace
         log_path = f"{source_zip_name} -> {file_info.filename}"
         
         try:
@@ -127,6 +132,8 @@ class Extractor:
             
             try:
                 with zipfile.ZipFile(jar_file, 'r') as zf:
+                    # First pass: collect all language files for this jar
+                    language_files = []
                     for file_info in zf.infolist():
                         if file_info.is_dir() or 'lang' not in file_info.filename:
                             continue
@@ -135,44 +142,64 @@ class Extractor:
                         if result_tuple[0] is None:
                             continue
                         
-                        namespace, file_format, content, extracted_data, is_english, is_chinese = result_tuple
+                        language_files.append(result_tuple)
+                    
+                    # Check for both formats in this jar
+                    formats_by_namespace = {}
+                    for namespace, file_format, content, extracted_data, is_english, is_chinese in language_files:
+                        if namespace not in formats_by_namespace:
+                            formats_by_namespace[namespace] = set()
+                        formats_by_namespace[namespace].add(file_format)
+                    
+                    # Process files with proper namespace handling
+                    for namespace, file_format, content, extracted_data, is_english, is_chinese in language_files:
+                        # Determine if we need to add format suffix
+                        if len(formats_by_namespace[namespace]) > 1:
+                            # Both formats exist, use namespace with suffix
+                            final_namespace = f"{namespace}:{file_format}"
+                        else:
+                            # Only one format exists, use namespace without suffix
+                            final_namespace = namespace
                         
                         # 初始化命名空间信息
-                        if namespace not in namespace_info:
-                            namespace_info[namespace] = NamespaceInfo(
-                                name=namespace,
-                                jar_name=jar_file.name,
+                        if final_namespace not in namespace_info:
+                            jar_name = jar_file.name
+                            if len(formats_by_namespace[namespace]) > 1:
+                                jar_name += " (both formats)"
+                            namespace_info[final_namespace] = NamespaceInfo(
+                                name=final_namespace,
+                                jar_name=jar_name,
                                 file_format=file_format
                             )
                         
                         # 更新命名空间的文件格式（优先使用JSON）
                         if file_format == 'json':
-                            namespace_info[namespace].file_format = file_format
+                            namespace_info[final_namespace].file_format = file_format
                         
                         # 处理英文文件
                         if is_english:
-                            raw_english_files[namespace] = content
-                            namespace_info[namespace].raw_content = content
+                            raw_english_files[final_namespace] = content
+                            namespace_info[final_namespace].raw_content = content
                             
                             for key, value in extracted_data.items():
                                 entry = LanguageEntry(
                                     key=key,
                                     en=value,
-                                    namespace=namespace
+                                    namespace=final_namespace
                                 )
-                                master_english[namespace][key] = entry
+                                master_english[final_namespace][key] = entry
                         # 处理中文文件
                         elif is_chinese:
                             for key, value in extracted_data.items():
                                 # 从master_english中查找对应的英文值，如果找不到则使用空字符串
-                                en_value = master_english[namespace][key].en if namespace in master_english and key in master_english[namespace] else ""
+                                en_value = master_english[final_namespace][key].en if final_namespace in master_english and key in master_english[final_namespace] else ""
                                 entry = LanguageEntry(
                                     key=key,
                                     en=en_value,
                                     zh=value,
-                                    namespace=namespace
+                                    namespace=final_namespace
                                 )
-                                internal_chinese[namespace][key] = entry
+                                internal_chinese[final_namespace][key] = entry
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取JAR文件: {jar_file.name} - 错误: {e}")
         

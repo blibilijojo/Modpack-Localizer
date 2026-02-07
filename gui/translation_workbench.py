@@ -266,7 +266,7 @@ class TranslationWorkbench(ttk.Frame):
         self.status_label.pack(side="left", fill="x", expand=True)
 
         # 功能切换按钮 - 放到最右边
-        self.mode_switch_btn = ttk.Button(btn_frame, text="切换到翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
+        self.mode_switch_btn = ttk.Button(btn_frame, text="进入翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
         self.mode_switch_btn.pack(side="right")
         ToolTip(self.mode_switch_btn, "在翻译工作台和翻译控制台功能之间切换")
         
@@ -1079,12 +1079,16 @@ class TranslationWorkbench(ttk.Frame):
         
         if self.main_window and self.is_dirty:
             # 添加延迟保存机制，避免过于频繁的会话保存
-            # 1秒后执行保存，期间有新的修改会取消之前的定时器
-            self._session_save_timer = self.after(1000, self._save_session_with_delay)
+            # 3秒后执行保存，期间有新的修改会取消之前的定时器
+            self._session_save_timer = self.after(3000, self._save_session_with_delay)
         
-        # 实现自动保存项目数据
+        # 实现自动保存项目数据（延迟执行）
         if self.is_dirty and self.current_project_path:
-            self._perform_save(self.current_project_path)
+            # 取消之前的自动保存定时器
+            if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+                self.after_cancel(self._auto_save_timer)
+            # 3秒后执行自动保存，期间有新的修改会取消之前的定时器
+            self._auto_save_timer = self.after(3000, lambda: self._perform_save(self.current_project_path))
     
     def _save_session_with_delay(self):
         """延迟保存会话"""
@@ -1092,7 +1096,6 @@ class TranslationWorkbench(ttk.Frame):
             self.main_window._save_current_session()
 
     def _perform_save(self, save_path) -> bool:
-        self._save_current_edit()
         latest_data = self.undo_stack[-1] if self.undo_stack else self.translation_data
         
         save_data = {
@@ -1282,7 +1285,7 @@ class TranslationWorkbench(ttk.Frame):
             # 清除当前选择信息，避免与翻译控制台的操作冲突
             self.current_selection_info = None
             
-            # 切换到翻译控制台模式
+            # 进入翻译控制台模式
             self._current_mode = "comprehensive"
             
             # 隐藏工作区UI
@@ -1360,7 +1363,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
             
             # 更新按钮文本
-            self.mode_switch_btn.config(text="切换到翻译控制台")
+            self.mode_switch_btn.config(text="进入翻译控制台")
             
             # 更新状态栏
             selection = self.ns_tree.selection()

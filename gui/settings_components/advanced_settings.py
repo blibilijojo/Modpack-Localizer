@@ -4,10 +4,8 @@ import ttkbootstrap as ttk
 from gui import ui_utils
 from gui import custom_widgets
 from utils import config_manager
-import base64
 import json
 import os
-import hashlib
 
 class AdvancedSettings:
     def __init__(self, parent, config, save_callback):
@@ -25,16 +23,12 @@ class AdvancedSettings:
         # 日志设置
         self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
         
-        # 密钥管理设置
-        self.saved_key_var = tk.StringVar(value=self.config.get("saved_encryption_key", ""))
-        
         # 绑定变量变化事件
         self._bind_events()
     
     def _bind_events(self):
         # 绑定变量变化事件
         self.log_level_var.trace_add("write", lambda *args: self.save_callback())
-        self.saved_key_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
         # 创建主容器
@@ -145,44 +139,13 @@ class AdvancedSettings:
         
         export_btn = ttk.Button(io_btn_frame, text="导出配置", command=self._export_config, bootstyle="info-outline")
         export_btn.pack(side="left", padx=(0, 10))
-        custom_widgets.ToolTip(export_btn, "导出当前配置到文件，支持密钥加密")
+        custom_widgets.ToolTip(export_btn, "导出当前配置到文件")
         
         import_btn = ttk.Button(io_btn_frame, text="导入配置", command=self._import_config, bootstyle="info-outline")
         import_btn.pack(side="left", padx=(0, 10))
-        custom_widgets.ToolTip(import_btn, "从文件导入配置，需要输入正确的密钥")
+        custom_widgets.ToolTip(import_btn, "从文件导入配置")
         
-        # 密钥管理设置
-        key_management_frame = tk_ttk.LabelFrame(advanced_frame, text="加密密钥管理", padding="10")
-        key_management_frame.pack(fill="x", pady=(0, 5))
-        
-        # 密钥输入框
-        key_input_frame = ttk.Frame(key_management_frame)
-        key_input_frame.pack(fill="x", pady=5)
-        key_input_frame.columnconfigure(0, weight=1)
-        
-        ttk.Label(key_input_frame, text="保存的加密密钥:", width=15).grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        
-        # 密钥显示/隐藏切换
-        self.key_visible = False
-        
-        def toggle_key_visibility():
-            self.key_visible = not self.key_visible
-            show_char = "" if self.key_visible else "*"
-            key_entry.config(show=show_char)
-            toggle_btn.config(text="👁️" if not self.key_visible else "👁️‍🗨️")
-        
-        key_entry = ttk.Entry(key_input_frame, textvariable=self.saved_key_var, show="*", width=40)
-        key_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        
-        toggle_btn = ttk.Button(key_input_frame, text="👁️", command=toggle_key_visibility, bootstyle="secondary", width=3)
-        toggle_btn.grid(row=0, column=2, padx=5, pady=5)
-        custom_widgets.ToolTip(toggle_btn, "显示/隐藏密钥")
-        
-        # 密钥说明
-        ttk.Label(key_management_frame, 
-                 text="注意：保存密钥后，导出配置时将自动使用该密钥进行加密；清空密钥则导出未加密配置。", 
-                 wraplength=600, 
-                 bootstyle="info").pack(anchor="w", pady=5)
+
         
         # 重置设置
         reset_frame = tk_ttk.LabelFrame(advanced_frame, text="重置设置", padding="10")
@@ -216,63 +179,19 @@ class AdvancedSettings:
             except Exception as e:
                 ui_utils.show_error("重置失败", f"重置设置时发生错误：{str(e)}")
     
-    def _derive_key(self, password):
-        """从密码派生加密密钥"""
-        # 使用SHA256哈希密码，生成32字节密钥
-        salt = b'modpack_localizer_salt'  # 固定盐值，确保相同密码生成相同密钥
-        # 多次哈希增强安全性
-        key_material = password.encode() + salt
-        for _ in range(10000):
-            key_material = hashlib.sha256(key_material).digest()
-        return key_material
-    
-    def _xor_encrypt(self, data, key):
-        """使用XOR算法加密数据"""
-        encrypted = bytearray()
-        key_len = len(key)
-        for i, byte in enumerate(data):
-            encrypted.append(byte ^ key[i % key_len])
-        return bytes(encrypted)
-    
-    def _encrypt_config(self, config_data, password):
-        """使用自定义算法加密配置数据"""
-        key = self._derive_key(password)
-        json_data = json.dumps(config_data, indent=4, ensure_ascii=False).encode()
-        encrypted_data = self._xor_encrypt(json_data, key)
-        return base64.urlsafe_b64encode(encrypted_data)
-    
-    def _decrypt_config(self, encrypted_data, password):
-        """使用自定义算法解密配置数据"""
-        key = self._derive_key(password)
-        decoded_data = base64.urlsafe_b64decode(encrypted_data)
-        decrypted_data = self._xor_encrypt(decoded_data, key)
-        return json.loads(decrypted_data.decode())
+
     
     def _export_config(self):
         """导出配置文件"""
         # 获取当前配置
         current_config = config_manager.load_config()
         
-        # 获取UI中最新的密钥值，确保实时反应变化
-        saved_key = self.saved_key_var.get()
-        
-        # 根据密钥是否为空自动决定是否加密
-        use_encryption = bool(saved_key)
-        password = saved_key if use_encryption else None
-        
-        # 根据加密选择动态设置文件类型选项
-        if use_encryption:
-            filetypes = [
-                ("加密配置文件", "*.mplcfg"),
-                ("所有文件", "*.*")
-            ]
-            default_extension = ".mplcfg"
-        else:
-            filetypes = [
-                ("未加密配置文件", "*.json"),
-                ("所有文件", "*.*")
-            ]
-            default_extension = ".json"
+        # 设置文件类型选项（只支持未加密的JSON文件）
+        filetypes = [
+            ("配置文件", "*.json"),
+            ("所有文件", "*.*")
+        ]
+        default_extension = ".json"
         
         # 选择保存路径
         file_path = filedialog.asksaveasfilename(
@@ -285,17 +204,10 @@ class AdvancedSettings:
             return
         
         try:
-            if use_encryption:
-                # 加密配置
-                encrypted_data = self._encrypt_config(current_config, password)
-                with open(file_path, "wb") as f:
-                    f.write(encrypted_data)
-                messagebox.showinfo("成功", f"配置已成功加密导出到文件: {file_path}")
-            else:
-                # 直接保存为JSON
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(current_config, f, indent=4, ensure_ascii=False)
-                messagebox.showinfo("成功", f"配置已成功导出到文件: {file_path}")
+            # 直接保存为JSON
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(current_config, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("成功", f"配置已成功导出到文件: {file_path}")
         except Exception as e:
             messagebox.showerror("错误", f"导出配置时发生错误: {e}")
     
@@ -304,7 +216,7 @@ class AdvancedSettings:
         # 选择文件
         file_path = filedialog.askopenfilename(
             filetypes=[
-                ("配置文件", "*.json *.mplcfg"),
+                ("配置文件", "*.json"),
                 ("所有文件", "*.*")
             ],
             title="导入配置文件"
@@ -314,40 +226,11 @@ class AdvancedSettings:
             return
         
         try:
-            with open(file_path, "rb") as f:
-                file_content = f.read()
+            with open(file_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
         except Exception as e:
-            messagebox.showerror("错误", f"读取配置文件时发生错误: {e}")
+            messagebox.showerror("错误", f"解析配置文件失败: {e}")
             return
-        
-        config_data = None
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        # 判断文件类型
-        if file_ext == ".mplcfg":
-            # 加密文件，需要密码
-            password = ui_utils.ask_string(
-                "输入密钥",
-                "请输入配置文件加密密钥:",
-                show="*",
-                parent=self.parent
-            )
-            
-            if not password:
-                return
-            
-            try:
-                config_data = self._decrypt_config(file_content, password)
-            except Exception as e:
-                messagebox.showerror("错误", f"解密配置文件失败: {e}\n请检查密钥是否正确")
-                return
-        else:
-            # 未加密文件，直接解析JSON
-            try:
-                config_data = json.loads(file_content.decode("utf-8"))
-            except Exception as e:
-                messagebox.showerror("错误", f"解析配置文件失败: {e}")
-                return
         
         # 确认导入
         confirm = messagebox.askyesno(
@@ -391,6 +274,5 @@ class AdvancedSettings:
         return {
             "log_level": self.log_level_var.get(),
             "log_retention_days": self.log_retention_days_var.get(),
-            "max_log_count": self.max_log_count_var.get(),
-            "saved_encryption_key": self.saved_key_var.get()
+            "max_log_count": self.max_log_count_var.get()
         }

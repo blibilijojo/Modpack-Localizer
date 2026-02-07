@@ -536,6 +536,182 @@ CRITICAL: 致命错误，程序即将崩溃
         self.download_dict_button.config(state="disabled", text="检查中...")
         threading.Thread(target=self._dict_update_worker, daemon=True).start()
 
+    def _dict_update_worker(self):
+        import requests
+        import logging
+        from pathlib import Path
+        from utils import config_manager
+        from gui.dialogs import DownloadProgressDialog
+        
+        try:
+            # 获取远程词典信息
+            remote_info = self._get_remote_dict_info()
+            if not remote_info:
+                if self.winfo_exists():
+                    self.after(0, lambda: ui_utils.show_error("更新失败", "无法获取远程词典信息，请检查网络连接。"))
+                return
+            
+            # 获取本地词典路径
+            community_dict_path = self.community_dict_var.get()
+            local_path = Path(community_dict_path) if community_dict_path else None
+            
+            # 检查本地词典版本
+            local_version = config_manager.load_config().get("last_dict_version", "0.0.0")
+            remote_version = remote_info.get("version", "0.0.0")
+            
+            # 比较版本
+            if local_path and local_path.exists():
+                if local_version == remote_version:
+                    if self.winfo_exists():
+                        self.after(0, lambda: ui_utils.show_info("检查完成", "社区词典已是最新版本。"))
+                    return
+            
+            # 需要更新或下载
+            if not local_path:
+                # 没有设置本地路径，提示用户
+                if self.winfo_exists():
+                    self.after(0, lambda: ui_utils.show_error("更新失败", "请先配置社区词典文件路径。"))
+                return
+            
+            # 弹窗询问用户是否更新
+            if self.winfo_exists():
+                def ask_update():
+                    # 显示确认对话框
+                    from tkinter import messagebox
+                    result = messagebox.askyesno(
+                        "发现新版本",
+                        f"发现社区词典新版本！\n\n当前版本: {local_version}\n最新版本: {remote_version}\n\n是否立即更新?",
+                        parent=self
+                    )
+                    if result:
+                        # 用户确认更新，执行下载
+                        self._download_dict(remote_info, local_path)
+                self.after(0, ask_update)
+        finally:
+            if self.winfo_exists():
+                self.after(0, lambda: self.download_dict_button.config(state="normal", text="检查/更新"))
+    
+    def _download_dict(self, remote_info, local_path):
+        """
+        下载词典文件（异步）
+        """
+        import threading
+        
+        # 启动新线程进行下载，避免阻塞主UI线程
+        def download_thread():
+            import requests
+            import logging
+            from gui.dialogs import DownloadProgressDialog
+            from utils import config_manager
+            import time
+            
+            # 创建进度对话框
+            progress_dialog = None
+            if self.winfo_exists():
+                # 使用after方法创建进度对话框，避免线程阻塞
+                def create_progress_dialog():
+                    setattr(self, "_progress_dialog", DownloadProgressDialog(self, title="更新社区词典"))
+                self.after(0, create_progress_dialog)
+                # 等待进度对话框创建完成
+                for _ in range(10):  # 最多等待1秒
+                    if hasattr(self, "_progress_dialog"):
+                        progress_dialog = self._progress_dialog
+                        break
+                    time.sleep(0.1)
+            
+            # 下载词典
+            url = remote_info.get("url")
+            if not url:
+                if self.winfo_exists():
+                    self.after(0, lambda: ui_utils.show_error("更新失败", "无法获取远程词典下载链接。"))
+                return
+            
+            # 应用GitHub加速
+            url = self._apply_github_acceleration(url)
+            
+            try:
+                # 增加超时时间，使用更稳定的连接
+                response = requests.get(url, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+                total_size = int(response.headers.get("content-length", 0))
+                bytes_downloaded = 0
+                last_update_time = 0
+                update_interval = 0.1  # 控制进度更新频率，每100ms更新一次
+                
+                with open(local_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=16384):  # 增大chunk大小，提高下载速度
+                        if chunk:
+                            f.write(chunk)
+                            bytes_downloaded += len(chunk)
+                            # 控制进度更新频率，避免过多的UI更新导致卡顿
+                            current_time = time.time()
+                            if progress_dialog and self.winfo_exists() and (current_time - last_update_time) > update_interval:
+                                progress = (bytes_downloaded / total_size) * 100 if total_size > 0 else 0
+                                # 使用lambda捕获当前值，避免闭包延迟绑定问题
+                                def update_ui(p=progress, b=bytes_downloaded, t=total_size):
+                                    if progress_dialog and self.winfo_exists():
+                                        try:
+                                            progress_dialog.update_progress("下载词典", int(p), f"已下载 {b//1024}/{t//1024} KB")
+                                        except Exception:
+                                            pass  # 忽略UI更新错误
+                                self.after(0, update_ui)
+                                last_update_time = current_time
+                
+                # 更新本地版本记录
+                config_manager.update_config("last_dict_version", remote_info.get("version"))
+                
+                # 显示成功信息
+                if self.winfo_exists():
+                    def show_success():
+                        if self.winfo_exists():
+                            ui_utils.show_info("更新成功", f"社区词典已成功更新到版本 {remote_info.get('version')}。")
+                    self.after(0, show_success)
+                    
+            except Exception as e:
+                logging.error(f"下载词典失败: {e}")
+                if self.winfo_exists():
+                    def show_error():
+                        if self.winfo_exists():
+                            ui_utils.show_error("更新失败", f"下载词典时发生错误: {e}")
+                    self.after(0, show_error)
+            finally:
+                # 关闭进度对话框
+                if hasattr(self, "_progress_dialog"):
+                    progress_dialog = self._progress_dialog
+                    if progress_dialog and self.winfo_exists():
+                        def close_dialog():
+                            try:
+                                progress_dialog.close_dialog()
+                            except Exception:
+                                pass  # 忽略关闭错误
+                        self.after(0, close_dialog)
+                    delattr(self, "_progress_dialog")
+        
+        # 启动下载线程
+        threading.Thread(target=download_thread, daemon=True).start()
+    
+    def _apply_github_acceleration(self, url):
+        """
+        应用GitHub加速
+        """
+        from utils import config_manager
+        
+        # 检查是否是GitHub链接
+        if "github.com" in url:
+            # 获取配置的GitHub代理
+            config = config_manager.load_config()
+            github_proxies = config.get("github_proxies", [])
+            
+            if github_proxies:
+                # 使用第一个代理
+                proxy = github_proxies[0]
+                # 构建加速链接
+                if url.startswith("https://github.com/"):
+                    # 替换为加速链接
+                    accelerated_url = proxy + url[8:]  # 移除 https:// 前缀
+                    return accelerated_url
+        return url
+
     def _get_remote_dict_info(self) -> dict | None:
         api_url = "https://api.github.com/repos/VM-Chinese-translate-group/i18n-Dict-Extender/releases/latest"
         try:

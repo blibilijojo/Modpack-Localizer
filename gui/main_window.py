@@ -182,6 +182,10 @@ class ProjectTab:
         mod_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="推荐流程。扫描Mods文件夹，生成标准汉化资源包。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
+        modrinth_rb = ttk.Radiobutton(new_project_frame, text="Modrinth搜索", variable=self.project_type_var, value="modrinth", style="TRadiobutton")
+        modrinth_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="从Modrinth平台搜索模组，自动下载并启动汉化流程。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+
         quest_rb = ttk.Radiobutton(new_project_frame, text="任务汉化", variable=self.project_type_var, value="quest", style="TRadiobutton")
         quest_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
@@ -226,6 +230,17 @@ class ProjectTab:
             
             start_command = self._setup_new_mod_project
         
+        elif self.project_type == "modrinth":
+            self.main_window.update_tab_title(self.tab_id, "Modrinth搜索设置")
+            config = config_manager.load_config()
+            self.output_dir_var.set(config.get("output_dir", ""))
+
+            ttk.Label(container, text="输出文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=1, column=2, padx=5, pady=8)
+            
+            start_command = self._setup_new_modrinth_project
+        
         elif self.project_type == "quest":
             self.main_window.update_tab_title(self.tab_id, "任务汉化设置")
             self.modpack_name_var.set("MyModpack")
@@ -234,8 +249,6 @@ class ProjectTab:
             ttk.Entry(container, textvariable=self.instance_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.instance_dir_var)).grid(row=1, column=2, padx=5, pady=8)
             
-
-
             start_command = self._setup_new_quest_project
         
         else:
@@ -378,6 +391,468 @@ class ProjectTab:
         self._run_quest_build_phase = run_quest_build
 
         threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True).start()
+    
+    def _setup_new_modrinth_project(self):
+        output_dir = self.output_dir_var.get()
+        if not output_dir:
+            ui_utils.show_error("输入不能为空", "请指定输出文件夹。", parent=self.root)
+            return
+
+        self.project_type = "modrinth"
+        self.project_name = "Modrinth搜索"
+        self.project_info = {"output_dir": output_dir}
+        self.log_message("Modrinth搜索项目已配置，开始搜索界面...", "INFO")
+        self.main_window.update_tab_title(self.tab_id, "Modrinth搜索")
+        
+        # 保存配置
+        config = config_manager.load_config()
+        config['output_dir'] = output_dir
+        config_manager.save_config(config)
+        
+        # 显示Modrinth搜索界面
+        self._show_modrinth_view()
+    
+    def _show_modrinth_view(self):
+        """显示Modrinth界面"""
+        self._clear_content_frame()
+        if not self.log_pane_visible:
+            self._toggle_log_pane()
+        
+        # 创建主容器
+        main_container = ttk.Frame(self.content_frame)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # 使用网格布局管理主容器
+        main_container.columnconfigure(0, weight=1)
+        main_container.columnconfigure(1, weight=1)
+        main_container.rowconfigure(0, weight=0)
+        main_container.rowconfigure(1, weight=1)
+        
+        # 搜索和筛选区域
+        search_frame = ttk.LabelFrame(main_container, text="搜索", padding=10)
+        search_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+        
+        # 搜索输入框
+        search_input_frame = ttk.Frame(search_frame)
+        search_input_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(search_input_frame, text="搜索关键词:", width=10).pack(side="left", padx=5, pady=5)
+        self.search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_input_frame, textvariable=self.search_var, width=60)
+        search_entry.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+        search_entry.bind("<Return>", lambda e: self.start_modrinth_search())
+        
+        # 筛选选项
+        filter_frame = ttk.Frame(search_frame)
+        filter_frame.pack(fill="x")
+        
+        ttk.Label(filter_frame, text="游戏版本:", width=10).pack(side="left", padx=5, pady=5)
+        self.game_version_var = tk.StringVar(value="全部")
+        game_version_combo = ttk.Combobox(filter_frame, textvariable=self.game_version_var, values=["全部", "1.20.1", "1.19.4", "1.18.2", "1.17.1", "1.16.5"], state="readonly", width=15)
+        game_version_combo.pack(side="left", padx=5, pady=5)
+        
+        ttk.Label(filter_frame, text="加载器:", width=10).pack(side="left", padx=5, pady=5)
+        self.mod_loader_var = tk.StringVar(value="全部")
+        mod_loader_combo = ttk.Combobox(filter_frame, textvariable=self.mod_loader_var, values=["全部", "fabric", "forge", "quilt"], state="readonly", width=15)
+        mod_loader_combo.pack(side="left", padx=5, pady=5)
+        
+        ttk.Button(filter_frame, text="搜索", command=self.start_modrinth_search, bootstyle="primary").pack(side="right", padx=5, pady=5)
+        
+        # 模组列表区域（左侧）
+        results_frame = ttk.LabelFrame(main_container, text="模组列表", padding=10)
+        results_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10), padx=(0, 5))
+        
+        # 模组列表
+        self.results_tree = ttk.Treeview(results_frame, columns=("title", "author", "downloads"), show="headings")
+        self.results_tree.heading("title", text="模组名称")
+        self.results_tree.heading("author", text="作者")
+        self.results_tree.heading("downloads", text="下载量")
+        self.results_tree.column("title", width=200)
+        self.results_tree.column("author", width=100)
+        self.results_tree.column("downloads", width=80, anchor="center")
+        
+        scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
+        self.results_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.results_tree.pack(fill="both", expand=True)
+        
+        # 右侧按钮
+        results_button_frame = ttk.Frame(results_frame)
+        results_button_frame.pack(fill="x", pady=(10, 0))
+        ttk.Button(results_button_frame, text="查看文件列表", command=self.view_files, bootstyle="outline").pack(side="left", padx=5)
+        ttk.Button(results_button_frame, text="打开模组页面", command=self.open_mod_page, bootstyle="outline").pack(side="left", padx=5)
+        ttk.Button(results_button_frame, text="下载并汉化", command=self.download_and_localize, bootstyle="success").pack(side="right", padx=5)
+        
+        # 文件列表区域（右侧）
+        files_label_frame = ttk.LabelFrame(main_container, text="文件列表", padding=10)
+        files_label_frame.grid(row=1, column=1, sticky="nsew", pady=(0, 10), padx=(5, 0))
+        
+        # 文件列表
+        self.files_tree = ttk.Treeview(files_label_frame, columns=("name", "version", "size", "date"), show="headings")
+        self.files_tree.heading("name", text="文件名")
+        self.files_tree.heading("version", text="版本")
+        self.files_tree.heading("size", text="大小")
+        self.files_tree.heading("date", text="上传日期")
+        self.files_tree.column("name", width=200)
+        self.files_tree.column("version", width=100)
+        self.files_tree.column("size", width=80, anchor="center")
+        self.files_tree.column("date", width=120)
+        
+        files_scrollbar = ttk.Scrollbar(files_label_frame, orient="vertical", command=self.files_tree.yview)
+        self.files_tree.configure(yscroll=files_scrollbar.set)
+        files_scrollbar.pack(side="right", fill="y")
+        self.files_tree.pack(fill="both", expand=True)
+        
+        # 结果变量
+        self.all_results = []
+        self.current_mod = None
+        self.current_files = []
+    
+    def start_modrinth_search(self):
+        """启动搜索"""
+        query = self.search_var.get().strip()
+        if not query:
+            messagebox.showinfo("提示", "请输入搜索关键词。")
+            return
+        
+        game_version = self.game_version_var.get()
+        mod_loader = self.mod_loader_var.get()
+        
+        # 清空结果
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # 更新状态
+        self.status_var.set("正在搜索Modrinth...")
+        self.log_message(f"开始搜索: {query}", "INFO")
+        
+        # 在后台线程中执行搜索
+        threading.Thread(target=self.search_modrinth, args=(query, game_version, mod_loader), daemon=True).start()
+    
+    def search_modrinth(self, query, game_version=None, mod_loader=None):
+        """执行Modrinth搜索请求"""
+        try:
+            import requests
+            params = {
+                "query": query,
+                "limit": 50,
+                "index": "relevance"
+            }
+            
+            # 添加筛选参数
+            if game_version and game_version != "全部":
+                params["filters"] = f"versions:{game_version}"
+            if mod_loader and mod_loader != "全部":
+                if "filters" in params:
+                    params["filters"] += f",categories:{mod_loader}"
+                else:
+                    params["filters"] = f"categories:{mod_loader}"
+            
+            # 发送API请求
+            response = requests.get("https://api.modrinth.com/v2/search", params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            # 处理结果
+            results = []
+            for hit in data.get("hits", []):
+                mod_data = {
+                    "project_id": hit.get("project_id"),
+                    "title": hit.get("title"),
+                    "author": hit.get("author"),
+                    "description": hit.get("description"),
+                    "downloads": hit.get("downloads", 0),
+                    "follows": hit.get("follows", 0),
+                    "license": hit.get("license"),
+                    "slug": hit.get("slug"),
+                    "versions": []
+                }
+                results.append(mod_data)
+            
+            self.all_results = results
+            self.root.after(0, self.update_results)
+        except Exception as e:
+            error_msg = f"搜索失败: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+    
+    def update_results(self):
+        """更新搜索结果"""
+        # 清空结果
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # 添加结果
+        for mod in self.all_results:
+            self.results_tree.insert("", "end", values=(mod["title"], mod["author"], mod["downloads"]), tags=(mod["project_id"],))
+        
+        # 更新状态
+        self.status_var.set(f"搜索完成，找到 {len(self.all_results)} 个结果")
+        self.log_message(f"搜索完成，找到 {len(self.all_results)} 个结果", "SUCCESS")
+    
+    def view_files(self):
+        """查看模组文件"""
+        selected_items = self.results_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("提示", "请先选择一个模组。")
+            return
+        
+        # 获取选中的模组
+        item = selected_items[0]
+        tags = self.results_tree.item(item, "tags")
+        if not tags:
+            return
+        
+        project_id = tags[0]
+        mod = next((m for m in self.all_results if m["project_id"] == project_id), None)
+        if not mod:
+            return
+        
+        self.current_mod = mod
+        self.status_var.set("正在获取文件列表...")
+        self.log_message(f"获取模组文件: {mod['title']}", "INFO")
+        
+        # 在后台线程中获取文件
+        threading.Thread(target=self.get_mod_files, args=(project_id,), daemon=True).start()
+    
+    def get_mod_files(self, project_id):
+        """获取模组文件"""
+        try:
+            import requests
+            response = requests.get(f"https://api.modrinth.com/v2/project/{project_id}/version", timeout=30)
+            response.raise_for_status()
+            files = response.json()
+            
+            self.current_files = files
+            self.root.after(0, self.update_files_list)
+        except Exception as e:
+            error_msg = f"获取文件失败: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+    
+    def update_files_list(self):
+        """更新文件列表"""
+        # 清空文件列表
+        for item in self.files_tree.get_children():
+            self.files_tree.delete(item)
+        
+        # 添加文件
+        for file_info in self.current_files:
+            file_name = ""
+            file_size = 0
+            for asset in file_info.get("files", []):
+                if asset.get("primary"):
+                    file_name = asset.get("filename")
+                    file_size = asset.get("size", 0)
+                    break
+            
+            version = file_info.get("version_number", "")
+            date = file_info.get("date_published", "")
+            
+            # 格式化大小
+            size_str = self._format_file_size(file_size)
+            
+            # 格式化日期
+            date_str = date[:10] if date else ""
+            
+            self.files_tree.insert("", "end", values=(file_name, version, size_str, date_str), tags=(file_info.get("id"),))
+        
+        # 更新状态
+        self.status_var.set(f"获取完成，找到 {len(self.current_files)} 个文件")
+        self.log_message(f"获取完成，找到 {len(self.current_files)} 个文件", "SUCCESS")
+    
+    def _format_file_size(self, size):
+        """格式化文件大小"""
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        else:
+            return f"{size / (1024 * 1024):.1f} MB"
+    
+    def open_mod_page(self):
+        """打开模组页面"""
+        selected_items = self.results_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("提示", "请先选择一个模组。")
+            return
+        
+        # 获取选中的模组
+        item = selected_items[0]
+        tags = self.results_tree.item(item, "tags")
+        if not tags:
+            return
+        
+        project_id = tags[0]
+        mod = next((m for m in self.all_results if m["project_id"] == project_id), None)
+        if not mod:
+            return
+        
+        # 打开模组页面
+        url = f"https://modrinth.com/mod/{mod['slug']}"
+        webbrowser.open(url)
+    
+    def download_and_localize(self):
+        """下载并本地化"""
+        selected_items = self.files_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("提示", "请先选择一个文件。")
+            return
+        
+        # 获取选中的文件
+        item = selected_items[0]
+        tags = self.files_tree.item(item, "tags")
+        if not tags:
+            return
+        
+        file_id = tags[0]
+        file_info = next((f for f in self.current_files if f["id"] == file_id), None)
+        if not file_info:
+            return
+        
+        # 获取下载URL
+        download_url = None
+        file_name = None
+        for asset in file_info.get("files", []):
+            if asset.get("primary"):
+                download_url = asset.get("url")
+                file_name = asset.get("filename")
+                break
+        
+        if not download_url:
+            messagebox.showinfo("错误", "无法获取下载链接。")
+            return
+        
+        # 更新状态
+        self.status_var.set("正在下载文件...")
+        self.log_message(f"开始下载: {file_name}", "INFO")
+        
+        # 在后台线程中下载文件
+        threading.Thread(target=self.download_file, args=(download_url, file_name, file_info), daemon=True).start()
+    
+    def download_file(self, url, file_name, file_info):
+        """下载文件"""
+        try:
+            import requests
+            import os
+            from pathlib import Path
+            
+            # 获取输出目录
+            output_dir = self.project_info.get('output_dir')
+            if not output_dir:
+                error_msg = "输出目录未设置"
+                self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+                self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+                self.root.after(0, lambda: self.status_var.set("错误"))
+                return
+            
+            # 确保输出目录存在
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # 下载文件
+            file_path = output_path / file_name
+            self.log_message(f"正在下载到: {file_path}", "INFO")
+            
+            response = requests.get(url, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            # 获取文件大小
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            # 写入文件
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # 更新下载进度
+                        if total_size > 0:
+                            progress = int((downloaded_size / total_size) * 100)
+                            self.root.after(0, lambda p=progress: self.status_var.set(f"下载中... {p}%"))
+            
+            # 下载完成
+            self.root.after(0, lambda: self.status_var.set("下载完成，准备汉化流程..."))
+            self.root.after(0, lambda: self.log_message(f"下载完成: {file_name}", "SUCCESS"))
+            
+            # 开始汉化流程
+            self.root.after(0, lambda: self.start_localization_process(file_path, file_info))
+        except requests.exceptions.RequestException as e:
+            error_msg = f"下载失败: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+        except Exception as e:
+            error_msg = f"发生错误: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+    
+    def start_localization_process(self, file_path, file_info=None):
+        """开始汉化流程"""
+        self.status_var.set("准备汉化流程...")
+        
+        # 构建项目名称
+        project_name = f"汉化 - {file_path.stem}"
+        if file_info:
+            version = file_info.get('version_number', '')
+            if version:
+                project_name = f"汉化 - {file_path.stem} (v{version})"
+        
+        self.log_message(f"开始汉化流程: {project_name}")
+        
+        # 创建临时mods目录
+        import tempfile
+        from pathlib import Path
+        
+        temp_mods_dir = tempfile.mkdtemp()
+        
+        # 将下载的文件复制到临时mods目录
+        import shutil
+        mod_file_path = Path(temp_mods_dir) / file_path.name
+        shutil.copy2(file_path, mod_file_path)
+        
+        # 更新项目信息
+        self.project_type = "mod"
+        self.project_name = project_name
+        self.project_info = {
+            "mods_dir": temp_mods_dir,
+            "output_dir": self.project_info.get('output_dir')
+        }
+        
+        # 保存配置
+        from utils import config_manager
+        config = config_manager.load_config()
+        config['mods_dir'] = temp_mods_dir
+        config['output_dir'] = self.project_info.get('output_dir')
+        config_manager.save_config(config)
+        
+        # 开始汉化流程
+        self._prepare_ui_for_workflow(1)
+        from core.orchestrator import Orchestrator
+        self.orchestrator = Orchestrator(
+            settings=config,
+            update_progress=self.update_progress,
+            root_window=self.root,
+            log_callback=self.log_message
+        )
+        
+        # 保存_launch_workbench方法的引用
+        self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(
+            data, 
+            self.orchestrator.namespace_formats, 
+            self.orchestrator.raw_english_files, 
+            config, 
+            None, 
+            "完成并生成资源包"
+        )
+        
+        # 启动翻译流程
+        threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True).start()
 
     def _load_project(self):
         path = filedialog.askopenfilename(

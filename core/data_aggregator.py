@@ -19,7 +19,7 @@ class DataAggregator:
         data = {}
         if file_format == 'json':
             try:
-                # 使用标准JSON解析库解析JSON文件，确保能正确提取所有键值对
+                # 使用标准JSON解析库解析JSON文件
                 data = json.loads(content)
             except json.JSONDecodeError:
                 # 如果标准解析失败，回退到正则表达式解析

@@ -77,12 +77,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.operations_values = {
             "AI翻译": "ai_translate",
             "导出文本": "export",
-            "导入翻译": "import"
+            "导入翻译": "import",
+            "标点修正": "punctuation_correct"
         }
         self.operations_reverse_values = {
             "ai_translate": "AI翻译",
             "export": "导出文本",
-            "import": "导入翻译"
+            "import": "导入翻译",
+            "punctuation_correct": "标点修正"
         }
         
         self.operation_var = tk.StringVar(value=self.operations_reverse_values.get("ai_translate"))
@@ -90,7 +92,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         operations = [
             "AI翻译",
             "导出文本",
-            "导入翻译"
+            "导入翻译",
+            "标点修正"
         ]
         
         # 使用更现代的Combobox样式
@@ -354,7 +357,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         button_container = ttk.Frame(self.button_frame)
         button_container.pack(fill="x", anchor="e")
         
-        self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-danger", width=12, state="disabled")
+        self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-secondary", width=12)
         self.cancel_button.pack(side="right", padx=(10, 0))
         
         self.start_button = ttk.Button(button_container, text="开始处理", command=self._on_start, bootstyle="success-outline", width=15)
@@ -509,6 +512,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self.operation_comment_var.set("将选中模组中的文本导出到文件或剪贴板，可选择导出范围和方式")
         elif operation == "导入翻译":
             self.operation_comment_var.set("从文件或剪贴板导入翻译结果，更新选中模组中的翻译内容")
+        elif operation == "标点修正":
+            self.operation_comment_var.set("自动检测和修正翻译文本中的标点符号，确保中英文标点的一致性和正确性")
         else:
             self.operation_comment_var.set("")
     
@@ -530,12 +535,19 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         if operation == "ai_translate":
             self.ai_options_frame.pack(fill="x", pady=(0, 15))
             self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack(side="right", padx=(10, 0))
         elif operation == "import":
             self.import_options_frame.pack(fill="x", pady=(0, 15))
             self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
         elif operation == "export":
             self.export_options_frame.pack(fill="x", pady=(0, 15))
             self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
+        elif operation == "punctuation_correct":
+            # 标点修正操作不需要特殊选项，只显示按钮
+            self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
         
         self.update_idletasks()
     
@@ -878,10 +890,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         # 禁用界面
         self.processing = True
         self.start_button.config(state="disabled")
-        self.cancel_button.config(text="取消", state="normal", bootstyle="danger-outline")
-        
-        # 禁用切换到翻译工作台按钮
-        self.workbench.mode_switch_btn.config(state="disabled")
+        self.cancel_button.config(text="取消")
         
         # 获取选中的模组
         selected_modules = self.workbench.ns_tree.selection()
@@ -893,6 +902,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self._start_export(selected_modules)
         elif operation == "import":
             self._start_import(selected_modules)
+        elif operation == "punctuation_correct":
+            self._start_punctuation_correction(selected_modules)
     
     def _on_exit(self):
         """退出翻译控制台模式，返回翻译工作台"""
@@ -909,22 +920,17 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _on_cancel(self):
         """取消处理"""
         if self.processing:
-            # 真正终止AI翻译进程
+            # 这里可以添加取消逻辑
             self.processing = False
             self.workbench.status_label.config(text="处理已取消")
             self.workbench.log_callback("处理已取消", "INFO")
-            
-            # 恢复界面状态
             self.start_button.config(state="normal")
-            self.cancel_button.config(text="取消", state="disabled", bootstyle="outline-danger")
-            
-            # 恢复切换到翻译工作台按钮的可用状态
+            self.cancel_button.config(text="取消", bootstyle="outline-secondary")
             self.workbench.mode_switch_btn.config(state="normal")
         else:
             # 因为现在是Frame组件，不需要destroy，只需要重置状态
             self.workbench.status_label.config(text="准备就绪")
             self.workbench.log_callback("准备就绪", "INFO")
-            self.cancel_button.config(state="disabled", bootstyle="outline-danger")
     
     def _start_ai_translation(self, selected_modules):
         """开始AI翻译"""
@@ -940,6 +946,12 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         
         self.workbench.status_label.config(text="正在准备AI翻译...")
         self.workbench.log_callback("正在准备AI翻译...", "INFO")
+        
+        # 禁用返回按钮
+        self.workbench.mode_switch_btn.config(state="disabled")
+        
+        # 更改取消按钮为红色
+        self.cancel_button.config(bootstyle="danger")
         
         # 在工作线程中执行AI翻译
         threading.Thread(target=self._ai_translation_worker, args=(selected_modules,), daemon=True).start()
@@ -1149,30 +1161,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:
-                        # 取消所有未完成的期货
-                        for f in future_map:
-                            f.cancel()
                         break
                     
                     batch_idx = future_map[future]
-                    try:
-                        # 检查期货是否已被取消
-                        if not future.cancelled():
-                            translations_nested[batch_idx] = future.result()
-                            
-                            # 更新状态
-                            status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
-                            self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
-                            self.workbench.log_callback(status_text, "INFO")
-                    except Exception as e:
-                        if not self.processing:
-                            # 取消操作导致的异常，忽略
-                            break
-                        logging.error(f"处理批次 {batch_idx} 时出错: {e}", exc_info=True)
-                        self.after(0, lambda: self.workbench.log_callback(f"处理批次 {batch_idx} 时出错: {e}", "ERROR"))
-                        # 如果是取消操作导致的异常，终止循环
-                        if not self.processing:
-                            break
+                    translations_nested[batch_idx] = future.result()
+                    
+                    # 更新状态
+                    status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
+                    
+                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                    self.workbench.log_callback(status_text, "INFO")
             
             if not self.processing:
                 return
@@ -1193,9 +1191,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         finally:
             self.after(0, lambda: setattr(self, "processing", False))
             self.after(0, lambda: self.start_button.config(state="normal"))
-            self.after(0, lambda: self.cancel_button.config(text="取消", state="disabled", bootstyle="outline-danger"))
-            # 恢复切换到翻译工作台按钮的可用状态
             self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
+            self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
     
     def _generate_translation_context(self, group, translated_texts):
         """为翻译组生成上下文，确保翻译风格一致性"""
@@ -1537,16 +1534,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     item['source'] = 'AI翻译'
                     updated_count += 1
         
-        # 保存当前选中的模组
-        selected_modules = self.workbench.ns_tree.selection()
-        
         # 更新UI
         self.workbench._populate_namespace_tree()
         self.workbench._populate_item_list()
-        
-        # 恢复选中的模组
-        if selected_modules:
-            self.workbench.ns_tree.selection_set(selected_modules)
         
         # 只有当有实际更新时才设置脏标志
         if updated_count > 0:
@@ -1614,11 +1604,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 
                 if include:
                     export_data.append({
-                        "namespace": ns,
                         "key": item["key"],
                         "en": item["en"],
-                        "zh": item.get("zh", ""),
-                        "source": source
+                        "zh": item.get("zh", "")
                     })
         
         if not export_data:
@@ -1698,3 +1686,120 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self.workbench._import_from_file()
         else:
             self.workbench._import_from_clipboard()
+    
+    def _start_punctuation_correction(self, selected_modules):
+        """开始标点修正"""
+        # 检查是否有选中的模组
+        if not selected_modules:
+            # 显示提示，要求先选中模组
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            # 恢复界面状态
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        
+        self.workbench.status_label.config(text="正在准备标点修正...")
+        self.workbench.log_callback("正在准备标点修正...", "INFO")
+        
+        # 在工作线程中执行标点修正
+        threading.Thread(target=self._punctuation_correction_worker, args=(selected_modules,), daemon=True).start()
+    
+    def _punctuation_correction_worker(self, selected_modules):
+        """标点修正工作线程"""
+        try:
+            # 导入标点修正器
+            from services.punctuation_corrector import punctuation_corrector
+            
+            # 收集需要处理的条目
+            all_items = []
+            for ns in selected_modules:
+                items = self.workbench.translation_data.get(ns, {}).get("items", [])
+                for idx, item in enumerate(items):
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    if en_text and zh_text:
+                        all_items.append((ns, idx, item))
+            
+            if not all_items:
+                self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
+                self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                self.after(0, lambda: setattr(self, "processing", False))
+                self.after(0, lambda: self.start_button.config(state="normal"))
+                return
+            
+            if not self.processing:
+                return
+            
+            # 执行标点修正
+            self.after(0, lambda: self.workbench.status_label.config(text="正在进行标点修正..."))
+            
+            corrected_count = 0
+            total_count = len(all_items)
+            
+            # 批量处理
+            batch_size = 10
+            for i in range(0, total_count, batch_size):
+                if not self.processing:
+                    break
+                
+                batch = all_items[i:i+batch_size]
+                for ns, idx, item in batch:
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    
+                    if en_text and zh_text:
+                        # 执行标点修正
+                        corrected_text = punctuation_corrector.correct_punctuation(en_text, zh_text)
+                        
+                        # 如果有变化，更新翻译结果
+                        if corrected_text != zh_text:
+                            item['zh'] = corrected_text
+                            item['source'] = '标点修正'
+                            corrected_count += 1
+                
+                # 更新进度
+                processed = min(i + batch_size, total_count)
+                status_text = f"标点修正中... 已处理 {processed}/{total_count} 条"
+                self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+            
+            if not self.processing:
+                return
+            
+            # 更新UI
+            self.after(0, lambda: self._update_punctuation_results(corrected_count, total_count))
+            
+        except Exception as e:
+            logging.error(f"标点修正失败: {e}", exc_info=True)
+            self.after(0, lambda: messagebox.showerror("标点修正失败", f"执行标点修正时发生错误:\n{e}"))
+            self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
+        finally:
+            self.after(0, lambda: setattr(self, "processing", False))
+            self.after(0, lambda: self.start_button.config(state="normal"))
+    
+    def _update_punctuation_results(self, corrected_count, total_count):
+        """更新标点修正结果"""
+        # 强制记录当前状态用于撤销
+        self.workbench.undo_stack.append(copy.deepcopy(self.workbench.translation_data))
+        self.workbench.undo_targets.append(None)
+        self.workbench.redo_stack.clear()
+        self.workbench.redo_targets.clear()
+        self.workbench._update_history_buttons()
+        
+        # 更新UI
+        self.workbench._populate_namespace_tree()
+        self.workbench._populate_item_list()
+        
+        # 设置脏标志
+        if corrected_count > 0:
+            self.workbench._set_dirty(True)
+        
+        # 更新状态和日志
+        status_text = f"标点修正完成，成功修正 {corrected_count} 条翻译，共处理 {total_count} 条"
+        self.workbench.status_label.config(text=status_text)
+        self.workbench.log_callback(status_text, "SUCCESS")
+        
+        # 更新菜单栏状态
+        if self.workbench.main_window:
+            self.workbench.main_window.update_menu_state()

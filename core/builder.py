@@ -64,7 +64,9 @@ class Builder:
         # 添加剩余内容
         output.append(template_content[current_pos:])
         
-        return ''.join(output)
+        # 确保返回的字符串只使用\n换行符
+        result = ''.join(output)
+        return result.replace('\r\n', '\n').replace('\r', '\n')
     
     def _build_lang_file(self, template_content: str, translations: Dict[str, str]) -> str:
         """
@@ -120,7 +122,9 @@ class Builder:
         # 添加剩余内容
         output.append(template_content[current_pos:])
         
-        return ''.join(output)
+        # 确保返回的字符串只使用\n换行符
+        result = ''.join(output)
+        return result.replace('\r\n', '\n').replace('\r', '\n')
     
     def _build_json_file_robust(self, template_content: str, translations: Dict[str, str]) -> str:
         """

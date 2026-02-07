@@ -374,28 +374,22 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
                 if content_type == "pending":
                     if not zh_text and en_text:
                         export_data.append({
-                            "namespace": ns,
                             "key": item["key"],
                             "en": item["en"],
-                            "zh": item.get("zh", ""),
-                            "source": source
+                            "zh": item.get("zh", "")
                         })
                 elif content_type == "completed":
                     if zh_text:
                         export_data.append({
-                            "namespace": ns,
                             "key": item["key"],
                             "en": item["en"],
-                            "zh": item.get("zh", ""),
-                            "source": source
+                            "zh": item.get("zh", "")
                         })
                 elif content_type == "all":
                     export_data.append({
-                        "namespace": ns,
                         "key": item["key"],
                         "en": item["en"],
-                        "zh": item.get("zh", ""),
-                        "source": source
+                        "zh": item.get("zh", "")
                     })
         
         return export_data

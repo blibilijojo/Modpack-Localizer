@@ -20,21 +20,7 @@ def find_files_in_dir(directory: Path, pattern: str) -> list[Path]:
         return []
     return list(directory.rglob(pattern))
 def escape_json_string(text: str) -> str:
-    # 创建转义字符映射表，保留原始转义序列
-    escape_map = {
-        '\\': '\\\\',
-        '"': '\\"',
-        '\b': '\\b',
-        '\f': '\\f',
-        '\n': '\\n',
-        '\r': '\\r',
-        '\t': '\\t'
-    }
-    
-    def escape_char(c):
-        return escape_map.get(c, c)
-    
-    return ''.join(escape_char(c) for c in text)
+    return text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
 
 def dump_json(file_path: Path, data: dict, indent: int = 4) -> bool:
     """

@@ -303,19 +303,93 @@ class TranslationWorkbench(ttk.Frame):
     def _safe_select_item_and_update_ui(self, iid):
         """安全地选择项目并更新UI"""
         if self.trans_tree.exists(iid):
-            self.trans_tree.selection_set(iid)
-            self.trans_tree.focus(iid)
-            self.trans_tree.see(iid)
-            # 触发项目选中事件以更新编辑器
-            self._on_item_selected(None)
-            # 更新UI状态，确保按钮可用
+            # 先获取条目信息
             ns, idx = self._get_ns_idx_from_iid(iid)
             if ns is not None:
                 item_data = self.translation_data[ns]['items'][idx]
+                # 先更新当前选择信息
                 self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': iid}
+                
+                # 解绑文本修改事件，避免设置编辑器内容时触发保存逻辑
+                self.zh_text_input.unbind("<KeyRelease>")
+                self.zh_text_input.unbind("<FocusOut>")
+                
+                # 先更新编辑器内容，避免触发保存逻辑
                 self._set_editor_content(item_data['en'], item_data.get('zh', ''))
+                # 清除编辑器的修改标记
+                self.zh_text_input.edit_modified(False)
+                
+                # 重新绑定文本修改事件
+                self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
+                self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
+                
+                # 选择项目
+                self.trans_tree.selection_set(iid)
+                self.trans_tree.focus(iid)
+                self.trans_tree.see(iid)
+                # 更新UI状态，确保按钮可用
                 self._update_ui_state(interactive=True, item_selected=True)
                 self.zh_text_input.focus_set()
+                # 显示匹配的术语
+                self._show_matching_terms(item_data['en'])
+    
+    def _restore_item_selection(self):
+        """根据保存的信息重新选中条目"""
+        if not hasattr(self, '_workbench_item_selection') or not self._workbench_item_selection:
+            return
+        
+        selection_info = self._workbench_item_selection
+        ns = selection_info['ns']
+        idx = selection_info['idx']
+        
+        # 检查命名空间是否存在
+        if not self.ns_tree.exists(ns):
+            return
+        
+        # 确保当前选中的命名空间是保存的命名空间
+        current_ns_selection = self.ns_tree.selection()
+        if not current_ns_selection or current_ns_selection[0] != ns:
+            # 切换到保存的命名空间
+            self.ns_tree.selection_set(ns)
+            self.ns_tree.focus(ns)
+            self.ns_tree.see(ns)
+            # 重新填充项目列表
+            self._populate_item_list()
+        
+        # 重新构建正确的条目ID
+        target_iid = f"{ns}___{idx}"
+        
+        # 检查条目是否存在
+        if self.trans_tree.exists(target_iid):
+            # 直接选择项目，不触发保存逻辑
+            self.trans_tree.selection_set(target_iid)
+            self.trans_tree.focus(target_iid)
+            self.trans_tree.see(target_iid)
+            
+            # 直接更新当前选择信息和编辑器内容
+            if ns is not None:
+                item_data = self.translation_data[ns]['items'][idx]
+                # 更新当前选择信息
+                self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': target_iid}
+                
+                # 解绑文本修改事件，避免设置编辑器内容时触发保存逻辑
+                self.zh_text_input.unbind("<KeyRelease>")
+                self.zh_text_input.unbind("<FocusOut>")
+                
+                # 更新编辑器内容
+                self._set_editor_content(item_data['en'], item_data.get('zh', ''))
+                # 清除编辑器的修改标记
+                self.zh_text_input.edit_modified(False)
+                
+                # 重新绑定文本修改事件
+                self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
+                self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
+                
+                # 更新UI状态
+                self._update_ui_state(interactive=True, item_selected=True)
+                self.zh_text_input.focus_set()
+                # 显示匹配的术语
+                self._show_matching_terms(item_data['en'])
 
     def find_next(self, params):
         find_text = params["find_text"]
@@ -806,7 +880,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#0000cd", "空": "#808080" }
+        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#0000cd", "标点修正": "#ff6347", "空": "#808080" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
         self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'bold'))
 
@@ -897,7 +971,7 @@ class TranslationWorkbench(ttk.Frame):
                                    values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
                                    tags=(source,))
 
-    def _on_namespace_selected(self, event=None, skip_clear_selection=False):
+    def _on_namespace_selected(self, event=None):
         self._save_current_edit()
         
         # 处理正常模式下的模组选择
@@ -908,11 +982,10 @@ class TranslationWorkbench(ttk.Frame):
         selection = self.ns_tree.selection()
         if not selection or not self.ns_tree.exists(selection[0]): return
         
+        self.current_selection_info = None
         self._populate_item_list()
-        if not skip_clear_selection:
-            self.current_selection_info = None
-            self._clear_editor()
-            self._update_ui_state(interactive=True, item_selected=False)
+        self._clear_editor()
+        self._update_ui_state(interactive=True, item_selected=False)
         self.status_label.config(text=f"已选择项目: {selection[0]}")
 
     def _on_item_selected(self, event=None):
@@ -928,7 +1001,8 @@ class TranslationWorkbench(ttk.Frame):
         current_selection = self.current_selection_info
         
         # 检查是否有当前选择，并且编辑器内容与当前选择的译文不同
-        if current_selection and current_zh_text != self.translation_data[current_selection['ns']]['items'][current_selection['idx']].get('zh', '').strip():
+        # 只有当当前选择与新选择不同时才保存，避免重新选中同一条目时触发保存逻辑
+        if current_selection and current_selection['row_id'] != row_id and current_zh_text != self.translation_data[current_selection['ns']]['items'][current_selection['idx']].get('zh', '').strip():
             # 如果不同，则保存当前编辑的内容
             self._save_current_edit()
         
@@ -1149,43 +1223,32 @@ class TranslationWorkbench(ttk.Frame):
         # 更新功能切换按钮状态
         self.mode_switch_btn.config(state=base_state)
         
-        if item_selected and interactive:
+        if item_selected and interactive and self.current_selection_info:
             # 检查当前条目是否已存在于个人词典中
             from utils import config_manager
             user_dict = config_manager.load_user_dict()
             info = self.current_selection_info
+            item_data = self.translation_data[info['ns']]['items'][info['idx']]
+            key, origin_name = item_data['key'], item_data['en']
+            translation = self.zh_text_input.get("1.0", "end-1c").strip()
             
-            # 添加空值检查，防止NoneType错误
-            if info and 'ns' in info and info['ns'] in self.translation_data:
-                ns_data = self.translation_data[info['ns']]
-                if ns_data and 'items' in ns_data and 'idx' in info and 0 <= info['idx'] < len(ns_data['items']):
-                    item_data = ns_data['items'][info['idx']]
-                    key, origin_name = item_data.get('key', ''), item_data.get('en', '')
-                    translation = self.zh_text_input.get("1.0", "end-1c").strip()
-                    
-                    # 检查key和origin_name是否都在词典中，且译文相同
-                    key_in_dict = key in user_dict["by_key"]
-                    origin_in_dict = origin_name in user_dict["by_origin_name"]
-                    
-                    # 如果key和origin_name都在词典中，且译文相同
-                    if key_in_dict and origin_in_dict:
-                        key_trans = user_dict["by_key"][key]
-                        origin_trans = user_dict["by_origin_name"][origin_name]
-                        if key_trans == translation and origin_trans == translation:
-                            # 已添加到词典，禁用按钮并更改文本
-                            self.add_to_dict_btn.config(state="disabled", text="已添加到词典")
-                            self.zh_text_input.config(state="normal", cursor="xterm")
-                            return
-                    
-                    # 否则，启用按钮并显示正常文本
-                    self.add_to_dict_btn.config(state="normal", text="添加到词典")
+            # 检查key和origin_name是否都在词典中，且译文相同
+            key_in_dict = key in user_dict["by_key"]
+            origin_in_dict = origin_name in user_dict["by_origin_name"]
+            
+            # 如果key和origin_name都在词典中，且译文相同
+            if key_in_dict and origin_in_dict:
+                key_trans = user_dict["by_key"][key]
+                origin_trans = user_dict["by_origin_name"][origin_name]
+                if key_trans == translation and origin_trans == translation:
+                    # 已添加到词典，禁用按钮并更改文本
+                    self.add_to_dict_btn.config(state="disabled", text="已添加到词典")
                     self.zh_text_input.config(state="normal", cursor="xterm")
-                else:
-                    self.add_to_dict_btn.config(state="disabled", text="添加到词典")
-                    self.zh_text_input.config(state="disabled", cursor="")
-            else:
-                self.add_to_dict_btn.config(state="disabled", text="添加到词典")
-                self.zh_text_input.config(state="disabled", cursor="")
+                    return
+            
+            # 否则，启用按钮并显示正常文本
+            self.add_to_dict_btn.config(state="normal", text="添加到词典")
+            self.zh_text_input.config(state="normal", cursor="xterm")
         else:
             self.add_to_dict_btn.config(state="disabled", text="添加到词典")
             self.zh_text_input.config(state="disabled", cursor="")
@@ -1196,205 +1259,126 @@ class TranslationWorkbench(ttk.Frame):
         self._save_current_edit()
         
         if self._current_mode == "workbench":
-            # 切换到翻译控制台模式
-            
-            # 1. 保存翻译工作台的选中模组状态
+            # 保存翻译工作台模式的选中状态
             if not hasattr(self, '_workbench_selection'):
                 self._workbench_selection = []
             self._workbench_selection = list(self.ns_tree.selection())
             
-            # 2. 记录当前选择的条目的key
-            # 确保属性存在
-            if not hasattr(self, '_saved_item_info'):
-                self._saved_item_info = None
-            
+            # 保存当前选中的条目信息
+            if not hasattr(self, '_workbench_item_selection'):
+                self._workbench_item_selection = None
+            # 保存当前选中的条目信息（只保存标识符，不保存数据）
             if self.current_selection_info:
-                # 获取当前选中的条目信息
-                ns = self.current_selection_info['ns']
-                idx = self.current_selection_info['idx']
-                item = self.translation_data[ns]['items'][idx]
-                # 保存key和对应的命名空间
-                self._saved_item_info = {
-                    'key': item['key'],
-                    'ns': ns
+                self._workbench_item_selection = {
+                    'ns': self.current_selection_info['ns'],
+                    'idx': self.current_selection_info['idx'],
+                    'row_id': self.current_selection_info['row_id']
                 }
             else:
-                # 没有选中条目，清空保存的信息
-                self._saved_item_info = None
+                self._workbench_item_selection = None
             
-            # 3. 清除当前选中状态
-            self.current_selection_info = None
+            # 取消当前所有已选中的条目状态
             self.trans_tree.selection_clear()
-            self._clear_editor()
+            # 清除当前选择信息，避免与翻译控制台的操作冲突
+            self.current_selection_info = None
             
-            # 4. 切换模式标志
+            # 切换到翻译控制台模式
             self._current_mode = "comprehensive"
             
-            # 5. 更新UI
+            # 隐藏工作区UI
             self.workbench_ui_container.pack_forget()
+            
+            # 先更新模组列表为多选模式
             self.ns_tree.config(selectmode="extended")
             
-            # 6. 恢复翻译控制台之前的选中状态
+            # 然后恢复翻译控制台模式的选中状态
             if hasattr(self, '_comprehensive_selection'):
                 self.ns_tree.selection_set(self._comprehensive_selection)
             else:
                 self.ns_tree.selection_clear()
             
-            # 7. 显示控制台UI
+            # 显示翻译控制台UI
             self.comprehensive_ui_container.pack(fill="both", expand=True)
             if self._comprehensive_ui is None:
+                # 创建翻译控制台UI组件
                 from gui.enhanced_comprehensive_processing import EnhancedComprehensiveProcessing
                 self._comprehensive_ui = EnhancedComprehensiveProcessing(self.comprehensive_ui_container, self)
                 self._comprehensive_ui.pack(fill="both", expand=True)
+                # 初始化时更新批次预览
+                self.after(0, lambda: self._comprehensive_ui._update_batch_preview())
             
-            # 8. 更新按钮和状态
+            # 更新按钮文本
             self.mode_switch_btn.config(text="返回翻译工作台")
-            self.status_label.config(text="翻译控制台模式 - 可多选模组进行批量操作")
             
-            # 9. 绑定控制台事件
+            # 更新状态栏
+            self.status_label.config(text="翻译控制台模式 - 可多选模组进行批量操作")
+            # 确保在翻译控制台模式下，只有翻译控制台的事件处理函数被绑定
             self.ns_tree.unbind("<<TreeviewSelect>>")
+            # 绑定翻译控制台模式的事件处理函数
             self.ns_tree.bind("<<TreeviewSelect>>", self._comprehensive_ui._on_module_selection_change)
             self.ns_tree.bind("<Button-1>", self._comprehensive_ui._on_module_click)
             self.ns_tree.bind("<ButtonPress-1>", self._comprehensive_ui._on_module_press)
             self.ns_tree.bind("<B1-Motion>", self._comprehensive_ui._on_module_drag)
             self.ns_tree.bind("<ButtonRelease-1>", self._comprehensive_ui._on_module_release)
+            # 更新批次预览（确保在选择状态恢复后调用）
+            self.after(0, lambda: self._comprehensive_ui._update_batch_preview() if hasattr(self, '_comprehensive_ui') else None)
         else:
-            # 切换回翻译工作台模式
-            
-            # 1. 保存翻译控制台的选中状态
+            # 保存翻译控制台模式的选中状态
             if not hasattr(self, '_comprehensive_selection'):
                 self._comprehensive_selection = []
             self._comprehensive_selection = list(self.ns_tree.selection())
             
-            # 2. 切换模式标志
+            # 切换回翻译工作台模式
             self._current_mode = "workbench"
             
-            # 3. 更新UI
+            # 隐藏翻译控制台UI
             self.comprehensive_ui_container.pack_forget()
+            
+            # 显示工作区UI
             self.workbench_ui_container.pack(fill="both", expand=True)
+            
+            # 1. 首先将选择模式改为单选
             self.ns_tree.config(selectmode="browse")
             
-            # 4. 解除控制台相关事件绑定
-            self.ns_tree.unbind("<Button-1>")
-            self.ns_tree.unbind("<ButtonPress-1>")
-            self.ns_tree.unbind("<B1-Motion>")
-            self.ns_tree.unbind("<ButtonRelease-1>")
+            # 2. 清除所有选中状态
+            self.ns_tree.selection_clear()
             
-            # 5. 绑定工作台事件
+            # 3. 恢复翻译工作台模式的选中状态
+            if hasattr(self, '_workbench_selection') and self._workbench_selection:
+                # 翻译工作台模式只允许选中一个模组，所以只取第一个
+                self.ns_tree.selection_set(self._workbench_selection[0])
+            
+            # 4. 确保只有一个选中项（防止任何可能的多选残留）
+            current_selection = self.ns_tree.selection()
+            if len(current_selection) > 1:
+                # 如果仍然有多个选中，只保留第一个
+                self.ns_tree.selection_clear()
+                self.ns_tree.selection_set(current_selection[0])
+            
+            # 切换回翻译工作台模式时，重新绑定事件处理函数
             self.ns_tree.unbind("<<TreeviewSelect>>")
             self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
             
-            # 6. 恢复翻译工作台的选中模组状态
-            if hasattr(self, '_workbench_selection') and self._workbench_selection:
-                # 只恢复第一个选中的模组（因为工作台模式是单选）
-                saved_ns = self._workbench_selection[0]
-                if self.ns_tree.exists(saved_ns):
-                    self.ns_tree.selection_set(saved_ns)
-            
-            # 7. 重新填充条目列表
-            self._populate_item_list()
-            
-            # 8. 更新按钮文本
+            # 更新按钮文本
             self.mode_switch_btn.config(text="切换到翻译控制台")
             
-            # 9. 初始显示默认状态
+            # 更新状态栏
             selection = self.ns_tree.selection()
             if selection:
                 self.status_label.config(text=f"已选择项目: {selection[0]}")
             else:
                 self.status_label.config(text="未选择任何项目")
             
-            # 10. 更新UI状态（默认未选中条目）
-            self._update_ui_state(interactive=True, item_selected=False)
+            # 重新填充项目列表
+            self._populate_item_list()
             
-            # 11. 最后独立执行：使用after_idle确保条目列表完全加载后恢复选中状态
-            self.after_idle(self._restore_item_selection)
-    
-    def _restore_item_selection(self):
-        """独立执行：恢复选中条目状态"""
-        # 检查是否有保存的条目信息
-        saved_item_info = getattr(self, '_saved_item_info', None)
-        
-        if saved_item_info:
-            saved_key = saved_item_info['key']
-            saved_ns = saved_item_info['ns']
+            # 更新UI状态
+            self._update_ui_state(interactive=True, item_selected=bool(selection))
             
-            # 1. 确保保存的模组存在
-            if saved_ns not in self.translation_data:
-                # 保存的模组不存在，清空记录
-                if hasattr(self, '_saved_item_info'):
-                    delattr(self, '_saved_item_info')
-                return
-            
-            # 2. 确保当前选中的模组是保存的模组
-            if self.ns_tree.selection():
-                current_ns = self.ns_tree.selection()[0]
-                if current_ns != saved_ns:
-                    # 切换到保存的模组
-                    if self.ns_tree.exists(saved_ns):
-                        self.ns_tree.selection_set(saved_ns)
-                        # 重新填充条目列表
-                        self._populate_item_list()
-            else:
-                # 没有选中模组，直接选中保存的模组
-                if self.ns_tree.exists(saved_ns):
-                    self.ns_tree.selection_set(saved_ns)
-                    # 重新填充条目列表
-                    self._populate_item_list()
-            
-            # 3. 遍历当前模组的所有条目，查找匹配key的条目
-            items = self.translation_data[saved_ns]['items']
-            found_idx = -1
-            for idx, item in enumerate(items):
-                if item['key'] == saved_key:
-                    found_idx = idx
-                    break
-            
-            if found_idx != -1:
-                # 4. 找到了匹配的条目，生成行ID
-                row_id = f"{saved_ns}___{found_idx}"
-                
-                # 5. 清空之前的选择
-                self.trans_tree.selection_clear()
-                
-                # 6. 手动选中对应条目
-                self.trans_tree.selection_add(row_id)
-                self.trans_tree.focus(row_id)
-                self.trans_tree.see(row_id)
-                
-                # 7. 手动更新current_selection_info
-                self.current_selection_info = {
-                    'ns': saved_ns,
-                    'idx': found_idx,
-                    'row_id': row_id
-                }
-                
-                # 8. 获取条目数据
-                item_data = items[found_idx]
-                en_text = item_data['en']
-                zh_text = item_data.get('zh', '')
-                
-                # 9. 直接更新编辑器内容
-                self.en_text_display.delete("1.0", tk.END)
-                self.en_text_display.insert("1.0", en_text)
-                
-                self.zh_text_input.config(state="normal")
-                self.zh_text_input.delete("1.0", tk.END)
-                self.zh_text_input.insert("1.0", zh_text)
-                self.zh_text_input.focus_set()
-                
-                # 10. 更新状态栏
-                self.status_label.config(text=f"正在编辑: {saved_ns} / {item_data['key']}")
-                
-                # 11. 更新UI状态
-                self._update_ui_state(interactive=True, item_selected=True)
-                
-                # 12. 更新术语提示
-                self._show_matching_terms(en_text)
-        
-        # 13. 无论是否成功恢复，都删除记录
-        if hasattr(self, '_saved_item_info'):
-            delattr(self, '_saved_item_info')
+            # 等待条目列表加载完成后，根据保存的信息重新选中条目
+            if hasattr(self, '_workbench_item_selection') and self._workbench_item_selection:
+                # 使用after方法确保在UI更新后执行重新选中操作
+                self.after(100, self._restore_item_selection)
     
     def _show_export_menu(self):
         """显示导出菜单"""
@@ -1453,9 +1437,7 @@ class TranslationWorkbench(ttk.Frame):
                 export_item = {
                     'key': item['key'],
                     'en': item['en'],
-                    'zh': item.get('zh', ''),
-                    'source': item.get('source', ''),
-                    'namespace': ns
+                    'zh': item.get('zh', '')
                 }
                 export_data.append(export_item)
         
@@ -1545,16 +1527,16 @@ class TranslationWorkbench(ttk.Frame):
         
         for import_item in import_data:
             key = import_item.get('key')
-            namespace = import_item.get('namespace')
             zh = import_item.get('zh', '').strip()
             
-            if not key or not namespace:
+            if not key:
                 skipped_count += 1
                 continue
             
             # 查找匹配的条目
             found = False
-            if namespace in self.translation_data:
+            # 遍历所有命名空间查找匹配的 key
+            for namespace in self.translation_data:
                 items = self.translation_data[namespace]['items']
                 for item in items:
                     if item['key'] == key:
@@ -1565,6 +1547,8 @@ class TranslationWorkbench(ttk.Frame):
                             updated_count += 1
                         found = True
                         break
+                if found:
+                    break
             
             if not found:
                 not_found_count += 1
@@ -1981,17 +1965,12 @@ class TranslationWorkbench(ttk.Frame):
         
     def _run_ai_translation_async(self):
         self._save_current_edit()
-        # 保存当前选中状态
-        saved_selection = self.current_selection_info.copy() if self.current_selection_info else None
-        # 取消选中状态
-        self.current_selection_info = None
         self._update_ui_state(interactive=False, item_selected=False)
         self.status_label.config(text="正在准备AI翻译...")
         self.log_callback("正在准备AI翻译...", "INFO")
-        # 将保存的选中状态传递给工作线程
-        threading.Thread(target=self._ai_translation_worker, args=(saved_selection,), daemon=True).start()
+        threading.Thread(target=self._ai_translation_worker, daemon=True).start()
 
-    def _ai_translation_worker(self, saved_selection):
+    def _ai_translation_worker(self):
         try:
             items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip() and item.get('en', '').strip()]
             if not items_to_translate_info:
@@ -2000,17 +1979,7 @@ class TranslationWorkbench(ttk.Frame):
                         self.after(0, lambda: self.status_label.config(text="没有需要AI翻译的空缺条目。"))
                 except RuntimeError:
                     pass
-                self.log_callback("没有需要AI翻译的空缺条目。", "INFO")
-                # 恢复UI状态
-                try:
-                    if self.winfo_exists():
-                        self.after(0, self._update_ui_state, True, bool(saved_selection))
-                        # 恢复选中状态
-                        if saved_selection:
-                            self.after(0, self._safe_select_item_and_update_ui, saved_selection['row_id'])
-                except (tk.TclError, RuntimeError):
-                    pass
-                return
+                self.log_callback("没有需要AI翻译的空缺条目。", "INFO"); return
             
             texts_to_translate = [info['en'] for info in items_to_translate_info]
             s = self.current_settings
@@ -2035,7 +2004,7 @@ class TranslationWorkbench(ttk.Frame):
             if len(translations) != len(texts_to_translate): raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
             try:
                 if self.winfo_exists():
-                    self.after(0, self._update_ui_after_ai, items_to_translate_info, translations, saved_selection)
+                    self.after(0, self._update_ui_after_ai, items_to_translate_info, translations)
             except RuntimeError:
                 pass
             
@@ -2049,10 +2018,7 @@ class TranslationWorkbench(ttk.Frame):
         finally:
             try:
                 if self.winfo_exists():
-                    self.after(0, self._update_ui_state, True, bool(saved_selection))
-                    # 恢复选中状态
-                    if saved_selection:
-                        self.after(0, self._safe_select_item_and_update_ui, saved_selection['row_id'])
+                    self.after(0, self._update_ui_state, True, bool(self.current_selection_info))
             except (tk.TclError, RuntimeError):
                 # 捕获tk.TclError和主线程不在主循环中的错误
                 pass
@@ -2062,14 +2028,15 @@ class TranslationWorkbench(ttk.Frame):
             return False
         return True
 
-    def _update_ui_after_ai(self, translated_info, translations, saved_selection):
+    def _update_ui_after_ai(self, translated_info, translations):
         """更新UI以反映AI翻译结果
         
         Args:
             translated_info: 翻译信息列表，包含每个翻译条目的命名空间和索引
             translations: AI返回的翻译结果列表
-            saved_selection: 翻译前保存的选中状态
         """
+        # 保存当前选中状态
+        saved_selection = self.current_selection_info.copy() if self.current_selection_info else None
         
         # 应用AI翻译结果
         valid_translation_count = 0
@@ -2117,25 +2084,24 @@ class TranslationWorkbench(ttk.Frame):
             
             # 检查条目是否存在
             if self.trans_tree.exists(iid):
-                # 更新当前选择信息
-                self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': iid}
-                item = self.translation_data[ns]['items'][idx]
-                
-                # 直接更新编辑器内容，避免触发_on_item_selected事件
-                self.zh_text_input.edit_modified(False)
-                self._set_editor_content(item['en'], item.get('zh', ''))
-                self.zh_text_input.edit_modified(False)
-                
-                # 更新树视图选中状态
+                # 重新选择条目
                 self.trans_tree.selection_set(iid)
                 self.trans_tree.focus(iid)
                 self.trans_tree.see(iid)
                 
+                # 更新当前选择信息
+                item = self.translation_data[ns]['items'][idx]
+                self.current_selection_info = {
+                    'ns': ns,
+                    'idx': idx,
+                    'row_id': iid
+                }
+                
+                # 更新编辑器内容
+                self._set_editor_content(item['en'], item.get('zh', ''))
+                
                 # 更新UI状态
                 self._update_ui_state(interactive=True, item_selected=True)
-                
-                # 显示匹配的术语
-                self._show_matching_terms(item['en'])
             else:
                 # 条目不存在，清除编辑器
                 self._clear_editor()

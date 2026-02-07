@@ -21,44 +21,31 @@ class Extractor:
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"((?:\\.|[^\\"])*)"', re.DOTALL)
     
-    def _unescape_unicode(self, text: str) -> str:
-        r"""
-        自定义unescape函数，只处理Unicode转义序列（\uXXXX），保留其他转义字符（如\n、\t等）
-        """
-        import re
-        
-        def replace_unicode(match):
-            """替换单个Unicode转义序列"""
-            hex_str = match.group(1)
-            try:
-                # 将十六进制字符串转换为整数，再转换为字符
-                return chr(int(hex_str, 16))
-            except ValueError:
-                # 如果转换失败，返回原始匹配字符串
-                return match.group(0)
-        
-        # 使用正则表达式匹配所有\uXXXX格式的Unicode转义序列
-        return re.sub(r'\\u([0-9a-fA-F]{4})', replace_unicode, text)
-    
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> Dict[str, str]:
-        """
-        从文本内容中提取语言数据，保持原始格式
-        """
+        """从文本内容中提取语言数据"""
         data = {}
         if file_format == 'json':
-            # 直接使用正则表达式解析，保留原始转义字符
+            # 始终使用正则表达式解析JSON文件
             for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
                 key = match.group(1)
                 value = match.group(2)
-                # 处理Unicode转义序列，但保留其他转义字符
-                value = self._unescape_unicode(value)
-                data[key] = value
+                # 处理Unicode转义序列（如\u963f），但保留\n等转义字符
+                import re
+                # 先将\n、\t等常见转义字符暂时替换为占位符
+                temp_value = value.replace('\\n', '__NEWLINE__')
+                temp_value = temp_value.replace('\\t', '__TAB__')
+                temp_value = temp_value.replace('\\r', '__CARRIAGE__')
+                # 处理Unicode转义序列
+                temp_value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), temp_value)
+                # 恢复占位符为原始转义字符
+                temp_value = temp_value.replace('__NEWLINE__', '\\n')
+                temp_value = temp_value.replace('__TAB__', '\\t')
+                temp_value = temp_value.replace('__CARRIAGE__', '\\r')
+                data[key] = temp_value
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                # 处理Unicode转义序列，但保留其他转义字符
-                value = self._unescape_unicode(value)
                 data[key] = value
         return data
     

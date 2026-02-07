@@ -175,11 +175,12 @@ class LANGConverter:
             match = re.compile('(.*)=(.*)').match(line)
             if match:
                 key, value = match.groups()
-                output[key] = value
+                output[key] = value.replace("%n", r"\n")
         return output
 
     def convert_json_to_lang(self, data: Dict) -> str:
         output = ""
         for key, value in data.items():
+            value = str(value).replace(r"\n", "%n")
             output += f"{key}={value}\n"
         return output

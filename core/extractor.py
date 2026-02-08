@@ -80,6 +80,10 @@ class Extractor:
         try:
             with zf.open(file_info) as f:
                 content = f.read().decode('utf-8-sig')
+        except UnicodeDecodeError as e:
+            # 处理非UTF-8编码的文件，跳过该文件
+            logging.warning(f"文件编码不是UTF-8，跳过处理: {log_path} - {e}")
+            return None, None, None, None, None, None
         except Exception as e:
             logging.warning(f"读取zip内文件失败: {log_path} - {e}")
             return None, None, None, None, None, None
@@ -135,7 +139,7 @@ class Extractor:
                     # First pass: collect all language files for this jar
                     language_files = []
                     for file_info in zf.infolist():
-                        if file_info.is_dir() or 'lang' not in file_info.filename:
+                        if file_info.is_dir() or 'lang' not in file_info.filename or not file_info.filename.startswith('assets/'):
                             continue
                         
                         result_tuple = self._process_zip_file(zf, file_info, master_english, internal_chinese, jar_file.name)
@@ -226,7 +230,7 @@ class Extractor:
             try:
                 with zipfile.ZipFile(zip_path, 'r') as zf:
                     for file_info in zf.infolist():
-                        if file_info.is_dir() or 'lang/zh_cn' not in file_info.filename.lower():
+                        if file_info.is_dir() or 'lang/zh_cn' not in file_info.filename.lower() or not file_info.filename.startswith('assets/'):
                             continue
                         
                         result_tuple = self._process_zip_file(zf, file_info, {}, current_zip_chinese_dict, zip_path.name)

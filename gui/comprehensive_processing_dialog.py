@@ -240,8 +240,17 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             # 初始化翻译器
             translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
             
-            # 分批次处理
-            batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
+            # 原文去重处理
+            unique_texts = []
+            text_to_indices = {}
+            for idx, text in enumerate(texts_to_translate):
+                if text not in text_to_indices:
+                    text_to_indices[text] = []
+                    unique_texts.append(text)
+                text_to_indices[text].append(idx)
+            
+            # 分批次处理唯一原文
+            batches = [unique_texts[i:i + s['ai_batch_size']] for i in range(0, len(unique_texts), s['ai_batch_size'])]
             total_batches = len(batches)
             translations_nested = [None] * total_batches
             
@@ -268,10 +277,16 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
                 return
             
             # 合并翻译结果
-            translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
+            unique_translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
             
-            if len(translations) != len(texts_to_translate):
-                raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
+            if len(unique_translations) != len(unique_texts):
+                raise ValueError(f"AI返回数量不匹配! 预期:{len(unique_texts)}, 实际:{len(unique_translations)}")
+            
+            # 构建唯一原文到翻译的映射
+            text_to_translation = {text: trans for text, trans in zip(unique_texts, unique_translations)}
+            
+            # 将翻译结果映射回原始顺序
+            translations = [text_to_translation[text] for text in texts_to_translate]
             
             # 更新翻译结果
             self.after(0, self._update_translations, items_to_process, translations)

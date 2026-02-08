@@ -99,6 +99,7 @@ class TranslationWorkbench(ttk.Frame):
 
     def get_state(self):
         return {
+            "project_name": self.project_name,
             "workbench_data": self.undo_stack[-1] if self.undo_stack else self.translation_data,
             "namespace_formats": self.namespace_formats,
             "raw_english_files": self.raw_english_files,
@@ -175,10 +176,14 @@ class TranslationWorkbench(ttk.Frame):
 
         table_container = ttk.Frame(right_pane, padding=5)
         self.trans_tree = ttk.Treeview(table_container, columns=("key", "english", "chinese", "source"), show="headings")
-        self.trans_tree.heading("key", text="原文键"); self.trans_tree.column("key", width=200, stretch=False)
+        self.trans_tree.heading("key", text="原文键", command=lambda: self._sort_items_by_default_order())
+        self.trans_tree.column("key", width=200, stretch=False)
         self.trans_tree.heading("english", text="原文"); self.trans_tree.column("english", width=250, stretch=True)
         self.trans_tree.heading("chinese", text="译文"); self.trans_tree.column("chinese", width=250, stretch=True)
-        self.trans_tree.heading("source", text="来源"); self.trans_tree.column("source", width=120, stretch=False)
+        self.trans_tree.heading("source", text="来源", command=lambda: self._sort_items_by_source())
+        self.trans_tree.column("source", width=120, stretch=False)
+        self.trans_items_sort_reverse = False
+        self.source_sort_reverse = False
         scrollbar = ttk.Scrollbar(table_container, orient="vertical", command=self.trans_tree.yview)
         self.trans_tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y"); self.trans_tree.pack(fill="both", expand=True)
@@ -997,6 +1002,93 @@ class TranslationWorkbench(ttk.Frame):
                                    values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
                                    tags=(source,))
 
+    def _sort_items_by_default_order(self):
+        """按照默认顺序排序条目，再次点击则反序"""
+        selection = self.ns_tree.selection()
+        if not selection or not self.ns_tree.exists(selection[0]):
+            return
+        
+        ns = selection[0]
+        items = self.translation_data[ns].get('items', [])
+        
+        # 切换排序顺序
+        self.trans_items_sort_reverse = not self.trans_items_sort_reverse
+        
+        # 清空当前树视图
+        self.trans_tree.delete(*self.trans_tree.get_children())
+        
+        # 按照默认顺序（索引顺序）重新插入条目
+        start_idx = len(items) - 1 if self.trans_items_sort_reverse else 0
+        end_idx = -1 if self.trans_items_sort_reverse else len(items)
+        step = -1 if self.trans_items_sort_reverse else 1
+        
+        for idx in range(start_idx, end_idx, step):
+            item_data = items[idx]
+            en_text = item_data.get('en', '').strip()
+            zh_text = item_data.get('zh', '').strip()
+            source = item_data.get('source', '')
+            
+            # 如果没有source标签或者source标签为默认值，根据内容自动确定
+            if not source or source == '待翻译' and not en_text:
+                if not en_text:
+                    if zh_text:
+                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
+                    else:
+                        source = '空'  # 原文为空且没有译文，标记为空
+                elif not zh_text:
+                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
+                else:
+                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
+            
+            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
+                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                   tags=(source,))
+    
+    def _sort_items_by_source(self):
+        """按照来源列排序条目，再次点击则反序"""
+        selection = self.ns_tree.selection()
+        if not selection or not self.ns_tree.exists(selection[0]):
+            return
+        
+        ns = selection[0]
+        items = self.translation_data[ns].get('items', [])
+        
+        # 切换排序顺序
+        self.source_sort_reverse = not self.source_sort_reverse
+        
+        # 准备排序数据
+        sortable_items = []
+        for idx, item_data in enumerate(items):
+            en_text = item_data.get('en', '').strip()
+            zh_text = item_data.get('zh', '').strip()
+            source = item_data.get('source', '')
+            
+            # 如果没有source标签或者source标签为默认值，根据内容自动确定
+            if not source or source == '待翻译' and not en_text:
+                if not en_text:
+                    if zh_text:
+                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
+                    else:
+                        source = '空'  # 原文为空且没有译文，标记为空
+                elif not zh_text:
+                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
+                else:
+                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
+            
+            sortable_items.append((source, idx, item_data))
+        
+        # 按照来源排序
+        sortable_items.sort(key=lambda x: x[0], reverse=self.source_sort_reverse)
+        
+        # 清空当前树视图
+        self.trans_tree.delete(*self.trans_tree.get_children())
+        
+        # 重新插入排序后的条目
+        for source, idx, item_data in sortable_items:
+            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
+                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                   tags=(source,))
+    
     def _on_namespace_selected(self, event=None):
         self._save_current_edit()
         
@@ -1009,6 +1101,9 @@ class TranslationWorkbench(ttk.Frame):
         if not selection or not self.ns_tree.exists(selection[0]): return
         
         self.current_selection_info = None
+        # 重置排序状态
+        self.trans_items_sort_reverse = False
+        self.source_sort_reverse = False
         self._populate_item_list()
         self._clear_editor()
         self._update_ui_state(interactive=True, item_selected=False)
@@ -2071,7 +2166,18 @@ class TranslationWorkbench(ttk.Frame):
             texts_to_translate = [info['en'] for info in items_to_translate_info]
             s = self.current_settings
             translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
-            batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
+            
+            # 原文去重处理
+            unique_texts = []
+            text_to_indices = {}
+            for idx, text in enumerate(texts_to_translate):
+                if text not in text_to_indices:
+                    text_to_indices[text] = []
+                    unique_texts.append(text)
+                text_to_indices[text].append(idx)
+            
+            # 分批次处理唯一原文
+            batches = [unique_texts[i:i + s['ai_batch_size']] for i in range(0, len(unique_texts), s['ai_batch_size'])]
             total_batches, translations_nested = len(batches), [None] * len(batches)
             
             with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
@@ -2087,8 +2193,17 @@ class TranslationWorkbench(ttk.Frame):
                         pass
                     self.log_callback(msg, "INFO")
             
-            translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
-            if len(translations) != len(texts_to_translate): raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
+            # 合并翻译结果
+            unique_translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
+            
+            if len(unique_translations) != len(unique_texts): raise ValueError(f"AI返回数量不匹配! 预期:{len(unique_texts)}, 实际:{len(unique_translations)}")
+            
+            # 构建唯一原文到翻译的映射
+            text_to_translation = {text: trans for text, trans in zip(unique_texts, unique_translations)}
+            
+            # 将翻译结果映射回原始顺序
+            translations = [text_to_translation[text] for text in texts_to_translate]
+            
             try:
                 if self.winfo_exists():
                     self.after(0, self._update_ui_after_ai, items_to_translate_info, translations)

@@ -166,7 +166,8 @@ class ProjectTab:
         self.workbench_instance = None
         self.main_window.update_menu_state()
         self.project_name = "新项目"
-        self.main_window.update_tab_title(self.tab_id, "新项目")
+        if self.tab_id:
+            self.main_window.update_tab_title(self.tab_id, "新项目")
         
         container = ttk.Frame(self.content_frame)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -266,7 +267,7 @@ class ProjectTab:
         ttk.Button(btn_frame, text="返回", command=self._show_welcome_view, bootstyle="secondary").pack(side="left", padx=10)
         ttk.Button(btn_frame, text="开始处理", command=start_command, bootstyle="success").pack(side="left")
 
-    def _show_workbench_view(self, workbench_data, namespace_formats, raw_english_files, current_settings, project_path, finish_button_text="完成"):
+    def _show_workbench_view(self, workbench_data, namespace_formats, raw_english_files, current_settings, project_path, finish_button_text="完成", save_session_after=False):
         self._clear_content_frame()
         if self.log_pane_visible:
             self._toggle_log_pane()
@@ -285,9 +286,12 @@ class ProjectTab:
             main_window_instance=self.main_window
         )
         self.workbench_instance.pack(fill="both", expand=True)
+        self.content_frame.update_idletasks()
+        self.workbench_instance.update_idletasks()
         self.main_window.update_menu_state()
-        # 标签页恢复过程中不保存会话，避免清除已加载的缓存
-        # 只有在用户实际操作后才保存会话
+        # 仅在正常的翻译决策流程中保存会话，不在标签页恢复过程中保存
+        if save_session_after:
+            self.main_window._save_current_session()
 
     def _on_workbench_finish(self, final_translations, final_workbench_data):
         self.main_window.update_menu_state()
@@ -860,7 +864,8 @@ class ProjectTab:
             self.orchestrator.raw_english_files, 
             config, 
             None, 
-            "完成并生成资源包"
+            "完成并生成资源包",
+            save_session_after=True
         )
         
         # 启动翻译流程
@@ -895,7 +900,7 @@ class ProjectTab:
             )
 
             def launch_loaded_workbench(data):
-                self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, settings, path, "完成并生成资源包")
+                self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, settings, path, "完成并生成资源包", save_session_after=True)
             self.orchestrator._launch_workbench = launch_loaded_workbench
             
             threading.Thread(target=self.orchestrator.run_workflow, daemon=True).start()
@@ -1021,7 +1026,7 @@ class MainWindow:
 
     def _save_current_session(self):
         active_tabs = list(self.project_tabs.values())
-        if any(tab.workbench_instance for tab in active_tabs):
+        if active_tabs:
             session_manager.save_session(active_tabs)
         else:
             session_manager.clear_session()
@@ -1053,9 +1058,6 @@ class MainWindow:
             for tab_state in session_data:
                 new_tab = self._add_new_tab()
                 new_tab.restore_from_state(tab_state)
-            
-            # 会话恢复完成后再保存会话
-            self._save_current_session()
         else:
              self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
 
@@ -1391,6 +1393,11 @@ class MainWindow:
         self.close_tab_map[close_tab_id] = tab_id
 
         self.notebook.select(tab_id)
+        # 确保标签页内容正确显示
+        self.notebook.update_idletasks()
+        project_tab.frame.update_idletasks()
+        if project_tab.content_frame:
+            project_tab.content_frame.update_idletasks()
         self.update_menu_state()
         return project_tab
     
@@ -1536,7 +1543,7 @@ class MainWindow:
         self.dragged_tab_index = None
         self.dragged_tab_id = None
         self.dragged_tab_pos = None
-        self._save_current_session()
+        # 移除标签页切换时的缓存保存
     
     def _reorder_tabs(self, target_index):
         """重新排列标签，使用Tcl命令直接操作标签位置，避免不必要的刷新"""

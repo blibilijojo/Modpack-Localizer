@@ -52,8 +52,30 @@ class Translator:
             return False
         if re.search('[一-鿿]', text):
             return True
-        if re.search(r'[a-zA-Z]', text):
+        
+        # 检查是否包含普通英文字母（非占位符部分）
+        # 占位符格式：%[数字]$?[a-zA-Z]+ 或 ${...}
+        # 保留所有占位符格式，只排除普通英文字母
+        
+        # 先移除所有占位符，然后检查是否还有普通英文字母
+        cleaned_text = text
+        
+        # 移除 %s, %1$s, %d, %tH 等格式的占位符
+        cleaned_text = re.sub(r'%\d*\$?[a-zA-Z]+', '', cleaned_text)
+        
+        # 移除 ${name} 格式的占位符
+        cleaned_text = re.sub(r'\$\{[^}]+\}', '', cleaned_text)
+        
+        # 移除 $1, $2 等格式的占位符
+        cleaned_text = re.sub(r'\$\d+', '', cleaned_text)
+        
+        # 移除单独的 % 符号
+        cleaned_text = cleaned_text.replace('%', '')
+        
+        # 检查是否还有普通英文字母
+        if re.search(r'[a-zA-Z]', cleaned_text):
             return False
+        
         return True
     
     def _get_ordered_keys(self, content: str, file_format: str) -> List[str]:
@@ -128,25 +150,43 @@ class Translator:
                 elif use_origin_name_lookup and english_value in user_dict_by_origin:
                     translation = user_dict_by_origin[english_value]
                     source = "个人词典[原文]"
-                # 3. 非英文内容直接保留
-                elif not re.search(r'[a-zA-Z]', english_value):
-                    translation = english_value
-                    source = "原文复制"
-                # 4. 第三方汉化包
+                # 3. 第三方汉化包
                 elif key in pack_chinese_dict:
                     translation = pack_chinese_dict[key]
                     source = "第三方汉化包"
-                # 5. 社区词典[Key]
+                # 4. 社区词典[Key]
                 elif key in community_dict_by_key:
                     translation = community_dict_by_key[key]
                     source = "社区词典[Key]"
-                # 6. 社区词典[原文]
+                # 5. 社区词典[原文]
                 elif use_origin_name_lookup and english_value in community_dict_by_origin:
                     candidates = community_dict_by_origin[english_value]
                     best_translation = self._resolve_origin_name_conflict(candidates)
                     if best_translation:
                         translation = best_translation
                         source = "社区词典[原文]"
+                # 6. 非英文内容直接保留（包括包含各种占位符的内容）
+                else:
+                    # 使用与_is_valid_translation相同的逻辑检查是否为非英文内容
+                    # 先移除所有占位符，然后检查是否还有普通英文字母
+                    cleaned_text = english_value
+                    
+                    # 移除 %s, %1$s, %d, %tH 等格式的占位符
+                    cleaned_text = re.sub(r'%\d*\$?[a-zA-Z]+', '', cleaned_text)
+                    
+                    # 移除 ${name} 格式的占位符
+                    cleaned_text = re.sub(r'\$\{[^}]+\}', '', cleaned_text)
+                    
+                    # 移除 $1, $2 等格式的占位符
+                    cleaned_text = re.sub(r'\$\d+', '', cleaned_text)
+                    
+                    # 移除单独的 % 符号
+                    cleaned_text = cleaned_text.replace('%', '')
+                    
+                    # 检查是否还有普通英文字母
+                    if not re.search(r'[a-zA-Z]', cleaned_text):
+                        translation = english_value
+                        source = "原文复制"
             
             # 验证翻译有效性
             if not self._is_valid_translation(translation):

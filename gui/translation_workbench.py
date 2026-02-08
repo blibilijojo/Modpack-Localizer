@@ -43,6 +43,8 @@ class TranslationWorkbench(ttk.Frame):
         
         # 术语匹配结果缓存
         self._term_match_cache = {}
+        self._term_cache_max_size = 1000  # 缓存最大条目数
+        self._term_cache_cleanup_threshold = 800  # 缓存清理阈值
         
         # 术语搜索线程控制
         self._current_term_thread = None
@@ -232,7 +234,12 @@ class TranslationWorkbench(ttk.Frame):
         self.zh_text_input = scrolledtext.ScrolledText(editor_frame, height=5, wrap=tk.WORD, state="disabled")
         # 确保译文栏水平填充整个可用空间
         self.zh_text_input.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
-        self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
+        
+        # 延迟保存机制
+        self._text_modified_timer = None
+        self._text_modified_delay = 500  # 延迟500ms执行保存
+        
+        self.zh_text_input.bind("<KeyRelease>", self._on_text_modified_delayed)
         self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
         self.zh_text_input.bind("<Return>", self._save_and_jump_sequential)
         self.zh_text_input.bind("<Control-Return>", self._save_and_jump_pending)
@@ -243,14 +250,24 @@ class TranslationWorkbench(ttk.Frame):
         self.zh_text_input.bind("<KeyRelease>", self._update_term_suggestions, add="+")
         editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="e", pady=(5,0))
         
+        # 优化按钮布局，按操作频率和逻辑顺序排列
+        btn_padding = 5  # 按钮间距
+        
+
+        
         self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="添加到词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
-        self.add_to_dict_btn.pack(side="left", padx=(0, 10))
+        self.add_to_dict_btn.pack(side="left", padx=(0, btn_padding))
+        
+        # 添加分隔符
+        separator = ttk.Separator(editor_btn_frame, orient="vertical")
+        separator.pack(side="left", fill="y", padx=(btn_padding, btn_padding))
         
         self.undo_btn = ttk.Button(editor_btn_frame, text="撤销", command=self.undo, bootstyle="info-outline")
-        self.undo_btn.pack(side="left", padx=(0, 5))
+        self.undo_btn.pack(side="left", padx=(0, btn_padding))
         ToolTip(self.undo_btn, "撤销上一步操作 (Ctrl+Z)")
+        
         self.redo_btn = ttk.Button(editor_btn_frame, text="重做", command=self.redo, bootstyle="info-outline")
-        self.redo_btn.pack(side="left", padx=(0, 10))
+        self.redo_btn.pack(side="left", padx=(0, btn_padding))
         ToolTip(self.redo_btn, "重做已撤销的操作 (Ctrl+Y)")
 
         right_pane.add(editor_frame, weight=1)
@@ -262,8 +279,17 @@ class TranslationWorkbench(ttk.Frame):
 
         btn_frame = ttk.Frame(self, padding=10)
         btn_frame.pack(fill="x")
-        self.status_label = ttk.Label(btn_frame, text="请选择一个项目以开始")
+        
+        # 左侧状态显示区域
+        status_container = ttk.Frame(btn_frame)
+        status_container.pack(side="left", fill="x", expand=True)
+        
+        # 主状态标签
+        self.status_label = ttk.Label(status_container, text="请选择一个项目以开始")
         self.status_label.pack(side="left", fill="x", expand=True)
+        
+        # 翻译状态显示标签
+
 
         # 功能切换按钮 - 放到最右边
         self.mode_switch_btn = ttk.Button(btn_frame, text="进入翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
@@ -1021,6 +1047,15 @@ class TranslationWorkbench(ttk.Frame):
         # 显示匹配的术语
         self._show_matching_terms(item_data['en'])
 
+    def _on_text_modified_delayed(self, event=None):
+        """延迟处理文本修改事件，减少频繁保存操作"""
+        # 取消之前的定时器
+        if self._text_modified_timer:
+            self.after_cancel(self._text_modified_timer)
+        
+        # 设置新的定时器
+        self._text_modified_timer = self.after(self._text_modified_delay, self._save_current_edit)
+    
     def _on_text_modified(self, event=None):
         if self.zh_text_input.edit_modified():
             self._save_current_edit()
@@ -1624,6 +1659,8 @@ class TranslationWorkbench(ttk.Frame):
                 # 快速检查：如果文本为空，直接返回空列表
                 if not en_text:
                     display_terms = []
+                    # 清理缓存
+                    self._cleanup_term_cache()
                     self._term_match_cache[cache_key] = display_terms
                     # 检查是否为最新请求，只有最新请求才更新UI
                     if current_search_id == self._current_search_id:
@@ -1638,6 +1675,23 @@ class TranslationWorkbench(ttk.Frame):
                 
                 # 提取文本中的所有单词，用于快速过滤
                 text_words = set(re.findall(r'\b[a-zA-Z0-9_]+\b', en_text.lower()))
+                
+                # 快速检查：如果单词集合为空，直接返回空列表
+                if not text_words:
+                    display_terms = []
+                    # 清理缓存
+                    self._cleanup_term_cache()
+                    self._term_match_cache[cache_key] = display_terms
+                    # 检查是否为最新请求，只有最新请求才更新UI
+                    if current_search_id == self._current_search_id:
+                        try:
+                            # 检查主窗口是否仍然存在
+                            if self.winfo_exists():
+                                self.after(0, lambda: self._update_term_display(display_terms))
+                        except RuntimeError:
+                            # 捕获主线程不在主循环中的错误
+                            pass
+                    return
                 
                 # 1. 处理个人词典中的术语
                 user_dict = config_manager.load_user_dict()
@@ -1794,6 +1848,8 @@ class TranslationWorkbench(ttk.Frame):
                 # 按照术语在原文中首次出现的位置排序
                 display_terms = sorted(term_with_positions, key=lambda x: x['position'])
                 
+                # 清理缓存
+                self._cleanup_term_cache()
                 # 缓存结果
                 self._term_match_cache[cache_key] = display_terms
                 
@@ -1891,6 +1947,29 @@ class TranslationWorkbench(ttk.Frame):
         self._term_match_cache.clear()
         logging.debug("术语缓存已清除")
     
+
+    
+    def _cleanup_term_cache(self):
+        """
+        清理术语缓存，保持缓存大小在合理范围内
+        """
+        if len(self._term_match_cache) > self._term_cache_cleanup_threshold:
+            # 获取缓存项并按访问顺序排序（使用keys()的顺序作为近似）
+            cache_items = list(self._term_match_cache.items())
+            # 保留最新的80%，删除最旧的20%
+            items_to_keep = int(len(cache_items) * 0.8)
+            if items_to_keep < self._term_cache_cleanup_threshold:
+                items_to_keep = self._term_cache_cleanup_threshold
+            
+            # 保留最新的条目（假设字典顺序是插入顺序的近似）
+            new_cache = {}
+            for key, value in cache_items[-items_to_keep:]:
+                new_cache[key] = value
+            
+            # 更新缓存
+            self._term_match_cache = new_cache
+            logging.debug(f"术语缓存已清理，当前大小: {len(self._term_match_cache)}")
+    
     def reload_term_database(self):
         """
         重新加载术语库并清除缓存
@@ -1939,6 +2018,11 @@ class TranslationWorkbench(ttk.Frame):
         
         # 阻止默认的复制行为
         return "break"
+    
+
+    
+
+
 
     def _add_to_user_dictionary(self):
         if not self.current_selection_info: return

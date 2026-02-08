@@ -119,24 +119,107 @@ class AITranslator:
                 self.key_manager.penalize_key(api_key, cooldown_duration)
                 logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试。")
     def _parse_response(self, response_text: str | None, original_batch: list[str]) -> list[str] | None:
-        if not response_text: 
+        if not response_text:
             logging.error("AI未返回任何文本内容")
             return None
         expected_length = len(original_batch)
         try:
-            start_index = response_text.find('{')
-            end_index = response_text.rfind('}')
-            if start_index == -1 or end_index == -1 or start_index >= end_index:
-                logging.error(f"AI响应中找不到有效的JSON对象。响应: {response_text}")
-                return None
-            json_str = response_text[start_index : end_index + 1]
+            # 预处理响应文本，移除代码块标记
+            processed_text = response_text.strip()
+            
+            # 处理 ```json 格式的代码块
+            if processed_text.startswith('```json'):
+                processed_text = processed_text[7:]
+            if processed_text.startswith('```'):
+                processed_text = processed_text[3:]
+            if processed_text.endswith('```'):
+                processed_text = processed_text[:-3]
+            
+            # 智能检测错误信息
+            # 只有当响应中包含错误信息关键词且JSON数据中也包含这些关键词时，才视为错误
+            is_error_response = False
+            error_keywords = ["抱歉", "错误", "无法", "failed", "error", "cannot"]
+            
+            # 检查是否包含错误信息关键词
+            contains_error_keyword = any(keyword in processed_text for keyword in error_keywords)
+            
+            # 如果包含错误关键词，尝试解析JSON并检查是否真的是错误信息
+            if contains_error_keyword:
+                try:
+                    # 尝试直接解析整个处理后的文本
+                    data = json.loads(processed_text)
+                    if isinstance(data, dict):
+                        # 检查JSON数据中是否包含错误信息
+                        for key, value in data.items():
+                            if isinstance(value, str) and any(keyword in value for keyword in error_keywords):
+                                # 检查是否所有值都是错误信息
+                                all_error_values = True
+                                for v in data.values():
+                                    if isinstance(v, str) and not any(keyword in v for keyword in error_keywords):
+                                        all_error_values = False
+                                        break
+                                # 只有当所有值都是错误信息时，才视为错误响应
+                                is_error_response = all_error_values
+                except Exception:
+                    # 如果无法解析为JSON，检查是否是纯错误信息
+                    # 只有当文本中只包含错误信息而没有有效的翻译内容时，才视为错误响应
+                    # 这里使用更严格的判断：检查是否包含有效的JSON结构
+                    if '{' not in processed_text or '}' not in processed_text:
+                        is_error_response = True
+            
+            if is_error_response:
+                logging.warning(f"AI返回了错误信息而不是翻译结果: {processed_text}")
+                # 对于错误信息，返回与原始批次长度相同的空字符串列表，避免无限重试
+                return ["" for _ in original_batch]
+            
+            # 智能提取JSON部分，处理包含额外文本的情况
+            start_index = processed_text.find('{')
+            if start_index == -1:
+                logging.error(f"AI响应中找不到有效的JSON对象。响应: {processed_text}")
+                # 尝试直接返回原文作为回退方案
+                return original_batch
+            
+            # 找到第一个{后的所有内容
+            json_candidate = processed_text[start_index:]
+            
+            # 计算括号匹配，找到完整的JSON对象
+            brace_count = 0
+            end_index = -1
+            for i, char in enumerate(json_candidate):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_index = start_index + i + 1
+                        break
+            
+            if end_index == -1:
+                logging.error(f"AI响应中找不到完整的JSON对象。响应: {processed_text}")
+                # 尝试直接返回原文作为回退方案
+                return original_batch
+            
+            json_str = processed_text[start_index:end_index]
             data = json.loads(json_str)
+            
             if not isinstance(data, dict):
                 logging.warning(f"AI响应解析出的内容不是一个字典对象。内容: {data}")
-                return None
+                # 尝试直接返回原文作为回退方案
+                return original_batch
+            
             if len(data) != expected_length:
-                logging.warning(f"AI响应条目数量不匹配！预期: {expected_length}, 实际: {len(data)}。将触发重试。")
-                return None
+                logging.warning(f"AI响应条目数量不匹配！预期: {expected_length}, 实际: {len(data)}。将使用原文回填。")
+                # 尝试返回尽可能多的翻译结果，其余使用原文
+                reconstructed_list = list(original_batch)
+                for key, value in data.items():
+                    try:
+                        index = int(key)
+                        if 0 <= index < expected_length and isinstance(value, str):
+                            reconstructed_list[index] = value.replace('\n', '\\n')
+                    except (ValueError, TypeError):
+                        pass
+                return reconstructed_list
+            
             reconstructed_list = [None] * expected_length
             for key, value in data.items():
                 try:
@@ -147,16 +230,23 @@ class AITranslator:
                             reconstructed_list[index] = value.replace('\n', '\\n')
                         else:
                              logging.warning(f"AI为键'{key}'返回了非字符串类型的值，将使用原文回填。")
-                             return None
+                             # 对于非字符串值，使用原文
+                             reconstructed_list[index] = original_batch[index]
                 except (ValueError, TypeError):
                     logging.warning(f"AI返回了无效的键'{key}'，已忽略。")
-            if any(item is None for item in reconstructed_list):
-                logging.warning(f"AI响应解析后存在未填充项（可能由无效或重复的键导致）。将触发重试。")
-                return None
+            
+            # 检查是否有未填充的项
+            for i in range(expected_length):
+                if reconstructed_list[i] is None:
+                    # 使用原文作为回退
+                    reconstructed_list[i] = original_batch[i]
+            
             return reconstructed_list
         except json.JSONDecodeError as e:
-            logging.error(f"解析AI的JSON响应失败: {e}. 尝试解析的字符串是: '{json_str}'")
-            return None
+            logging.error(f"解析AI的JSON响应失败: {e}. 尝试解析的字符串是: '{processed_text}'")
+            # 解析失败时返回原文
+            return original_batch
         except Exception as e:
             logging.error(f"解析AI响应时发生未知错误: {e}")
-            return None
+            # 发生未知错误时返回原文
+            return original_batch

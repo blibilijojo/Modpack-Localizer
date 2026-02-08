@@ -9,6 +9,7 @@ from .models import (
 from .extractor import Extractor
 from .translator import Translator
 from .builder import Builder
+from .dictionary_manager import DictionaryManager
 
 class Workflow:
     """工作流协调器"""
@@ -17,36 +18,11 @@ class Workflow:
         self.extractor = Extractor()
         self.translator = Translator()
         self.builder = Builder()
+        self.dictionary_manager = DictionaryManager()
     
     def _load_dictionaries(self, community_dict_path: str) -> tuple[Dict, Dict, Dict]:
         """加载各种词典"""
-        from utils import config_manager
-        import sqlite3
-        from collections import defaultdict
-        
-        # 加载用户词典
-        user_dict = config_manager.load_user_dict()
-        user_dict_by_key = user_dict.get('by_key', {})
-        user_dict_by_origin = user_dict.get('by_origin_name', {})
-        
-        # 加载社区词典
-        community_dict_by_key = {}
-        community_dict_by_origin = defaultdict(list)
-        
-        if community_dict_path and Path(community_dict_path).is_file():
-            try:
-                with sqlite3.connect(f"file:{community_dict_path}?mode=ro", uri=True) as con:
-                    cur = con.cursor()
-                    cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
-                    for key, origin_name, trans_name, version in cur.fetchall():
-                        if key:
-                            community_dict_by_key[key] = trans_name
-                        if origin_name and trans_name:
-                            community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
-            except sqlite3.Error as e:
-                logging.error(f"读取社区词典数据库时发生错误: {e}")
-        
-        return user_dict, community_dict_by_key, community_dict_by_origin
+        return self.dictionary_manager.get_all_dictionaries(community_dict_path)
     
     def run_extraction(
         self, 

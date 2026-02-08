@@ -22,7 +22,7 @@ nosetests.xml
 pytest.xml
 *.egg
 .DS_Store
-
+.session_cache
 # IDE/Editor specific
 .vscode/
 .idea/

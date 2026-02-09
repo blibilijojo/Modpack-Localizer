@@ -2,9 +2,65 @@ import json
 import sqlite3
 from pathlib import Path
 import logging
+import base64
+from cryptography.fernet import Fernet, InvalidToken
+import os
 
 CONFIG_FILE_PATH = Path("config.json")
 USER_DICT_PATH = Path("Dict-User.db")
+KEY_FILE_PATH = Path(".encryption_key")
+
+# 加密密钥管理函数
+def _get_encryption_key():
+    """获取或生成加密密钥"""
+    if KEY_FILE_PATH.exists():
+        try:
+            with open(KEY_FILE_PATH, 'rb') as f:
+                key = f.read()
+            return key
+        except Exception as e:
+            logging.warning(f"读取加密密钥失败: {e}，生成新密钥")
+    
+    # 生成新密钥
+    key = Fernet.generate_key()
+    try:
+        with open(KEY_FILE_PATH, 'wb') as f:
+            f.write(key)
+        # 设置文件权限（仅当前用户可访问）
+        if os.name == 'nt':
+            import ctypes
+            ctypes.windll.kernel32.SetFileAttributesW(str(KEY_FILE_PATH), 0x02)  # 隐藏文件
+    except Exception as e:
+        logging.error(f"保存加密密钥失败: {e}")
+    
+    return key
+
+def _encrypt_token(token):
+    """加密token"""
+    if not token:
+        return ""
+    try:
+        key = _get_encryption_key()
+        fernet = Fernet(key)
+        encrypted = fernet.encrypt(token.encode('utf-8'))
+        return base64.b64encode(encrypted).decode('utf-8')
+    except Exception as e:
+        logging.error(f"加密token失败: {e}")
+        return token
+
+def _decrypt_token(encrypted_token):
+    """解密token"""
+    if not encrypted_token:
+        return ""
+    try:
+        key = _get_encryption_key()
+        fernet = Fernet(key)
+        encrypted = base64.b64decode(encrypted_token.encode('utf-8'))
+        decrypted = fernet.decrypt(encrypted)
+        return decrypted.decode('utf-8')
+    except (InvalidToken, Exception) as e:
+        logging.error(f"解密token失败: {e}")
+        return encrypted_token
 
 # 数据库初始化函数
 def _init_user_dict_db():
@@ -97,6 +153,10 @@ DEFAULT_CONFIG = {
         "https://cdn.gh-proxy.org/",
         "https://gh-proxy.org/"
     ],
+    # GitHub汉化仓库上传设置
+    "github_repo": "",
+    "github_token": "",
+    "github_sync_with_upstream": True,
     
     # AI翻译批次处理默认值
     "ai_batch_count": 10,       # 批次数默认值
@@ -144,6 +204,11 @@ def load_config() -> dict:
             logging.warning("检测到旧版AI提示词，已自动更新为最稳健的键值对模式。")
             config["prompt"] = DEFAULT_PROMPT.strip()
             config_updated = True
+        
+        # 解密GitHub token
+        if "github_token" in config:
+            config["github_token"] = _decrypt_token(config["github_token"])
+        
         if config_updated:
             logging.info("配置文件已自动更新和补充，正在保存...")
             save_config(config)
@@ -155,8 +220,15 @@ def load_config() -> dict:
 
 def save_config(config_data: dict):
     try:
+        # 创建配置副本以避免修改原始数据
+        config_copy = config_data.copy()
+        
+        # 加密GitHub token
+        if "github_token" in config_copy:
+            config_copy["github_token"] = _encrypt_token(config_copy["github_token"])
+        
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, indent=4, ensure_ascii=False)
+            json.dump(config_copy, f, indent=4, ensure_ascii=False)
         logging.debug("配置已自动保存")
     except Exception as e:
         logging.error(f"保存配置文件时出错: {e}")

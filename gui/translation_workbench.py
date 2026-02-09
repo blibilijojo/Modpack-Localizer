@@ -100,7 +100,7 @@ class TranslationWorkbench(ttk.Frame):
     def get_state(self):
         return {
             "project_name": self.project_name,
-            "workbench_data": self.undo_stack[-1] if self.undo_stack else self.translation_data,
+            "workbench_data": self.translation_data,
             "namespace_formats": self.namespace_formats,
             "raw_english_files": self.raw_english_files,
             "current_project_path": self.current_project_path,
@@ -253,27 +253,35 @@ class TranslationWorkbench(ttk.Frame):
         self.zh_text_input.bind("<Control-C>", self._on_copy)
         # 添加术语提示实时更新
         self.zh_text_input.bind("<KeyRelease>", self._update_term_suggestions, add="+")
-        editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="e", pady=(5,0))
+        editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="ew", pady=(5,0))
+        editor_btn_frame.columnconfigure(0, weight=1)
+        
+        # 右侧框架 - 放置其他按钮
+        right_frame = ttk.Frame(editor_btn_frame)
+        right_frame.grid(row=0, column=0, sticky="e")
         
         # 优化按钮布局，按操作频率和逻辑顺序排列
         btn_padding = 5  # 按钮间距
         
-
-        
-        self.add_to_dict_btn = ttk.Button(editor_btn_frame, text="添加到词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
-        self.add_to_dict_btn.pack(side="left", padx=(0, btn_padding))
+        # 其他按钮（居右）
+        self.add_to_dict_btn = ttk.Button(right_frame, text="添加到词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
+        self.add_to_dict_btn.pack(side="right", padx=(btn_padding, 0))
         
         # 添加分隔符
-        separator = ttk.Separator(editor_btn_frame, orient="vertical")
-        separator.pack(side="left", fill="y", padx=(btn_padding, btn_padding))
+        separator2 = ttk.Separator(right_frame, orient="vertical")
+        separator2.pack(side="right", fill="y", padx=(btn_padding, btn_padding))
         
-        self.undo_btn = ttk.Button(editor_btn_frame, text="撤销", command=self.undo, bootstyle="info-outline")
-        self.undo_btn.pack(side="left", padx=(0, btn_padding))
+        self.redo_btn = ttk.Button(right_frame, text="重做", command=self.redo, bootstyle="info-outline")
+        self.redo_btn.pack(side="right", padx=(btn_padding, btn_padding))
+        ToolTip(self.redo_btn, "重做已撤销的操作 (Ctrl+Y)")
+        
+        self.undo_btn = ttk.Button(right_frame, text="撤销", command=self.undo, bootstyle="info-outline")
+        self.undo_btn.pack(side="right", padx=(0, btn_padding))
         ToolTip(self.undo_btn, "撤销上一步操作 (Ctrl+Z)")
         
-        self.redo_btn = ttk.Button(editor_btn_frame, text="重做", command=self.redo, bootstyle="info-outline")
-        self.redo_btn.pack(side="left", padx=(0, btn_padding))
-        ToolTip(self.redo_btn, "重做已撤销的操作 (Ctrl+Y)")
+        # 添加分隔符
+        separator1 = ttk.Separator(right_frame, orient="vertical")
+        separator1.pack(side="right", fill="y", padx=(btn_padding, btn_padding))
 
         right_pane.add(editor_frame, weight=1)
         
@@ -281,6 +289,11 @@ class TranslationWorkbench(ttk.Frame):
         self.comprehensive_ui_container = ttk.Frame(self.right_frame_container)
         self.comprehensive_ui_container.pack(fill="both", expand=True)
         self.comprehensive_ui_container.pack_forget()
+        
+        # 创建上传到汉化仓库UI容器，初始隐藏
+        self.github_upload_ui_container = ttk.Frame(self.right_frame_container)
+        self.github_upload_ui_container.pack(fill="both", expand=True)
+        self.github_upload_ui_container.pack_forget()
 
         btn_frame = ttk.Frame(self, padding=10)
         btn_frame.pack(fill="x")
@@ -296,15 +309,21 @@ class TranslationWorkbench(ttk.Frame):
         # 翻译状态显示标签
 
 
-        # 功能切换按钮 - 放到最右边
+        # 功能切换按钮
         self.mode_switch_btn = ttk.Button(btn_frame, text="进入翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
         self.mode_switch_btn.pack(side="right")
         ToolTip(self.mode_switch_btn, "在翻译工作台和翻译控制台功能之间切换")
         
         self.save_button = ttk.Button(btn_frame, text="保存项目", command=self._save_project, bootstyle="primary-outline")
         self.save_button.pack(side="right", padx=5)
+        
         self.finish_button = ttk.Button(btn_frame, text=self.finish_button_text, command=self._on_finish, bootstyle="success")
-        self.finish_button.pack(side="right")
+        self.finish_button.pack(side="right", padx=5)
+        
+        # 上传到汉化仓库按钮 - 放在最左边
+        self.github_upload_button = ttk.Button(btn_frame, text="上传到GitHub", command=self._on_github_upload, bootstyle="warning")
+        self.github_upload_button.pack(side="right")
+        ToolTip(self.github_upload_button, "进入GitHub汉化仓库上传界面")
 
     def _update_theme_colors(self):
         style = ttk.Style.get_instance()
@@ -1100,14 +1119,28 @@ class TranslationWorkbench(ttk.Frame):
         selection = self.ns_tree.selection()
         if not selection or not self.ns_tree.exists(selection[0]): return
         
+        current_mod = selection[0]
+        # 从翻译数据中获取模组信息
+        mod_data = self.translation_data.get(current_mod, {})
+        # 使用模组ID作为命名空间
+        current_namespace = current_mod.split(':')[0] if ':' in current_mod else current_mod
+        
+        # 检查是否在GitHub上传模式
+        if hasattr(self, '_github_upload_ui') and self.github_upload_ui_container.winfo_ismapped():
+            # 更新GitHub上传UI中的命名空间和分支
+            self._github_upload_ui.update_namespace_and_branch(current_namespace)
+        
         self.current_selection_info = None
         # 重置排序状态
         self.trans_items_sort_reverse = False
         self.source_sort_reverse = False
         self._populate_item_list()
         self._clear_editor()
+        # 当选择模组时，启用GitHub上传按钮
         self._update_ui_state(interactive=True, item_selected=False)
-        self.status_label.config(text=f"已选择项目: {selection[0]}")
+        # 单独启用GitHub上传按钮，因为上传操作是针对整个模组的
+        self.github_upload_button.config(state="normal")
+        self.status_label.config(text=f"已选择项目: {current_mod}")
 
     def _on_item_selected(self, event=None):
         selection = self.trans_tree.selection()
@@ -1226,7 +1259,7 @@ class TranslationWorkbench(ttk.Frame):
             self.main_window._save_current_session()
 
     def _perform_save(self, save_path) -> bool:
-        latest_data = self.undo_stack[-1] if self.undo_stack else self.translation_data
+        latest_data = self.translation_data
         
         save_data = {
             "version": "2.3", 
@@ -1353,8 +1386,30 @@ class TranslationWorkbench(ttk.Frame):
         self.finish_button.config(state=base_state)
         self.save_button.config(state=base_state)
         
-        # 更新功能切换按钮状态
-        self.mode_switch_btn.config(state=base_state)
+        # 直接检查当前是否在特殊模式下
+        # 1. 检查是否在GitHub上传模式
+        is_in_github_upload_mode = False
+        if hasattr(self, 'github_upload_ui_container'):
+            try:
+                is_in_github_upload_mode = self.github_upload_ui_container.winfo_ismapped()
+            except:
+                pass
+        
+        # 2. 检查是否在翻译控制台模式
+        is_in_translation_console_mode = False
+        if hasattr(self, '_current_mode'):
+            is_in_translation_console_mode = self._current_mode == 'comprehensive'
+        
+        # 3. 综合判断
+        is_in_special_mode = is_in_github_upload_mode or is_in_translation_console_mode
+        
+        # 只有在普通工作台模式下才更新按钮状态
+        if not is_in_special_mode:
+            # 更新功能切换按钮状态
+            self.mode_switch_btn.config(state=base_state)
+            
+            # GitHub上传按钮始终启用，不需要选中项目
+            self.github_upload_button.config(state="normal")
         
         if item_selected and interactive and self.current_selection_info:
             # 检查当前条目是否已存在于个人词典中
@@ -1386,6 +1441,101 @@ class TranslationWorkbench(ttk.Frame):
             self.add_to_dict_btn.config(state="disabled", text="添加到词典")
             self.zh_text_input.config(state="disabled", cursor="")
             
+    def _toggle_github_upload_mode(self, enter_mode=True):
+        """在翻译工作台和GitHub上传模式之间切换"""
+        # 保存当前编辑
+        self._save_current_edit()
+        
+        if enter_mode:
+            # 进入GitHub上传模式
+            # 保存翻译工作台模式的选中状态
+            if not hasattr(self, '_workbench_selection'):
+                self._workbench_selection = []
+            self._workbench_selection = list(self.ns_tree.selection())
+            
+            # 保存当前选中的条目信息
+            if not hasattr(self, '_workbench_item_selection'):
+                self._workbench_item_selection = None
+            if self.current_selection_info:
+                self._workbench_item_selection = {
+                    'ns': self.current_selection_info['ns'],
+                    'idx': self.current_selection_info['idx'],
+                    'row_id': self.current_selection_info['row_id']
+                }
+            else:
+                self._workbench_item_selection = None
+            
+            # 取消当前所有已选中的条目状态
+            self.trans_tree.selection_clear()
+            # 清除当前选择信息
+            self.current_selection_info = None
+            
+            # 隐藏工作区UI
+            self.workbench_ui_container.pack_forget()
+            
+            # 显示GitHub上传UI
+            self.github_upload_ui_container.pack(fill="both", expand=True)
+            
+            # 更新按钮文本和命令
+            self.github_upload_button.config(text="返回翻译工作台", command=lambda: self._toggle_github_upload_mode(False), bootstyle="warning")
+            # 禁用翻译控制台按钮
+            self.mode_switch_btn.config(state="disabled")
+            
+            # 更新状态栏
+            self.status_label.config(text="GitHub上传模式 - 配置上传选项并执行上传")
+        else:
+            # 返回翻译工作台模式
+            # 隐藏GitHub上传UI
+            self.github_upload_ui_container.pack_forget()
+            
+            # 显示工作区UI
+            self.workbench_ui_container.pack(fill="both", expand=True)
+            
+            # 1. 首先将选择模式改为单选
+            self.ns_tree.config(selectmode="browse")
+            
+            # 2. 清除所有选中状态
+            self.ns_tree.selection_clear()
+            
+            # 3. 恢复翻译工作台模式的选中状态
+            if hasattr(self, '_workbench_selection') and self._workbench_selection:
+                # 翻译工作台模式只允许选中一个模组，所以只取第一个
+                self.ns_tree.selection_set(self._workbench_selection[0])
+            
+            # 4. 确保只有一个选中项（防止任何可能的多选残留）
+            current_selection = self.ns_tree.selection()
+            if len(current_selection) > 1:
+                # 如果仍然有多个选中，只保留第一个
+                self.ns_tree.selection_clear()
+                self.ns_tree.selection_set(current_selection[0])
+            
+            # 切换回翻译工作台模式时，重新绑定事件处理函数
+            self.ns_tree.unbind("<<TreeviewSelect>>")
+            self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
+            
+            # 更新按钮文本和命令
+            self.github_upload_button.config(text="上传到GitHub", command=self._on_github_upload, bootstyle="warning")
+            # 启用翻译控制台按钮
+            self.mode_switch_btn.config(state="normal")
+            
+            # 更新状态栏
+            selection = self.ns_tree.selection()
+            if selection:
+                self.status_label.config(text=f"已选择项目: {selection[0]}")
+            else:
+                self.status_label.config(text="未选择任何项目")
+            
+            # 重新填充项目列表
+            self._populate_item_list()
+            
+            # 更新UI状态
+            self._update_ui_state(interactive=True, item_selected=bool(selection))
+            
+            # 等待条目列表加载完成后，根据保存的信息重新选中条目
+            if hasattr(self, '_workbench_item_selection') and self._workbench_item_selection:
+                # 使用after方法确保在UI更新后执行重新选中操作
+                self.after(100, self._restore_item_selection)
+    
     def _toggle_mode(self):
         """在翻译工作台和翻译控制台功能之间切换"""
         # 保存当前编辑
@@ -1442,6 +1592,8 @@ class TranslationWorkbench(ttk.Frame):
             
             # 更新按钮文本
             self.mode_switch_btn.config(text="返回翻译工作台")
+            # 禁用GitHub上传按钮
+            self.github_upload_button.config(state="disabled")
             
             # 更新状态栏
             self.status_label.config(text="翻译控制台模式 - 可多选模组进行批量操作")
@@ -1494,6 +1646,8 @@ class TranslationWorkbench(ttk.Frame):
             
             # 更新按钮文本
             self.mode_switch_btn.config(text="进入翻译控制台")
+            # 启用GitHub上传按钮
+            self.github_upload_button.config(state="normal")
             
             # 更新状态栏
             selection = self.ns_tree.selection()
@@ -2327,3 +2481,61 @@ class TranslationWorkbench(ttk.Frame):
         final_translations = dict(final_lookup)
         if self.finish_callback:
             self.finish_callback(final_translations, latest_data)
+    
+    def _on_github_upload(self):
+        """GitHub汉化仓库上传按钮点击事件"""
+        # 保存当前编辑
+        self._save_current_edit()
+        
+        # 加载GitHub配置
+        from utils import config_manager
+        config = config_manager.load_config()
+        github_config = {
+            'repo': config.get('github_repo', ''),
+            'token': config.get('github_token', ''),
+            'commit_message': config.get('github_commit_message', '更新汉化资源包'),
+            'pull_before_push': config.get('github_pull_before_push', True)
+        }
+        
+        # 验证配置
+        required_configs = ['repo', 'token', 'commit_message']
+        if not all(github_config.get(key, '') for key in required_configs):
+            from gui import ui_utils
+            ui_utils.show_error("配置不完整", "请先在设置中配置GitHub上传选项", parent=self)
+            return
+        
+        # 获取当前选中的模组信息
+        current_mod = None
+        current_namespace = ""
+        current_file_format = "json"  # 默认格式
+        
+        # 检查是否有选中的项目
+        selection = self.ns_tree.selection()
+        if selection:
+            current_mod = selection[0]
+            # 从翻译数据中获取模组信息
+            mod_data = self.translation_data.get(current_mod, {})
+            # 使用模组ID作为命名空间
+            current_namespace = current_mod.split(':')[0] if ':' in current_mod else current_mod
+            # 根据namespace_formats确定文件格式
+            if hasattr(self, 'namespace_formats') and current_namespace in self.namespace_formats:
+                current_file_format = self.namespace_formats[current_namespace]
+            else:
+                # 如果没有找到对应格式，默认使用json
+                current_file_format = "json"
+        
+        # 进入GitHub上传模式
+        self._toggle_github_upload_mode(True)
+        
+        # 创建GitHub上传UI组件
+        if not hasattr(self, '_github_upload_ui'):
+            from gui.github_upload_ui import GitHubUploadUI
+            self._github_upload_ui = GitHubUploadUI(
+                self.github_upload_ui_container, 
+                self, 
+                current_namespace, 
+                current_file_format, 
+                github_config
+            )
+            self._github_upload_ui.pack(fill="both", expand=True)
+        

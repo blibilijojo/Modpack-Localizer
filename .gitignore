@@ -1,90 +1,75 @@
-# Modpack Localizer - 白名单模式 .gitignore
+# Modpack Localizer - .gitignore
 
-# 首先忽略所有文件
-*
-
-# 然后明确包含需要的文件和目录
-
-# 源代码目录
-!core/
-!core/**/*.py
-!gui/
-!gui/**/*.py
-!services/
-!services/**/*.py
-!utils/
-!utils/**/*.py
-
-# 根目录文件
-!main.py
-!README.md
-!requirements.txt
-!_version.py
-!updater.py
-
-# GitHub工作流
-!.github/
-!.github/workflows/
-!.github/workflows/build-release.yml
-
-# 排除编译生成的文件和目录
+# Python编译生成的文件
 __pycache__/
-**/__pycache__/
 *.pyc
 
-# 排除配置和用户数据文件
-config.json
-user_dict.json
-Dict-Sqlite.db
-Dict-User.db
+# 构建输出
+build/
+dist/
+*.spec
+*.exe
 
-# 排除日志文件
+# 日志目录和文件
 logs/
 error_logs/
 aio_error_logs/
 ModpackLocalizer.log
 updater_error.log
 
-# 排除会话缓存
+# 缓存文件和目录
 .session_cache/
 session_cache.json
 
-# 排除构建输出
-build/
-dist/
-*.spec
-*.exe
+# 配置和用户数据文件
+config.json
+user_dict.json
+Dict-Sqlite.db
+Dict-User.db
+term_database.json
 
-# 排除IDE和编辑器文件
+# 排除所有txt和json格式的文件
+*.txt
+*.json
+
+# 明确排除index.json文件
+index.json
+
+# IDE和编辑器文件
 .vscode/
 .idea/
+.trae/
 *.swp
 *.swo
 *.sublime-project
 *.sublime-workspace
 
-# 排除操作系统生成的文件
+# 操作系统生成的文件
 Thumbs.db
 .DS_Store
 
-# 排除临时文件
+# 临时文件
 *.tmp
 *.temp
 *.bak
 *.backup
 *~
 
-# 排除加密密钥文件
+# 加密和锁文件
 .encryption_key
-
-# 排除测试目录
-汉化包测试/
-
-# 排除锁文件
 .__ModpackLocalizer.lock
 
-# 排除Trae IDE文件
-.trae/
+# 测试目录
+汉化包测试/
 
-# 排除术语数据库文件
-term_database.json
+# 明确包含的文件和目录（确保重要文件不被忽略）
+!main.py
+!README.md
+!requirements.txt
+!_version.py
+!updater.py
+!core/
+!gui/
+!services/
+!utils/
+!.github/

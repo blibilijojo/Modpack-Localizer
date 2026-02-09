@@ -8,7 +8,7 @@ import logging
 # 缓存根目录
 CACHE_ROOT = Path(".session_cache")
 # 索引文件路径
-INDEX_FILE = CACHE_ROOT / "index.json"
+INDEX_FILE = CACHE_ROOT / "session_index.json"
 
 # 确保缓存目录存在
 def _ensure_cache_dir_exists():

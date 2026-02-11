@@ -375,7 +375,7 @@ class ProjectTab:
             root_window=self.root,
             log_callback=self.log_message
         )
-        self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config, None, "完成并生成资源包")
+        self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config, None, "完成并生成资源包", save_session_after=True)
         threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True).start()
 
     def _setup_new_quest_project(self):
@@ -557,12 +557,12 @@ class ProjectTab:
             
             # 添加筛选参数
             if game_version and game_version != "全部":
-                params["filters"] = f"versions:{game_version}"
+                params["filters"] = f"versions={game_version}"
             if mod_loader and mod_loader != "全部":
                 if "filters" in params:
-                    params["filters"] += f",categories:{mod_loader}"
+                    params["filters"] += f",categories={mod_loader}"
                 else:
-                    params["filters"] = f"categories:{mod_loader}"
+                    params["filters"] = f"categories={mod_loader}"
             
             # 发送API请求
             response = requests.get("https://api.modrinth.com/v2/search", params=params, timeout=30)

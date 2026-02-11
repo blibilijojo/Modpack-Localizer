@@ -82,11 +82,11 @@ class Translator:
         """获取有序键列表"""
         keys = []
         if file_format == 'json':
-            try:
-                data = json.loads(content)
-                return list(data.keys())
-            except json.JSONDecodeError:
-                return []
+            # 使用正则表达式解析JSON文件，保持原始顺序
+            JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+            for match in JSON_KEY_VALUE_PATTERN.finditer(content):
+                key = match.group(1)
+                keys.append(key)
         elif file_format == 'lang':
             lang_kv_pattern = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
             for match in lang_kv_pattern.finditer(content):
@@ -112,7 +112,22 @@ class Translator:
         # 获取有序键
         ordered_keys = []
         if namespace_info.raw_content and namespace_info.file_format:
-            ordered_keys = self._get_ordered_keys(namespace_info.raw_content, namespace_info.file_format)
+            # 从原始文件中提取有序键
+            original_ordered_keys = self._get_ordered_keys(namespace_info.raw_content, namespace_info.file_format)
+            
+            # 处理带有计数器后缀的 _comment 条目
+            comment_counter = 0
+            for key in original_ordered_keys:
+                if key == '_comment':
+                    comment_counter += 1
+                    # 查找对应的带有计数器后缀的键
+                    for entry_key in english_entries.keys():
+                        if entry_key == f'_comment_{comment_counter}':
+                            ordered_keys.append(entry_key)
+                            break
+                else:
+                    # 对于非 _comment 键，直接添加
+                    ordered_keys.append(key)
         
         if not ordered_keys:
             ordered_keys = list(english_entries.keys())
@@ -132,7 +147,7 @@ class Translator:
             translation = None
             source = None
             
-            if key == '_comment':
+            if key.startswith('_comment'):
                 if key in internal_chinese:
                     translation = internal_chinese[key].zh
                     source = "模组自带"

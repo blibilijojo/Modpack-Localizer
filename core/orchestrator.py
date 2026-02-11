@@ -24,6 +24,9 @@ class Orchestrator:
         self.final_workbench_data = None
         self.raw_english_files = {}
         self.namespace_formats = {}
+        self.module_names = []
+        self.curseforge_names = []
+        self.project_name = 'Unnamed_Project'
         # 初始化工作流
         self.workflow = Workflow()
     def run_translation_phase(self):
@@ -48,9 +51,64 @@ class Orchestrator:
             try:
                 # 执行数据提取
                 extraction_result = self.workflow.run_extraction(context)
+                
+                # 保存模组名称（从提取结果中获取，避免重复提取）
+                self.module_names = extraction_result.module_names
+                # 保存curseforge名称
+                self.curseforge_names = getattr(extraction_result, 'curseforge_names', [])
+                # 保存Modrinth名称
+                self.modrinth_names = getattr(extraction_result, 'modrinth_names', [])
             except Exception as agg_error:
                 logging.error(f"数据提取失败: {agg_error}", exc_info=True)
                 raise Exception(f"数据提取失败: {agg_error}")
+            
+            # 检查提取结果
+            master_english_count = len(extraction_result.master_english)
+            logging.info(f"数据提取完成，共发现 {master_english_count} 个命名空间")
+            self.log(f"数据提取完成，共发现 {master_english_count} 个命名空间", "INFO")
+            
+            # 存储模组名称供后续使用
+            module_names_dict = {}
+            for module in self.module_names:
+                # 尝试从来源路径中提取JAR文件名
+                source_path = module['source']
+                import re
+                parts = re.split(r'[\\/]', source_path, 1)
+                if len(parts) > 0:
+                    first_part = parts[0]
+                    if first_part.endswith('.jar'):
+                        # 这是一个JAR文件中的模块
+                        jar_name = first_part[:-4]  # 移除.jar后缀
+                        module_names_dict[jar_name.lower()] = module['name']
+            
+            # 存储curseforge名称供后续使用
+            curseforge_names_dict = {}
+            for module in self.curseforge_names:
+                # 尝试从来源路径中提取JAR文件名
+                source_path = module['source']
+                parts = re.split(r'[\\/]', source_path, 1)
+                if len(parts) > 0:
+                    first_part = parts[0]
+                    if first_part.endswith('.jar'):
+                        # 这是一个JAR文件中的模块
+                        jar_name = first_part[:-4]  # 移除.jar后缀
+                        curseforge_names_dict[jar_name.lower()] = module['curseforge_name']
+            
+            # 存储Modrinth名称供后续使用
+            modrinth_names_dict = {}
+            for module in self.modrinth_names:
+                # 尝试从来源路径中提取JAR文件名
+                source_path = module['source']
+                parts = re.split(r'[\\/]', source_path, 1)
+                if len(parts) > 0:
+                    first_part = parts[0]
+                    if first_part.endswith('.jar'):
+                        # 这是一个JAR文件中的模块
+                        jar_name = first_part[:-4]  # 移除.jar后缀
+                        modrinth_names_dict[jar_name.lower()] = module['modrinth_name']
+            
+            if master_english_count == 0:
+                raise Exception("未从模组中提取到任何英文语言文件。请确保下载的模组包含 lang/en_us.lang 或 lang/en_us.json 文件。")
             
             self.update_progress("数据聚合完成", 50)
             
@@ -72,8 +130,11 @@ class Orchestrator:
                 raise Exception(f"翻译决策失败: {dec_error}")
             
             # 验证决策结果
+            workbench_data_count = len(translation_result.workbench_data)
+            logging.info(f"翻译决策完成，共生成 {workbench_data_count} 个命名空间的翻译数据")
+            
             if not translation_result.workbench_data:
-                raise Exception("翻译决策未生成任何数据")
+                raise Exception("翻译决策未生成任何数据。可能是因为模组中的语言文件格式不正确或无法解析。")
             
             # 转换为旧格式的workbench_data
             workbench_data = {}
@@ -91,9 +152,25 @@ class Orchestrator:
                 jar_name = extraction_result.namespace_info.get(ns, None)
                 jar_name = jar_name.jar_name if jar_name else 'Unknown'
                 
+                # 尝试使用提取到的模组名称
+                display_name = f"{ns} ({jar_name})"  # 始终使用命名空间作为前缀
+                mod_name = ""  # 默认设置为空字符串
+                curseforge_name = ""  # 默认设置为空字符串
+                modrinth_name = ""  # 默认设置为空字符串
+                jar_name_without_ext = jar_name[:-4] if jar_name.endswith('.jar') else jar_name
+                if jar_name_without_ext.lower() in module_names_dict:
+                    mod_name = module_names_dict[jar_name_without_ext.lower()]  # 使用提取到的模组名称
+                if jar_name_without_ext.lower() in curseforge_names_dict:
+                    curseforge_name = curseforge_names_dict[jar_name_without_ext.lower()]  # 使用提取到的curseforge名称
+                if jar_name_without_ext.lower() in modrinth_names_dict:
+                    modrinth_name = modrinth_names_dict[jar_name_without_ext.lower()]  # 使用提取到的Modrinth名称
+                
                 workbench_data[ns] = {
+                    'mod_name': mod_name,
                     'jar_name': jar_name,
-                    'display_name': f"{ns} ({jar_name})",
+                    'display_name': display_name,
+                    'curseforge_name': curseforge_name,
+                    'modrinth_name': modrinth_name,
                     'items': items
                 }
             
@@ -118,7 +195,8 @@ class Orchestrator:
             log_callback=self.log,
             project_path=self.project_path,
             finish_button_text="完成并生成资源包",
-            undo_history=undo_history
+            undo_history=undo_history,
+            module_names=self.module_names
         )
         self.root.wait_window(workbench)
         if workbench.final_translations is not None:
@@ -255,6 +333,10 @@ class Orchestrator:
         self.update_progress("正在加载项目...", 10)
         self.raw_english_files = self.save_data.get('raw_english_files', {})
         self.namespace_formats = self.save_data.get('namespace_formats', {})
+        self.module_names = self.save_data.get('module_names', [])
+        self.curseforge_names = self.save_data.get('curseforge_names', [])
+        self.modrinth_names = self.save_data.get('modrinth_names', [])
+        self.project_name = self.save_data.get('project_name', 'Unnamed_Project')
         workbench_data = self.save_data.get('workbench_data', {})
         
         if not all([self.raw_english_files, self.namespace_formats, workbench_data]):

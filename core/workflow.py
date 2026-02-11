@@ -54,6 +54,68 @@ class Workflow:
                 progress_update_callback=context.progress_callback
             )
             
+            # 提取模组名称
+            logging.info("开始提取模组名称...")
+            module_names = self.extractor.extract_module_names(mods_path)
+            if module_names:
+                logging.info(f"成功提取到 {len(module_names)} 个模组名称")
+                for module in module_names[:5]:  # 只显示前5个作为示例
+                    logging.info(f"- {module['name']} (来源: {module['source']})")
+                if len(module_names) > 5:
+                    logging.info(f"... 等 {len(module_names) - 5} 个模组")
+            
+            # 将提取到的模组名称设置到提取结果中
+            extraction_result.module_names = module_names
+            
+            # 提取curseforge名称
+            logging.info("开始提取curseforge名称...")
+            curseforge_names = self.extractor.extract_curseforge_names(mods_path)
+            if curseforge_names:
+                logging.info(f"成功提取到 {len(curseforge_names)} 个curseforge名称")
+                for module in curseforge_names[:5]:  # 只显示前5个作为示例
+                    logging.info(f"- {module['curseforge_name']} (来源: {module['source']})")
+                if len(curseforge_names) > 5:
+                    logging.info(f"... 等 {len(curseforge_names) - 5} 个curseforge名称")
+            
+            # 将提取到的curseforge名称设置到提取结果中
+            extraction_result.curseforge_names = curseforge_names
+            
+            # 提取Modrinth名称：只对没有Curseforge名称的模组进行搜索
+            logging.info("开始提取Modrinth名称...")
+            
+            # 找出所有的JAR文件
+            all_jar_files = list(mods_path.glob('*.jar'))
+            
+            # 找出已经有Curseforge名称的JAR文件
+            curseforge_jar_files = []
+            for module in curseforge_names:
+                source = module.get('source', '')
+                # 从source中提取JAR文件名
+                # source格式如："AmbientEnvironment-fabric-1.21.1-18.0.0.2.jar\fabric.mod.json"
+                if '.jar' in source:
+                    # 尝试从source路径中提取JAR文件的完整路径
+                    import re
+                    parts = re.split(r'[\\/]', source, 1)
+                    if len(parts) > 0:
+                        jar_name = parts[0]
+                        # 查找对应的JAR文件
+                        for jar_file in all_jar_files:
+                            if jar_file.name == jar_name:
+                                curseforge_jar_files.append(jar_file)
+                                break
+            
+            # 提取Modrinth名称，排除那些已经有Curseforge名称的JAR文件
+            modrinth_names = self.extractor.extract_modrinth_names(mods_path, excluded_jar_files=curseforge_jar_files)
+            if modrinth_names:
+                logging.info(f"成功提取到 {len(modrinth_names)} 个Modrinth名称")
+                for module in modrinth_names[:5]:  # 只显示前5个作为示例
+                    logging.info(f"- {module['modrinth_name']} (来源: {module['source']})")
+                if len(modrinth_names) > 5:
+                    logging.info(f"... 等 {len(modrinth_names) - 5} 个Modrinth名称")
+            
+            # 将提取到的Modrinth名称设置到提取结果中
+            extraction_result.modrinth_names = modrinth_names
+            
             context.extraction_result = extraction_result
             logging.info("=== 数据提取阶段完成 ===")
             return extraction_result

@@ -22,6 +22,9 @@ class GitHubUploadUI(tk.Frame):
         # 初始化UI
         self._create_widgets()
         
+        # 自动填充模组名称
+        self._auto_fill_mod_name()
+        
     def _create_widgets(self):
         # 创建主框架
         main_frame = ttk.Frame(self, padding=10)
@@ -92,11 +95,23 @@ class GitHubUploadUI(tk.Frame):
         self.push_to_upstream_var = tk.BooleanVar(value=self.github_config.get('push_to_upstream', False))
         ttk.Checkbutton(advanced_frame, text="推送到源仓库", variable=self.push_to_upstream_var).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=5)
         
-        # PR标题配置项
+        # PR标题配置项（改为预览模式，不可编辑）
         self.pr_title_var = tk.StringVar(value="")
         ttk.Label(advanced_frame, text="PR标题:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-        pr_title_entry = ttk.Entry(advanced_frame, textvariable=self.pr_title_var, width=60)
+        pr_title_entry = ttk.Entry(advanced_frame, textvariable=self.pr_title_var, width=60, state="disabled")
         pr_title_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5, columnspan=2)
+        pr_title_entry.configure(style="Disabled.TEntry")
+        
+        # 添加模组名称和简述配置项，同一行显示
+        ttk.Label(advanced_frame, text="模组名称:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        self.mod_name_var = tk.StringVar(value="")
+        mod_name_entry = ttk.Entry(advanced_frame, textvariable=self.mod_name_var, width=30)
+        mod_name_entry.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(advanced_frame, text="简述:").grid(row=3, column=1, sticky="e", padx=5, pady=5)
+        self.desc_var = tk.StringVar(value="翻译提交")
+        desc_entry = ttk.Entry(advanced_frame, textvariable=self.desc_var, width=30)
+        desc_entry.grid(row=3, column=2, sticky="e", padx=5, pady=5)
         
         # 更新路径显示
         self._update_path_display()
@@ -113,6 +128,18 @@ class GitHubUploadUI(tk.Frame):
         self.version_var.trace_add("write", on_version_change)
         self.project_name_var.trace_add("write", lambda *args: self._update_path_display())
         self.namespace_var.trace_add("write", lambda *args: self._update_path_display())
+        
+        # 绑定模组名称和简述变化事件，实时更新PR标题预览
+        def update_pr_title(*args):
+            mod_name = self.mod_name_var.get().strip()
+            desc = self.desc_var.get().strip() or "翻译提交"
+            if mod_name:
+                self.pr_title_var.set(f"{mod_name} {desc}")
+            else:
+                self.pr_title_var.set("")
+        
+        self.mod_name_var.trace_add("write", update_pr_title)
+        self.desc_var.trace_add("write", update_pr_title)
     
         # 状态标签
         self.status_var = tk.StringVar(value="请填写上传信息")
@@ -211,9 +238,10 @@ class GitHubUploadUI(tk.Frame):
     def _update_path_display(self):
         # 构建路径
         version = self.version_var.get().strip()
-        project_name = self.project_name_var.get().strip() or self.default_namespace
+        # 使用模组名称作为项目名称
+        mod_name = self.mod_name_var.get().strip() or self.default_namespace
         namespace = self.namespace_var.get().strip()
-        path = f"projects/{version}/assets/{project_name}/{namespace}/lang"
+        path = f"projects/{version}/assets/{mod_name}/{namespace}/lang"
         self.path_var.set(path)
     
     def _on_upload(self):
@@ -248,9 +276,11 @@ class GitHubUploadUI(tk.Frame):
             return
         
         # 构建上传配置
+        # 使用模组名称作为项目名称
+        mod_name = self.mod_name_var.get().strip() or namespace
         upload_config = {
             'version': version,
-            'project_name': project_name,
+            'project_name': mod_name,
             'namespace': namespace,
             'branch': branch,
             'file_format': self.default_file_format
@@ -303,13 +333,15 @@ class GitHubUploadUI(tk.Frame):
                     else:
                         self.status_var.set(f"同步原仓库成功: {sync_message}")
                 # 设置PR标题
-                if self.pr_title_var.get().strip():
-                    # 如果用户手动填写了PR标题，直接使用
-                    github_service.pr_title = self.pr_title_var.get().strip()
+                mod_name = self.mod_name_var.get().strip()
+                desc = self.desc_var.get().strip() or "翻译提交"
+                
+                if mod_name:
+                    # 使用用户配置的模组名称和简述
+                    github_service.pr_title = f'{mod_name} {desc}'
                 else:
-                    # 否则使用默认格式：模组英文全名 + 简述
-                    default_description = '更新汉化资源包'
-                    github_service.pr_title = f'{mod_display_name} {default_description}'
+                    # 如果用户未填写模组名称且 curseforge_name 为空，只使用简述
+                    github_service.pr_title = desc
                 
                 # 构建上传数据
                 final_lookup = {}
@@ -327,11 +359,25 @@ class GitHubUploadUI(tk.Frame):
                 # 获取原始英文文件内容，用于保持JSON格式一致
                 raw_english_files = getattr(self.workbench, 'raw_english_files', {})
                 
+                # 优先使用 curseforge_name，然后是 modrinth_name 作为 project_name
+                project_name = self.project_name_var.get().strip()
+                if not project_name:
+                    # 尝试从workbench数据中获取curseforge_name和modrinth_name
+                    if hasattr(self.workbench, 'translation_data') and upload_config['namespace'] in self.workbench.translation_data:
+                        mod_data = self.workbench.translation_data[upload_config['namespace']]
+                        if 'curseforge_name' in mod_data and mod_data['curseforge_name']:
+                            project_name = mod_data['curseforge_name']
+                        elif 'modrinth_name' in mod_data and mod_data['modrinth_name']:
+                            project_name = mod_data['modrinth_name']
+                # 如果 curseforge_name 和 modrinth_name 都为空，项目名称也为空
+                # 不再回退到命名空间
+                # 使用 project_name 作为上传的项目名称
+                mod_name = project_name
                 success, message = github_service.upload_translations(
                     final_translations, 
                     upload_config['version'], 
                     self.github_config.get('commit_message', '提交'),
-                    project_name=upload_config['project_name'],
+                    project_name=mod_name,
                     namespace=upload_config['namespace'],
                     file_format=upload_config['file_format'],
                     raw_english_files=raw_english_files
@@ -371,8 +417,49 @@ class GitHubUploadUI(tk.Frame):
         self.namespace_var.set(namespace)
         # 更新分支名称，使用命名空间作为默认值
         self.branch_var.set(namespace)
+        # 自动填充模组名称（会同时更新 project_name_var）
+        self._auto_fill_mod_name()
         # 更新路径显示
         self._update_path_display()
+    
+    def _auto_fill_mod_name(self):
+        """自动填充模组名称"""
+        if hasattr(self.workbench, 'ns_tree'):
+            selection = self.workbench.ns_tree.selection()
+            if selection:
+                current_mod = selection[0]
+                if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
+                    mod_data = self.workbench.translation_data[current_mod]
+                    # 恢复原始逻辑：使用 mod_name 作为模组名称
+                    if 'mod_name' in mod_data:
+                        mod_name = mod_data['mod_name']
+                    elif 'display_name' in mod_data:
+                        # 从display_name中提取模组名称（去掉括号中的内容）
+                        display_name = mod_data['display_name']
+                        if ' (' in display_name:
+                            mod_name = display_name.split(' (')[0]
+                        else:
+                            mod_name = display_name
+                    else:
+                        mod_name = current_mod
+                    
+                    # 只更新模组名称，不更新项目名称
+                    self.mod_name_var.set(mod_name)
+                    
+                    # 单独处理项目名称：优先使用 curseforge_name，然后是 modrinth_name
+                    project_name = ""
+                    if 'curseforge_name' in mod_data and mod_data['curseforge_name']:
+                        project_name = mod_data['curseforge_name']
+                    elif 'modrinth_name' in mod_data and mod_data['modrinth_name']:
+                        project_name = mod_data['modrinth_name']
+                    self.project_name_var.set(project_name)
+                    
+                    # 更新PR标题预览
+                    def update_pr_title(*args):
+                        desc = self.desc_var.get().strip() or "翻译提交"
+                        pr_title = f"{mod_name} {desc}" if mod_name else desc
+                        self.pr_title_var.set(pr_title)
+                    update_pr_title()
     
     def _on_sync(self):
         """手动同步原仓库按钮点击事件"""

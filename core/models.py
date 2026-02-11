@@ -37,6 +37,9 @@ class ExtractionResult:
     pack_chinese: Dict[str, str] = field(default_factory=dict)
     namespace_info: Dict[str, NamespaceInfo] = field(default_factory=dict)
     raw_english_files: Dict[str, str] = field(default_factory=dict)
+    module_names: List[Dict[str, str]] = field(default_factory=list)
+    curseforge_names: List[Dict[str, str]] = field(default_factory=list)
+    modrinth_names: List[Dict[str, str]] = field(default_factory=list)
 
 @dataclass
 class TranslationResult:

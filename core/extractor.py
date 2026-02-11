@@ -4,9 +4,21 @@ import logging
 import sqlite3
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from collections import defaultdict
 from utils import file_utils, config_manager
+
+def is_json_content(content: str) -> bool:
+    """检查内容是否为JSON格式"""
+    try:
+        json.loads(content)
+        return True
+    except json.JSONDecodeError:
+        return False
+
+def is_toml_content(content: str) -> bool:
+    """检查内容是否为TOML格式"""
+    return 'displayName' in content and ('=' in content or ':=' in content)
 
 from .models import (
     LanguageEntry, NamespaceInfo, ExtractionResult,
@@ -20,10 +32,14 @@ class Extractor:
         # 保持原有正则表达式规则不变
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"((?:\\.|[^\\"])*)"', re.DOTALL)
+        self._module_names_cache = {}  # 添加缓存属性
+        self._curseforge_names_cache = {}  # 添加curseforge名称缓存属性
+        self._modrinth_names_cache = {}  # 添加modrinth名称缓存属性
     
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> Dict[str, str]:
         """从文本内容中提取语言数据"""
         data = {}
+        comment_counter = 0
         if file_format == 'json':
             # 始终使用正则表达式解析JSON文件
             for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
@@ -41,12 +57,22 @@ class Extractor:
                 temp_value = temp_value.replace('__NEWLINE__', '\\n')
                 temp_value = temp_value.replace('__TAB__', '\\t')
                 temp_value = temp_value.replace('__CARRIAGE__', '\\r')
-                data[key] = temp_value
+                # 处理多个_comment条目
+                if key == '_comment':
+                    comment_counter += 1
+                    data[f'_comment_{comment_counter}'] = temp_value
+                else:
+                    data[key] = temp_value
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                data[key] = value
+                # 处理多个_comment条目
+                if key == '_comment':
+                    comment_counter += 1
+                    data[f'_comment_{comment_counter}'] = value
+                else:
+                    data[key] = value
         return data
     
     def _get_namespace_from_path(self, path_str: str) -> str:
@@ -250,6 +276,703 @@ class Extractor:
         logging.info(f"  - {len(zip_paths)} 个第三方汉化包处理完毕，共聚合 {len(final_pack_chinese_dict)} 条有效汉化。")
         return final_pack_chinese_dict
     
+    def extract_module_names(self, root_dir: Path) -> List[Dict[str, str]]:
+        """从指定目录提取模组名称"""
+        # 检查缓存
+        cache_key = str(root_dir)
+        if cache_key in self._module_names_cache:
+            logging.info("--- 从缓存中获取模组名称 ---")
+            return self._module_names_cache[cache_key]
+        
+        logging.info("--- 开始提取模组名称 ---")
+        
+        module_names = []
+        processed_files: Set[str] = set()
+        
+        # 支持的文件扩展名
+        extensions = ['.json', '.toml', '.info']
+        
+        # 扫描目录中的文件
+        self._scan_directory(root_dir, extensions, module_names, processed_files)
+        
+        # 扫描目录中的JAR文件
+        jar_files = list(root_dir.glob('*.jar'))
+        logging.info(f"发现 {len(jar_files)} 个JAR文件")
+        
+        for jar_file in jar_files:
+            self._process_jar_file(jar_file, module_names, processed_files)
+        
+        # 去重
+        unique_modules = []
+        seen_names = set()
+        for module in module_names:
+            name = module.get('name')
+            if name and name not in seen_names:
+                unique_modules.append(module)
+                seen_names.add(name)
+        
+        # 存储到缓存
+        self._module_names_cache[cache_key] = unique_modules
+        
+        logging.info(f"模组名称提取完成。共发现 {len(unique_modules)} 个模组名称。")
+        return unique_modules
+    
+    def extract_curseforge_names(self, root_dir: Path) -> List[Dict[str, str]]:
+        """从指定目录提取curseforge名称"""
+        # 检查缓存
+        cache_key = str(root_dir)
+        if cache_key in self._curseforge_names_cache:
+            logging.info("--- 从缓存中获取curseforge名称 ---")
+            return self._curseforge_names_cache[cache_key]
+        
+        logging.info("--- 开始提取curseforge名称 ---")
+        
+        curseforge_names = []
+        processed_files: Set[str] = set()
+        
+        # 支持的文件扩展名
+        extensions = ['.json', '.toml', '.info']
+        
+        # 扫描目录中的文件
+        self._scan_directory_for_curseforge(root_dir, extensions, curseforge_names, processed_files)
+        
+        # 扫描目录中的JAR文件
+        jar_files = list(root_dir.glob('*.jar'))
+        logging.info(f"发现 {len(jar_files)} 个JAR文件")
+        
+        for jar_file in jar_files:
+            self._process_jar_file_for_curseforge(jar_file, curseforge_names, processed_files)
+        
+        # 去重
+        unique_curseforge = []
+        seen_names = set()
+        for module in curseforge_names:
+            name = module.get('curseforge_name')
+            if name and name not in seen_names:
+                unique_curseforge.append(module)
+                seen_names.add(name)
+        
+        # 存储到缓存
+        self._curseforge_names_cache[cache_key] = unique_curseforge
+        
+        logging.info(f"curseforge名称提取完成。共发现 {len(unique_curseforge)} 个curseforge名称。")
+        return unique_curseforge
+    
+    def extract_modrinth_names(self, root_dir: Path, excluded_jar_files: List[Path] = None) -> List[Dict[str, str]]:
+        """从指定目录提取Modrinth名称
+        
+        Args:
+            root_dir: 要扫描的根目录
+            excluded_jar_files: 要排除的JAR文件列表（这些文件已经有Curseforge名称）
+        """
+        # 检查缓存
+        cache_key = str(root_dir)
+        if excluded_jar_files:
+            # 如果有排除的文件，不使用缓存
+            use_cache = False
+        else:
+            use_cache = True
+            if cache_key in self._modrinth_names_cache:
+                logging.info("--- 从缓存中获取Modrinth名称 ---")
+                return self._modrinth_names_cache[cache_key]
+        
+        logging.info("--- 开始提取Modrinth名称 ---")
+        
+        modrinth_names = []
+        processed_files: Set[str] = set()
+        
+        # 支持的文件扩展名
+        extensions = ['.json', '.toml', '.info']
+        
+        # 扫描目录中的文件
+        # 如果有排除的JAR文件，我们需要确定哪些目录文件也应该被排除
+        if excluded_jar_files:
+            # 从排除的JAR文件中提取模组名称，用于排除目录中的相关文件
+            excluded_mod_names = set()
+            for jar_file in excluded_jar_files:
+                # 从JAR文件名中提取模组名称（去掉版本号等后缀）
+                jar_name = jar_file.name
+                # 去掉.jar后缀
+                if jar_name.endswith('.jar'):
+                    jar_name = jar_name[:-4]
+                # 去掉常见的后缀（如-fabric, -forge等）
+                import re
+                # 匹配常见的后缀模式
+                jar_name = re.sub(r'-fabric.*', '', jar_name, flags=re.IGNORECASE)
+                jar_name = re.sub(r'-forge.*', '', jar_name, flags=re.IGNORECASE)
+                jar_name = re.sub(r'-mc.*', '', jar_name, flags=re.IGNORECASE)
+                jar_name = re.sub(r'_fabric.*', '', jar_name, flags=re.IGNORECASE)
+                jar_name = re.sub(r'_forge.*', '', jar_name, flags=re.IGNORECASE)
+                jar_name = re.sub(r'_mc.*', '', jar_name, flags=re.IGNORECASE)
+                # 去掉版本号
+                jar_name = re.sub(r'-\d+\.\d+.*', '', jar_name)
+                jar_name = re.sub(r'_\d+\.\d+.*', '', jar_name)
+                if jar_name:
+                    excluded_mod_names.add(jar_name.lower())
+            
+            # 扫描目录中的文件，但排除那些可能属于已排除模组的文件
+            for ext in extensions:
+                for file_path in root_dir.glob(f'*{ext}'):
+                    if file_path.is_file():
+                        # 检查文件名是否与排除的模组名称相关
+                        file_name = file_path.name
+                        file_name_lower = file_name.lower()
+                        
+                        # 检查是否应该排除这个文件
+                        exclude_file = False
+                        for mod_name in excluded_mod_names:
+                            if mod_name in file_name_lower:
+                                exclude_file = True
+                                break
+                        
+                        if not exclude_file:
+                            file_key = str(file_path)
+                            if file_key not in processed_files:
+                                logging.debug(f"处理文件以提取Modrinth名称: {file_path}")
+                                self._process_module_file_for_modrinth(file_path, modrinth_names)
+                                processed_files.add(file_key)
+            
+            # 扫描META-INF目录，但同样排除相关文件
+            meta_inf_dir = root_dir / 'META-INF'
+            if meta_inf_dir.exists() and meta_inf_dir.is_dir():
+                for ext in extensions:
+                    for file_path in meta_inf_dir.glob(f'*{ext}'):
+                        if file_path.is_file():
+                            file_key = str(file_path)
+                            if file_key not in processed_files:
+                                logging.debug(f"处理文件以提取Modrinth名称: {file_path}")
+                                self._process_module_file_for_modrinth(file_path, modrinth_names)
+                                processed_files.add(file_key)
+        else:
+            # 如果没有排除的文件，正常扫描目录
+            self._scan_directory_for_modrinth(root_dir, extensions, modrinth_names, processed_files)
+        
+        # 扫描目录中的JAR文件
+        all_jar_files = list(root_dir.glob('*.jar'))
+        
+        # 过滤出需要处理的JAR文件（排除那些已经有Curseforge名称的文件）
+        if excluded_jar_files:
+            excluded_paths = set(str(f) for f in excluded_jar_files)
+            jar_files = [f for f in all_jar_files if str(f) not in excluded_paths]
+            logging.info(f"发现 {len(all_jar_files)} 个JAR文件，其中 {len(excluded_jar_files)} 个已有Curseforge名称，将处理剩余 {len(jar_files)} 个JAR文件")
+        else:
+            jar_files = all_jar_files
+            logging.info(f"发现 {len(jar_files)} 个JAR文件")
+        
+        for jar_file in jar_files:
+            self._process_jar_file_for_modrinth(jar_file, modrinth_names, processed_files)
+        
+        # 去重
+        unique_modrinth = []
+        seen_names = set()
+        for module in modrinth_names:
+            name = module.get('modrinth_name')
+            if name and name not in seen_names:
+                unique_modrinth.append(module)
+                seen_names.add(name)
+        
+        # 存储到缓存（仅当没有排除文件时）
+        if use_cache:
+            self._modrinth_names_cache[cache_key] = unique_modrinth
+        
+        logging.info(f"Modrinth名称提取完成。共发现 {len(unique_modrinth)} 个Modrinth名称。")
+        return unique_modrinth
+    
+    def _scan_directory(self, directory: Path, extensions: List[str], module_names: List[Dict[str, str]], processed_files: Set[str]):
+        """扫描目录中的文件"""
+        # 扫描根目录
+        for ext in extensions:
+            for file_path in directory.glob(f'*{ext}'):
+                if file_path.is_file():
+                    file_key = str(file_path)
+                    if file_key not in processed_files:
+                        logging.debug(f"处理文件: {file_path}")
+                        self._process_module_file(file_path, module_names)
+                        processed_files.add(file_key)
+        
+        # 扫描META-INF目录
+        meta_inf_dir = directory / 'META-INF'
+        if meta_inf_dir.exists() and meta_inf_dir.is_dir():
+            for ext in extensions:
+                for file_path in meta_inf_dir.glob(f'*{ext}'):
+                    if file_path.is_file():
+                        file_key = str(file_path)
+                        if file_key not in processed_files:
+                            logging.debug(f"处理文件: {file_path}")
+                            self._process_module_file(file_path, module_names)
+                            processed_files.add(file_key)
+    
+    def _scan_directory_for_curseforge(self, directory: Path, extensions: List[str], curseforge_names: List[Dict[str, str]], processed_files: Set[str]):
+        """扫描目录中的文件以提取curseforge名称"""
+        # 扫描根目录
+        for ext in extensions:
+            for file_path in directory.glob(f'*{ext}'):
+                if file_path.is_file():
+                    file_key = str(file_path)
+                    if file_key not in processed_files:
+                        logging.debug(f"处理文件以提取curseforge名称: {file_path}")
+                        self._process_module_file_for_curseforge(file_path, curseforge_names)
+                        processed_files.add(file_key)
+        
+        # 扫描META-INF目录
+        meta_inf_dir = directory / 'META-INF'
+        if meta_inf_dir.exists() and meta_inf_dir.is_dir():
+            for ext in extensions:
+                for file_path in meta_inf_dir.glob(f'*{ext}'):
+                    if file_path.is_file():
+                        file_key = str(file_path)
+                        if file_key not in processed_files:
+                            logging.debug(f"处理文件以提取curseforge名称: {file_path}")
+                            self._process_module_file_for_curseforge(file_path, curseforge_names)
+                            processed_files.add(file_key)
+    
+    def _scan_directory_for_modrinth(self, directory: Path, extensions: List[str], modrinth_names: List[Dict[str, str]], processed_files: Set[str]):
+        """扫描目录中的文件以提取Modrinth名称"""
+        # 扫描根目录
+        for ext in extensions:
+            for file_path in directory.glob(f'*{ext}'):
+                if file_path.is_file():
+                    file_key = str(file_path)
+                    if file_key not in processed_files:
+                        logging.debug(f"处理文件以提取Modrinth名称: {file_path}")
+                        self._process_module_file_for_modrinth(file_path, modrinth_names)
+                        processed_files.add(file_key)
+        
+        # 扫描META-INF目录
+        meta_inf_dir = directory / 'META-INF'
+        if meta_inf_dir.exists() and meta_inf_dir.is_dir():
+            for ext in extensions:
+                for file_path in meta_inf_dir.glob(f'*{ext}'):
+                    if file_path.is_file():
+                        file_key = str(file_path)
+                        if file_key not in processed_files:
+                            logging.debug(f"处理文件以提取Modrinth名称: {file_path}")
+                            self._process_module_file_for_modrinth(file_path, modrinth_names)
+                            processed_files.add(file_key)
+    
+    def _process_jar_file(self, jar_file: Path, module_names: List[Dict[str, str]], processed_files: Set[str]):
+        """处理JAR文件中的模组信息"""
+        try:
+            with zipfile.ZipFile(jar_file, 'r') as zf:
+                # 检查JAR文件中的相关文件
+                for file_info in zf.infolist():
+                    # 跳过目录
+                    if file_info.filename.endswith('/'):
+                        continue
+                    
+                    # 检查是否是我们要找的文件
+                    file_path = file_info.filename
+                    file_key = f"{jar_file}:{file_path}"
+                    
+                    if file_key in processed_files:
+                        continue
+                    
+                    # 检查文件路径是否在根目录或META-INF目录
+                    if '/' not in file_path or file_path.startswith('META-INF/'):
+                        # 检查文件扩展名
+                        ext = Path(file_path).suffix
+                        if ext in ['.json', '.toml', '.info']:
+                            logging.debug(f"处理JAR文件中的文件: {jar_file} -> {file_path}")
+                            try:
+                                with zf.open(file_info) as f:
+                                    content = f.read().decode('utf-8-sig')
+                                    # 创建包含JAR文件名的完整路径
+                                    full_path = f"{jar_file.name}/{file_path}"
+                                    # 根据文件类型处理
+                                    if Path(file_path).suffix in ['.json', '.info'] or is_json_content(content):
+                                        self._extract_from_json(Path(full_path), content, module_names)
+                                    elif Path(file_path).suffix == '.toml' or is_toml_content(content):
+                                        self._extract_from_toml(Path(full_path), content, module_names)
+                                    processed_files.add(file_key)
+                            except UnicodeDecodeError:
+                                logging.warning(f"JAR文件中的文件编码错误，跳过处理: {jar_file} -> {file_path}")
+                            except Exception as e:
+                                logging.warning(f"处理JAR文件中的文件时发生错误: {jar_file} -> {file_path} - {e}")
+        except zipfile.BadZipFile:
+            logging.warning(f"无效的JAR文件，跳过处理: {jar_file}")
+        except Exception as e:
+            logging.warning(f"处理JAR文件时发生错误: {jar_file} - {e}")
+    
+    def _process_jar_file_for_curseforge(self, jar_file: Path, curseforge_names: List[Dict[str, str]], processed_files: Set[str]):
+        """处理JAR文件中的curseforge信息"""
+        try:
+            with zipfile.ZipFile(jar_file, 'r') as zf:
+                # 检查JAR文件中的相关文件
+                for file_info in zf.infolist():
+                    # 跳过目录
+                    if file_info.filename.endswith('/'):
+                        continue
+                    
+                    # 检查是否是我们要找的文件
+                    file_path = file_info.filename
+                    file_key = f"{jar_file}:{file_path}"
+                    
+                    if file_key in processed_files:
+                        continue
+                    
+                    # 检查文件路径是否在根目录或META-INF目录
+                    if '/' not in file_path or file_path.startswith('META-INF/'):
+                        # 检查文件扩展名
+                        ext = Path(file_path).suffix
+                        if ext in ['.json', '.toml', '.info']:
+                            logging.debug(f"处理JAR文件中的文件以提取curseforge名称: {jar_file} -> {file_path}")
+                            try:
+                                with zf.open(file_info) as f:
+                                    content = f.read().decode('utf-8-sig')
+                                    # 创建包含JAR文件名的完整路径
+                                    full_path = f"{jar_file.name}/{file_path}"
+                                    # 根据文件类型处理
+                                    if Path(file_path).suffix in ['.json', '.info'] or is_json_content(content):
+                                        self._extract_curseforge_from_json(Path(full_path), content, curseforge_names)
+                                    elif Path(file_path).suffix == '.toml' or is_toml_content(content):
+                                        self._extract_curseforge_from_toml(Path(full_path), content, curseforge_names)
+                                    processed_files.add(file_key)
+                            except UnicodeDecodeError:
+                                logging.warning(f"JAR文件中的文件编码错误，跳过处理: {jar_file} -> {file_path}")
+                            except Exception as e:
+                                logging.warning(f"处理JAR文件中的文件时发生错误: {jar_file} -> {file_path} - {e}")
+        except zipfile.BadZipFile:
+            logging.warning(f"无效的JAR文件，跳过处理: {jar_file}")
+        except Exception as e:
+            logging.warning(f"处理JAR文件时发生错误: {jar_file} - {e}")
+    
+    def _process_jar_file_for_modrinth(self, jar_file: Path, modrinth_names: List[Dict[str, str]], processed_files: Set[str]):
+        """处理JAR文件中的Modrinth信息"""
+        try:
+            with zipfile.ZipFile(jar_file, 'r') as zf:
+                # 检查JAR文件中的相关文件
+                for file_info in zf.infolist():
+                    # 跳过目录
+                    if file_info.filename.endswith('/'):
+                        continue
+                    
+                    # 检查是否是我们要找的文件
+                    file_path = file_info.filename
+                    file_key = f"{jar_file}:{file_path}"
+                    
+                    if file_key in processed_files:
+                        continue
+                    
+                    # 检查文件路径是否在根目录或META-INF目录
+                    if '/' not in file_path or file_path.startswith('META-INF/'):
+                        # 检查文件扩展名
+                        ext = Path(file_path).suffix
+                        if ext in ['.json', '.toml', '.info']:
+                            logging.debug(f"处理JAR文件中的文件以提取Modrinth名称: {jar_file} -> {file_path}")
+                            try:
+                                with zf.open(file_info) as f:
+                                    content = f.read().decode('utf-8-sig')
+                                    # 创建包含JAR文件名的完整路径
+                                    full_path = f"{jar_file.name}/{file_path}"
+                                    # 根据文件类型处理
+                                    if Path(file_path).suffix in ['.json', '.info'] or is_json_content(content):
+                                        self._extract_modrinth_from_json(Path(full_path), content, modrinth_names)
+                                    elif Path(file_path).suffix == '.toml' or is_toml_content(content):
+                                        self._extract_modrinth_from_toml(Path(full_path), content, modrinth_names)
+                                    processed_files.add(file_key)
+                            except UnicodeDecodeError:
+                                logging.warning(f"JAR文件中的文件编码错误，跳过处理: {jar_file} -> {file_path}")
+                            except Exception as e:
+                                logging.warning(f"处理JAR文件中的文件时发生错误: {jar_file} -> {file_path} - {e}")
+        except zipfile.BadZipFile:
+            logging.warning(f"无效的JAR文件，跳过处理: {jar_file}")
+        except Exception as e:
+            logging.warning(f"处理JAR文件时发生错误: {jar_file} - {e}")
+    
+    def _process_module_file(self, file_path: Path, module_names: List[Dict[str, str]]):
+        """处理单个模组信息文件"""
+        try:
+            content = file_path.read_text(encoding='utf-8-sig')
+            
+            # 检查文件内容是否为JSON格式
+            if file_path.suffix in ['.json', '.info'] or is_json_content(content):
+                self._extract_from_json(file_path, content, module_names)
+            elif file_path.suffix == '.toml' or is_toml_content(content):
+                self._extract_from_toml(file_path, content, module_names)
+        except UnicodeDecodeError:
+            logging.warning(f"文件编码错误，跳过处理: {file_path}")
+        except PermissionError:
+            logging.warning(f"无权限访问文件，跳过处理: {file_path}")
+        except Exception as e:
+            logging.warning(f"处理文件时发生错误: {file_path} - {e}")
+    
+    def _process_module_file_for_curseforge(self, file_path: Path, curseforge_names: List[Dict[str, str]]):
+        """处理单个文件以提取curseforge名称"""
+        try:
+            content = file_path.read_text(encoding='utf-8-sig')
+            
+            # 检查文件内容是否为JSON格式
+            if file_path.suffix in ['.json', '.info'] or is_json_content(content):
+                self._extract_curseforge_from_json(file_path, content, curseforge_names)
+            elif file_path.suffix == '.toml' or is_toml_content(content):
+                self._extract_curseforge_from_toml(file_path, content, curseforge_names)
+        except UnicodeDecodeError:
+            logging.warning(f"文件编码错误，跳过处理: {file_path}")
+        except PermissionError:
+            logging.warning(f"无权限访问文件，跳过处理: {file_path}")
+        except Exception as e:
+            logging.warning(f"处理文件时发生错误: {file_path} - {e}")
+    
+    def _process_module_file_for_modrinth(self, file_path: Path, modrinth_names: List[Dict[str, str]]):
+        """处理单个文件以提取Modrinth名称"""
+        try:
+            content = file_path.read_text(encoding='utf-8-sig')
+            
+            # 检查文件内容是否为JSON格式
+            if file_path.suffix in ['.json', '.info'] or is_json_content(content):
+                self._extract_modrinth_from_json(file_path, content, modrinth_names)
+            elif file_path.suffix == '.toml' or is_toml_content(content):
+                self._extract_modrinth_from_toml(file_path, content, modrinth_names)
+        except UnicodeDecodeError:
+            logging.warning(f"文件编码错误，跳过处理: {file_path}")
+        except PermissionError:
+            logging.warning(f"无权限访问文件，跳过处理: {file_path}")
+        except Exception as e:
+            logging.warning(f"处理文件时发生错误: {file_path} - {e}")
+    
+    def _extract_from_json(self, file_path: Path, content: str, module_names: List[Dict[str, str]]):
+        """从JSON文件中提取模组名称"""
+        try:
+            data = json.loads(content)
+            # 尝试从不同字段提取名称
+            name_fields = ['name', 'displayName', 'modName', 'title']
+            
+            # 检查根级别字段
+            if isinstance(data, dict):
+                for field in name_fields:
+                    if field in data and isinstance(data[field], str):
+                        module_names.append({
+                            'name': data[field],
+                            'source': str(file_path)
+                        })
+                        return
+                
+                # 检查mods数组 (mcmod.info格式)
+                if 'mods' in data and isinstance(data['mods'], list):
+                    for mod in data['mods']:
+                        if isinstance(mod, dict):
+                            for field in name_fields:
+                                if field in mod and isinstance(mod[field], str):
+                                    module_names.append({
+                                        'name': mod[field],
+                                        'source': str(file_path)
+                                    })
+                                    return
+                # 检查modList数组 (另一种格式)
+                elif 'modList' in data and isinstance(data['modList'], list):
+                    for mod in data['modList']:
+                        if isinstance(mod, dict):
+                            for field in name_fields:
+                                if field in mod and isinstance(mod[field], str):
+                                    module_names.append({
+                                        'name': mod[field],
+                                        'source': str(file_path)
+                                    })
+                                    return
+            # 检查根级别是否是数组 (mcmod.info格式的另一种形式)
+            elif isinstance(data, list):
+                for mod in data:
+                    if isinstance(mod, dict):
+                        for field in name_fields:
+                            if field in mod and isinstance(mod[field], str):
+                                module_names.append({
+                                    'name': mod[field],
+                                    'source': str(file_path)
+                                })
+                                return
+        except json.JSONDecodeError:
+            logging.warning(f"JSON格式错误，尝试修复并重新解析: {file_path}")
+            # 尝试修复JSON字符串
+            try:
+                # 移除多余的换行符和空白字符
+                import re
+                # 尝试匹配name字段的简单模式
+                name_match = re.search(r'"name"\s*:\s*"([^"]*)"', content)
+                if name_match:
+                    module_names.append({
+                        'name': name_match.group(1),
+                        'source': str(file_path)
+                    })
+                    return
+                # 尝试更复杂的模式，匹配modList中的name
+                modlist_name_match = re.search(r'"modList"\s*:\s*\[\s*\{[\s\S]*?"name"\s*:\s*"([^"]*)"', content)
+                if modlist_name_match:
+                    module_names.append({
+                        'name': modlist_name_match.group(1),
+                        'source': str(file_path)
+                    })
+                    return
+            except Exception as e:
+                logging.warning(f"修复JSON时发生错误: {e}")
+            logging.warning(f"无法提取模组名称，跳过处理: {file_path}")
+    
+    def _extract_from_toml(self, file_path: Path, content: str, module_names: List[Dict[str, str]]):
+        """从TOML文件中提取模组名称"""
+        try:
+            # 简单解析TOML格式，查找displayName字段
+            import re
+            # 匹配 displayName="..." 或 displayName = "..." 格式，支持包含单引号的字符串
+            pattern = re.compile(r'displayName\s*=\s*(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL)
+            match = pattern.search(content)
+            
+            if match:
+                module_names.append({
+                    'name': match.group(2),
+                    'source': str(file_path)
+                })
+        except Exception as e:
+            logging.warning(f"解析TOML文件时发生错误: {file_path} - {e}")
+
+    def _extract_curseforge_from_json(self, file_path: Path, content: str, curseforge_names: List[Dict[str, str]]):
+        """从JSON文件中提取curseforge名称"""
+        try:
+            # 搜索包含curseforge.com的字符串
+            import re
+            # 匹配包含curseforge.com的链接
+            curseforge_pattern = re.compile(r'curseforge\.com[^"\']*', re.IGNORECASE)
+            matches = curseforge_pattern.finditer(content)
+            
+            for match in matches:
+                curseforge_url = match.group(0)
+                # 按照优先级提取curseforge名称
+                # 主提取规则：第三个反斜杠与第四个反斜杠之间的内容
+                parts = curseforge_url.split('/')
+                if len(parts) > 4:
+                    # 有第四个反斜杠
+                    curseforge_name = parts[4]
+                elif len(parts) == 4:
+                    # 没有第四个反斜杠，使用第三个反斜杠后的内容
+                    curseforge_name = parts[3]
+                else:
+                    # 格式不符合要求，跳过
+                    continue
+                
+                # 清理提取的名称，移除可能的查询参数或其他内容
+                curseforge_name = curseforge_name.split('?')[0].split('#')[0]
+                
+                if curseforge_name:
+                    curseforge_names.append({
+                        'curseforge_name': curseforge_name,
+                        'source': str(file_path)
+                    })
+                    return
+        except Exception as e:
+            logging.warning(f"从JSON文件提取curseforge名称时发生错误: {file_path} - {e}")
+    
+    def _extract_modrinth_from_json(self, file_path: Path, content: str, modrinth_names: List[Dict[str, str]]):
+        """从JSON文件中提取Modrinth名称"""
+        try:
+            # 搜索包含modrinth.com的字符串
+            import re
+            # 匹配包含modrinth.com的链接
+            modrinth_pattern = re.compile(r'modrinth\.com[^"\']*', re.IGNORECASE)
+            matches = modrinth_pattern.finditer(content)
+            
+            for match in matches:
+                modrinth_url = match.group(0)
+                # 按照优先级提取Modrinth名称
+                # 主提取规则：从mod/后的内容提取
+                parts = modrinth_url.split('/')
+                if 'mod' in parts:
+                    mod_index = parts.index('mod')
+                    if mod_index + 1 < len(parts):
+                        modrinth_name = parts[mod_index + 1]
+                    else:
+                        # 格式不符合要求，跳过
+                        continue
+                else:
+                    # 格式不符合要求，跳过
+                    continue
+                
+                # 清理提取的名称，移除可能的查询参数或其他内容
+                modrinth_name = modrinth_name.split('?')[0].split('#')[0]
+                
+                if modrinth_name:
+                    # 添加modrinth-前缀以区分
+                    modrinth_name = f"modrinth-{modrinth_name}"
+                    modrinth_names.append({
+                        'modrinth_name': modrinth_name,
+                        'source': str(file_path)
+                    })
+                    return
+        except Exception as e:
+            logging.warning(f"从JSON文件提取Modrinth名称时发生错误: {file_path} - {e}")
+
+    def _extract_curseforge_from_toml(self, file_path: Path, content: str, curseforge_names: List[Dict[str, str]]):
+        """从TOML文件中提取curseforge名称"""
+        try:
+            # 搜索包含curseforge.com的字符串
+            import re
+            # 匹配包含curseforge.com的链接
+            curseforge_pattern = re.compile(r'curseforge\.com[^"\']*', re.IGNORECASE)
+            matches = curseforge_pattern.finditer(content)
+            
+            for match in matches:
+                curseforge_url = match.group(0)
+                # 按照优先级提取curseforge名称
+                # 主提取规则：第三个反斜杠与第四个反斜杠之间的内容
+                parts = curseforge_url.split('/')
+                if len(parts) > 4:
+                    # 有第四个反斜杠
+                    curseforge_name = parts[4]
+                elif len(parts) == 4:
+                    # 没有第四个反斜杠，使用第三个反斜杠后的内容
+                    curseforge_name = parts[3]
+                else:
+                    # 格式不符合要求，跳过
+                    continue
+                
+                # 清理提取的名称，移除可能的查询参数或其他内容
+                curseforge_name = curseforge_name.split('?')[0].split('#')[0]
+                
+                if curseforge_name:
+                    curseforge_names.append({
+                        'curseforge_name': curseforge_name,
+                        'source': str(file_path)
+                    })
+                    return
+        except Exception as e:
+            logging.warning(f"从TOML文件提取curseforge名称时发生错误: {file_path} - {e}")
+    
+    def _extract_modrinth_from_toml(self, file_path: Path, content: str, modrinth_names: List[Dict[str, str]]):
+        """从TOML文件中提取Modrinth名称"""
+        try:
+            # 搜索包含modrinth.com的字符串
+            import re
+            # 匹配包含modrinth.com的链接
+            modrinth_pattern = re.compile(r'modrinth\.com[^"\']*', re.IGNORECASE)
+            matches = modrinth_pattern.finditer(content)
+            
+            for match in matches:
+                modrinth_url = match.group(0)
+                # 按照优先级提取Modrinth名称
+                # 主提取规则：从mod/后的内容提取
+                parts = modrinth_url.split('/')
+                if 'mod' in parts:
+                    mod_index = parts.index('mod')
+                    if mod_index + 1 < len(parts):
+                        modrinth_name = parts[mod_index + 1]
+                    else:
+                        # 格式不符合要求，跳过
+                        continue
+                else:
+                    # 格式不符合要求，跳过
+                    continue
+                
+                # 清理提取的名称，移除可能的查询参数或其他内容
+                modrinth_name = modrinth_name.split('?')[0].split('#')[0]
+                
+                if modrinth_name:
+                    # 添加modrinth-前缀以区分
+                    modrinth_name = f"modrinth-{modrinth_name}"
+                    modrinth_names.append({
+                        'modrinth_name': modrinth_name,
+                        'source': str(file_path)
+                    })
+                    return
+        except Exception as e:
+            logging.warning(f"从TOML文件提取Modrinth名称时发生错误: {file_path} - {e}")
+
     def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_path: str, progress_update_callback=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("--- 阶段 1: 开始聚合所有语言数据 ---")

@@ -45,13 +45,25 @@ class Builder:
         # 构建输出内容，保留原始格式
         output = []
         current_pos = 0
+        comment_counter = 0
         
         for info in key_info:
             # 添加匹配前的内容
             output.append(template_content[current_pos:info['start']])
             
             # 替换值
-            if info['key'] in translations:
+            if info['key'] == '_comment':
+                # 对于 _comment 键，查找对应的带有计数器后缀的键
+                comment_counter += 1
+                translated_key = f'_comment_{comment_counter}'
+                if translated_key in translations:
+                    translated_value = translations[translated_key]
+                    # 保持原始键的格式，只替换值
+                    output.append(f'"{info["key"]}":"{translated_value}"')
+                else:
+                    # 保留原始值
+                    output.append(info['full_match'])
+            elif info['key'] in translations:
                 translated_value = translations[info['key']]
                 # 保持原始键的格式，只替换值
                 output.append(f'"{info["key"]}":"{translated_value}"')
@@ -103,13 +115,25 @@ class Builder:
         # 构建输出内容，保留原始格式
         output = []
         current_pos = 0
+        comment_counter = 0
         
         for info in key_info:
             # 添加匹配前的内容
             output.append(template_content[current_pos:info['start']])
             
             # 替换值
-            if info['key'] in translations:
+            if info['key'] == '_comment':
+                # 对于 _comment 键，查找对应的带有计数器后缀的键
+                comment_counter += 1
+                translated_key = f'_comment_{comment_counter}'
+                if translated_key in translations:
+                    translated_value = translations[translated_key]
+                    # 保持原始缩进和键的格式，只替换值
+                    output.append(f'{info["indent"]}{info["key"]} = {translated_value}')
+                else:
+                    # 保留原始值
+                    output.append(info['full_match'])
+            elif info['key'] in translations:
                 translated_value = translations[info['key']]
                 # 保持原始缩进和键的格式，只替换值
                 output.append(f'{info["indent"]}{info["key"]} = {translated_value}')
@@ -144,21 +168,34 @@ class Builder:
         current_pos = 0
         output_content = ""
         processed_keys = set()
+        comment_counter = 0
         
         for key, start, end in key_positions:
             # 添加当前位置到匹配开始位置的内容
             output_content += template_content[current_pos:start]
             
             # 替换为翻译后的值
-            if key in translations:
+            if key == '_comment':
+                # 对于 _comment 键，查找对应的带有计数器后缀的键
+                comment_counter += 1
+                translated_key = f'_comment_{comment_counter}'
+                if translated_key in translations:
+                    translated_value = translations[translated_key]
+                    # 保持原始键的格式，只替换值
+                    output_content += f'"{key}":"{translated_value}"'
+                    processed_keys.add(translated_key)
+                else:
+                    # 如果没有翻译，保持原始值
+                    output_content += template_content[start:end]
+            elif key in translations:
                 translated_value = translations[key]
                 # 保持原始键的格式，只替换值
                 output_content += f'"{key}":"{translated_value}"'
+                processed_keys.add(key)
             else:
                 # 如果没有翻译，保持原始值
                 output_content += template_content[start:end]
             
-            processed_keys.add(key)
             current_pos = end
         
         # 添加剩余内容

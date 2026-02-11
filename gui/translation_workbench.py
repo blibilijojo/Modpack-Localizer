@@ -21,12 +21,13 @@ from gui.find_replace_dialog import FindReplaceDialog
 from core.term_database import TermDatabase
 
 class TranslationWorkbench(ttk.Frame):
-    def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None, undo_history: dict = None):
+    def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None, undo_history: dict = None, module_names: list = None):
         super().__init__(parent_frame)
         self.translation_data = initial_data
         self.namespace_formats = namespace_formats
         self.raw_english_files = raw_english_files
         self.current_settings = current_settings
+        self.module_names = module_names or []
         self.log_callback = log_callback or (lambda msg, lvl: None)
         self.finish_callback = finish_callback
         self.cancel_callback = cancel_callback
@@ -661,7 +662,11 @@ class TranslationWorkbench(ttk.Frame):
     def _update_item_in_tree(self, iid, item):
         """更新树视图中的项目"""
         if self.trans_tree.exists(iid):
-            self.trans_tree.item(iid, values=(item['key'], item['en'], item.get('zh', ''), item['source']))
+            # 前台显示时将 _comment_* 格式的键显示为 _comment
+            display_key = item['key']
+            if display_key.startswith('_comment_'):
+                display_key = '_comment'
+            self.trans_tree.item(iid, values=(display_key, item['en'], item.get('zh', ''), item['source']))
 
     def replace_all(self, params):
         find_text = params["find_text"]
@@ -1017,8 +1022,12 @@ class TranslationWorkbench(ttk.Frame):
                 else:
                     source = '手动校对'  # 原文不为空且有译文，标记为手动校对
             
+            # 前台显示时将 _comment_* 格式的键显示为 _comment
+            display_key = item_data['key']
+            if display_key.startswith('_comment_'):
+                display_key = '_comment'
             self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                   values=(display_key, item_data['en'], item_data.get('zh', ''), source),
                                    tags=(source,))
 
     def _sort_items_by_default_order(self):
@@ -1059,8 +1068,12 @@ class TranslationWorkbench(ttk.Frame):
                 else:
                     source = '手动校对'  # 原文不为空且有译文，标记为手动校对
             
+            # 前台显示时将 _comment_* 格式的键显示为 _comment
+            display_key = item_data['key']
+            if display_key.startswith('_comment_'):
+                display_key = '_comment'
             self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
+                                   values=(display_key, item_data['en'], item_data.get('zh', ''), source),
                                    tags=(source,))
     
     def _sort_items_by_source(self):
@@ -1266,7 +1279,12 @@ class TranslationWorkbench(ttk.Frame):
             "timestamp": datetime.now().isoformat(),
             "workbench_data": latest_data, 
             "namespace_formats": self.namespace_formats,
-            "raw_english_files": self.raw_english_files
+            "raw_english_files": self.raw_english_files,
+            "module_names": self.module_names,
+            "project_name": self.project_name,
+            "current_settings": self.current_settings,
+            "undo_stack": self.undo_stack,
+            "redo_stack": self.redo_stack
         }
         try:
             with open(save_path, 'w', encoding='utf-8') as f: 
@@ -2538,4 +2556,7 @@ class TranslationWorkbench(ttk.Frame):
                 github_config
             )
             self._github_upload_ui.pack(fill="both", expand=True)
+        else:
+            # 更新GitHub上传UI中的命名空间和分支
+            self._github_upload_ui.update_namespace_and_branch(current_namespace)
         

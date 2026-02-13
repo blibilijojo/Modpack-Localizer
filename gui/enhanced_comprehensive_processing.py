@@ -920,13 +920,18 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _on_cancel(self):
         """取消处理"""
         if self.processing:
-            # 这里可以添加取消逻辑
+            # 记录取消操作
+            self.workbench.log_callback("用户点击取消按钮，正在终止AI翻译任务...", "INFO")
+            # 取消AI翻译操作
             self.processing = False
-            self.workbench.status_label.config(text="处理已取消")
-            self.workbench.log_callback("处理已取消", "INFO")
+            # 调用workbench的取消方法，它会处理线程池的关闭和重建
+            self.workbench.cancel_ai_translation()
+            # 恢复界面状态
             self.start_button.config(state="normal")
             self.cancel_button.config(text="取消", bootstyle="outline-secondary")
             self.workbench.mode_switch_btn.config(state="normal")
+            # 记录取消完成
+            self.workbench.log_callback("AI翻译任务已成功取消", "INFO")
         else:
             # 因为现在是Frame组件，不需要destroy，只需要重置状态
             self.workbench.status_label.config(text="准备就绪")
@@ -959,6 +964,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _ai_translation_worker(self, selected_modules):
         """AI翻译工作线程"""
         try:
+            # 检查取消标志
+            if not self.processing:
+                self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
+            
             # 获取翻译模式，将显示值转换为内部值
             translation_mode_display = self.translation_mode_var.get()
             translation_mode = self.modes_values.get(translation_mode_display, "hybrid")
@@ -970,8 +980,18 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             
             # 先收集所有已翻译文本，用于混合翻译模式
             for ns in selected_modules:
+                # 检查取消标志
+                if not self.processing:
+                    self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                    return
+                
                 items = self.workbench.translation_data.get(ns, {}).get("items", [])
                 for idx, item in enumerate(items):
+                    # 检查取消标志
+                    if not self.processing:
+                        self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                        return
+                    
                     en_text = item.get("en", "").strip()
                     zh_text = item.get("zh", "").strip()
                     if en_text:
@@ -999,6 +1019,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             if not all_items:
                 # 添加安全检查
                 if self.winfo_exists():
+                    from tkinter import messagebox
                     self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
                     if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
                         self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
@@ -1154,17 +1175,34 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             # 记录翻译设置
             logging.info(f"AI翻译设置 - 模式: {translation_mode}, 批处理大小: {batch_size}")
             
-            # 使用线程池执行翻译
-            with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
-                future_map = {}
+            # 使用workbench的线程池执行翻译
+            executor = self.workbench._thread_pool
+            future_map = {}
+            
+            try:
+                # 保存当前翻译器实例
+                self.translator = translator
                 
                 for i, (batch, contexts) in enumerate(batches):
+                    # 检查取消标志
+                    if not self.processing:
+                        break
                     # 根据模式调整提示词
                     batch_prompt = self._adjust_prompt_for_mode(s['prompt'], translation_mode, contexts)
                     future_map[executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt, s.get('ai_stream_timeout', 30)))] = i
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:
+                        # 取消所有未完成的任务
+                        for f in future_map:
+                            if not f.done():
+                                try:
+                                    f.cancel()
+                                except Exception:
+                                    pass
+                        # 取消翻译器任务
+                        if hasattr(self, 'translator') and self.translator:
+                            self.translator.cancel()
                         break
                     
                     batch_idx = future_map[future]
@@ -1175,8 +1213,15 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     
                     self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
                     self.workbench.log_callback(status_text, "INFO")
+            except Exception as e:
+                logging.error(f"执行翻译任务时发生错误: {e}")
             
             if not self.processing:
+                # 记录取消日志
+                self.workbench.log_callback("AI翻译已取消，所有任务已终止", "INFO")
+                # 取消翻译器任务
+                if hasattr(self, 'translator') and self.translator:
+                    self.translator.cancel()
                 return
             
             # 5. 合并翻译结果
@@ -1192,6 +1237,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             logging.error(f"AI翻译失败: {e}", exc_info=True)
             # 添加安全检查
             if self.winfo_exists():
+                from tkinter import messagebox
                 self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}"))
                 if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
                     self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
@@ -1486,14 +1532,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     
     def _update_translations(self, item_mapping, translations, translation_mode):
         """更新翻译结果"""
-        # 强制记录当前状态用于撤销，不检查状态是否相同
-        # 因为AI翻译会批量修改数据，必须确保能撤销
-        self.workbench.undo_stack.append(copy.deepcopy(self.workbench.translation_data))
-        self.workbench.undo_targets.append(None)
-        self.workbench.redo_stack.clear()
-        self.workbench.redo_targets.clear()
-        self.workbench._update_history_buttons()
-        
+        # 收集修改记录
+        changes = []
         updated_count = 0
         skipped_count = 0
         
@@ -1533,6 +1573,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 # 润色模式下：只有当译文有变化时才更新
                 if translation_mode == "polish":
                     if final_translation != previous_translation:
+                        # 记录修改
+                        changes.append({
+                            'ns': ns,
+                            'key': item.get('key', ''),
+                            'original': previous_translation,
+                            'new': final_translation
+                        })
                         # 更新翻译结果
                         item['zh'] = final_translation
                         item['source'] = 'AI翻译'
@@ -1542,9 +1589,27 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         skipped_count += 1
                 else:
                     # 其他模式：直接更新
+                    # 记录修改
+                    changes.append({
+                        'ns': ns,
+                        'key': item.get('key', ''),
+                        'original': previous_translation,
+                        'new': final_translation
+                    })
                     item['zh'] = final_translation
                     item['source'] = 'AI翻译'
                     updated_count += 1
+        
+        # 强制记录当前状态用于撤销，不检查状态是否相同
+        # 因为AI翻译会批量修改数据，必须确保能撤销
+        details = {
+            'process_type': 'ai_translation',
+            'changes': changes,
+            'updated_count': updated_count,
+            'skipped_count': skipped_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
+        self.workbench._update_history_buttons()
         
         # 更新UI
         self.workbench._populate_namespace_tree()
@@ -1624,6 +1689,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         if not export_data:
             # 添加安全检查
             if self.winfo_exists():
+                from tkinter import messagebox
                 self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要导出。"))
                 if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
                     self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
@@ -1657,6 +1723,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 self.after(0, lambda: self.workbench.log_callback(f"成功导出 {len(export_data)} 条记录到 {file_path}", "SUCCESS"))
             except Exception as e:
                 logging.error(f"导出文件失败: {e}")
+                from tkinter import messagebox
                 self.after(0, lambda err=e: messagebox.showerror("导出失败", f"导出文件时发生错误:\n{err}"))
         else:
             # 导出到剪贴板
@@ -1669,9 +1736,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 status_text = f"已将 {len(export_data)} 条记录复制到剪贴板"
                 self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
                 self.after(0, lambda: self.workbench.log_callback(f"成功将 {len(export_data)} 条记录复制到剪贴板", "SUCCESS"))
+                from tkinter import messagebox
                 self.after(0, lambda: messagebox.showinfo("导出完成", f"已将 {len(export_data)} 条记录复制到剪贴板"))
             except Exception as e:
                 logging.error(f"复制到剪贴板失败: {e}")
+                from tkinter import messagebox
                 self.after(0, lambda err=e: messagebox.showerror("导出失败", f"复制到剪贴板时发生错误:\n{err}"))
         
         self.after(0, lambda: setattr(self, "processing", False))
@@ -1741,6 +1810,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             if not all_items:
                 # 添加安全检查
                 if self.winfo_exists():
+                    from tkinter import messagebox
                     self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
                     if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
                         self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
@@ -1757,6 +1827,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             
             corrected_count = 0
             total_count = len(all_items)
+            changes = []
             
             # 批量处理
             batch_size = 10
@@ -1775,6 +1846,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         
                         # 如果有变化，更新翻译结果
                         if corrected_text != zh_text:
+                            # 记录修改
+                            changes.append({
+                                'ns': ns,
+                                'key': item.get('key', ''),
+                                'original': zh_text,
+                                'new': corrected_text
+                            })
                             item['zh'] = corrected_text
                             item['source'] = '标点修正'
                             corrected_count += 1
@@ -1792,12 +1870,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             # 更新UI
             # 添加安全检查
             if self.winfo_exists():
-                self.after(0, lambda: self._update_punctuation_results(corrected_count, total_count))
+                self.after(0, lambda: self._update_punctuation_results(corrected_count, total_count, changes))
             
         except Exception as e:
             logging.error(f"标点修正失败: {e}", exc_info=True)
             # 添加安全检查
             if self.winfo_exists():
+                from tkinter import messagebox
                 self.after(0, lambda: messagebox.showerror("标点修正失败", f"执行标点修正时发生错误:\n{e}"))
                 if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
                     self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
@@ -1808,13 +1887,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 if hasattr(self, 'start_button') and self.start_button.winfo_exists():
                     self.after(0, lambda: self.start_button.config(state="normal"))
     
-    def _update_punctuation_results(self, corrected_count, total_count):
+    def _update_punctuation_results(self, corrected_count, total_count, changes):
         """更新标点修正结果"""
         # 强制记录当前状态用于撤销
-        self.workbench.undo_stack.append(copy.deepcopy(self.workbench.translation_data))
-        self.workbench.undo_targets.append(None)
-        self.workbench.redo_stack.clear()
-        self.workbench.redo_targets.clear()
+        details = {
+            'process_type': 'punctuation_correction',
+            'changes': changes,
+            'corrected_count': corrected_count,
+            'total_count': total_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
         self.workbench._update_history_buttons()
         
         # 更新UI

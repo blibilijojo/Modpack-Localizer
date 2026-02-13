@@ -238,10 +238,10 @@ class GitHubUploadUI(tk.Frame):
     def _update_path_display(self):
         # 构建路径
         version = self.version_var.get().strip()
-        # 使用模组名称作为项目名称
-        mod_name = self.mod_name_var.get().strip() or self.default_namespace
+        # 使用项目名称作为项目名称
+        project_name = self.project_name_var.get().strip() or self.default_namespace
         namespace = self.namespace_var.get().strip()
-        path = f"projects/{version}/assets/{mod_name}/{namespace}/lang"
+        path = f"projects/{version}/assets/{project_name}/{namespace}/lang"
         self.path_var.set(path)
     
     def _on_upload(self):
@@ -369,15 +369,23 @@ class GitHubUploadUI(tk.Frame):
                             project_name = mod_data['curseforge_name']
                         elif 'modrinth_name' in mod_data and mod_data['modrinth_name']:
                             project_name = mod_data['modrinth_name']
-                # 如果 curseforge_name 和 modrinth_name 都为空，项目名称也为空
-                # 不再回退到命名空间
-                # 使用 project_name 作为上传的项目名称
-                mod_name = project_name
+                        elif 'mod_name' in mod_data:
+                            project_name = mod_data['mod_name']
+                        elif 'display_name' in mod_data:
+                            # 从display_name中提取模组名称（去掉括号中的内容）
+                            display_name = mod_data['display_name']
+                            if ' (' in display_name:
+                                project_name = display_name.split(' (')[0]
+                            else:
+                                project_name = display_name
+                        else:
+                            # 如果都没有，使用命名空间作为默认值
+                            project_name = upload_config['namespace']
                 success, message = github_service.upload_translations(
                     final_translations, 
                     upload_config['version'], 
                     self.github_config.get('commit_message', '提交'),
-                    project_name=mod_name,
+                    project_name=project_name,
                     namespace=upload_config['namespace'],
                     file_format=upload_config['file_format'],
                     raw_english_files=raw_english_files

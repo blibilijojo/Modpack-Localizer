@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import re
 import copy
+import uuid
 
 from utils import config_manager
 from services.ai_translator import AITranslator
@@ -42,15 +43,24 @@ class TranslationWorkbench(ttk.Frame):
         self._last_term_update_time = 0
         self._term_update_delay = 100  # 延迟100ms执行术语匹配
         
-        # 术语匹配结果缓存
-        self._term_match_cache = {}
+        # 术语匹配结果缓存 - 使用OrderedDict实现LRU缓存
+        from collections import OrderedDict
+        self._term_match_cache = OrderedDict()
         self._term_cache_max_size = 1000  # 缓存最大条目数
-        self._term_cache_cleanup_threshold = 800  # 缓存清理阈值
         
         # 术语搜索线程控制
         self._current_term_thread = None
         self._term_search_cancelled = False
         self._current_search_id = 0
+        
+        # AI翻译取消控制
+        self._ai_translation_cancelled = False
+        # 当前的AI翻译器实例
+        self._current_translator = None
+        
+        # 线程池管理
+        from concurrent.futures import ThreadPoolExecutor
+        self._thread_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ModpackLocalizer")
 
         self.final_translations = None
         self.current_selection_info = None
@@ -61,10 +71,26 @@ class TranslationWorkbench(ttk.Frame):
         self.current_project_path = project_path
         self.is_dirty = False
         
-        self.undo_stack = []
-        self.redo_stack = []
-        self.undo_targets = []
-        self.redo_targets = []
+        # 操作记录系统
+        self.operation_history = []  # 操作历史记录
+        self.max_history_size = 100   # 最大历史记录数量
+        self.last_operation_time = 0  # 上次操作时间
+        self.operation_merge_window = 2.0  # 操作合并窗口（秒）
+        self.current_state_index = 0  # 当前状态在操作历史中的索引
+        
+        # 操作类型定义
+        self.OPERATION_TYPES = {
+            'INIT': '初始化',
+            'EDIT': '文本编辑',
+            'REPLACE': '替换操作',
+            'REPLACE_ALL': '全部替换',
+            'IMPORT': '导入数据',
+            'AI_TRANSLATION': 'AI翻译',
+            'BATCH_PROCESS': '批量处理',
+            'DICTIONARY_ADD': '添加词典',
+            'REDO': '重做操作',
+            'OTHER': '其他操作'
+        }
         
         self.finish_button_text = finish_button_text
 
@@ -87,7 +113,19 @@ class TranslationWorkbench(ttk.Frame):
         # 同时在idle时再次检查，确保窗口完全初始化后比例正确
         self.after_idle(self._set_initial_sash_position)
         
-        self._record_action(target_iid=None) 
+        # 初始化操作历史（不记录为用户操作）
+        # 添加初始状态作为历史记录的基础
+        import uuid
+        initial_state = {
+            'id': str(uuid.uuid4()),
+            'type': 'INIT',
+            'description': '初始化',
+            'timestamp': datetime.now().isoformat(),
+            'target_iid': None,
+            'details': {'project_name': self.project_name},
+            'state': copy.deepcopy(self.translation_data)
+        }
+        self.operation_history = [initial_state]
         self._update_history_buttons()
         self.bind_all("<Control-z>", self.undo)
         self.bind_all("<Control-y>", self.redo)
@@ -245,15 +283,18 @@ class TranslationWorkbench(ttk.Frame):
         self._text_modified_timer = None
         self._text_modified_delay = 500  # 延迟500ms执行保存
         
-        self.zh_text_input.bind("<KeyRelease>", self._on_text_modified_delayed)
+        def _on_key_release(event):
+            """合并的按键释放事件处理函数"""
+            self._on_text_modified_delayed(event)
+            self._update_term_suggestions(event)
+        
+        self.zh_text_input.bind("<KeyRelease>", _on_key_release)
         self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
         self.zh_text_input.bind("<Return>", self._save_and_jump_sequential)
         self.zh_text_input.bind("<Control-Return>", self._save_and_jump_pending)
         # 添加复制事件处理，确保只复制实际文本
         self.zh_text_input.bind("<Control-c>", self._on_copy)
         self.zh_text_input.bind("<Control-C>", self._on_copy)
-        # 添加术语提示实时更新
-        self.zh_text_input.bind("<KeyRelease>", self._update_term_suggestions, add="+")
         editor_btn_frame = ttk.Frame(editor_frame); editor_btn_frame.grid(row=3, column=1, sticky="ew", pady=(5,0))
         editor_btn_frame.columnconfigure(0, weight=1)
         
@@ -267,6 +308,14 @@ class TranslationWorkbench(ttk.Frame):
         # 其他按钮（居右）
         self.add_to_dict_btn = ttk.Button(right_frame, text="添加到词典", command=self._add_to_user_dictionary, state="disabled", bootstyle="info-outline")
         self.add_to_dict_btn.pack(side="right", padx=(btn_padding, 0))
+        
+        # 添加分隔符
+        separator3 = ttk.Separator(right_frame, orient="vertical")
+        separator3.pack(side="right", fill="y", padx=(btn_padding, btn_padding))
+        
+        self.history_btn = ttk.Button(right_frame, text="操作历史", command=self._show_operation_history, bootstyle="info-outline")
+        self.history_btn.pack(side="right", padx=(btn_padding, btn_padding))
+        ToolTip(self.history_btn, "查看和管理操作历史")
         
         # 添加分隔符
         separator2 = ttk.Separator(right_frame, orient="vertical")
@@ -340,12 +389,13 @@ class TranslationWorkbench(ttk.Frame):
                 return []
             return self.trans_tree.get_children()
         else:
-            all_iids = []
-            for ns_iid in self.ns_tree.get_children():
-                for idx, item in enumerate(self.translation_data.get(ns_iid, {}).get('items', [])):
-                    if item.get('en', '').strip():
-                        all_iids.append(f"{ns_iid}___{idx}")
-            return all_iids
+            # 使用列表推导式代替显式循环，提高性能
+            return [
+                f"{ns_iid}___{idx}"
+                for ns_iid in self.ns_tree.get_children()
+                for idx, item in enumerate(self.translation_data.get(ns_iid, {}).get('items', []))
+                if item.get('en', '').strip()
+            ]
 
     def _safe_select_item(self, iid):
         if self.trans_tree.exists(iid):
@@ -371,7 +421,12 @@ class TranslationWorkbench(ttk.Frame):
                 self.zh_text_input.edit_modified(False)
                 
                 # 重新绑定文本修改事件
-                self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
+                def _on_key_release(event):
+                    """合并的按键释放事件处理函数"""
+                    self._on_text_modified(event)
+                    self._update_term_suggestions(event)
+                
+                self.zh_text_input.bind("<KeyRelease>", _on_key_release)
                 self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
                 
                 # 选择项目
@@ -433,7 +488,12 @@ class TranslationWorkbench(ttk.Frame):
                 self.zh_text_input.edit_modified(False)
                 
                 # 重新绑定文本修改事件
-                self.zh_text_input.bind("<KeyRelease>", self._on_text_modified)
+                def _on_key_release(event):
+                    """合并的按键释放事件处理函数"""
+                    self._on_text_modified(event)
+                    self._update_term_suggestions(event)
+                
+                self.zh_text_input.bind("<KeyRelease>", _on_key_release)
                 self.zh_text_input.bind("<FocusOut>", lambda e: self._save_current_edit())
                 
                 # 更新UI状态
@@ -461,8 +521,11 @@ class TranslationWorkbench(ttk.Frame):
         # 获取当前选中的项目
         current_selection = self.trans_tree.selection()
         start_index = -1
-        if current_selection and current_selection[0] in all_items:
-            start_index = all_items.index(current_selection[0])
+        if current_selection:
+            selected_item = current_selection[0]
+            # 使用字典加速查找，时间复杂度O(1) instead of O(n)
+            item_to_index = {item: idx for idx, item in enumerate(all_items)}
+            start_index = item_to_index.get(selected_item, -1)
         
         # 计算搜索顺序
         if direction == 1:  # 向下搜索
@@ -627,11 +690,7 @@ class TranslationWorkbench(ttk.Frame):
             new_text = re.sub(re.escape(find_text), replace_text, target_text, flags=re.IGNORECASE)
 
         if new_text != target_text:
-            # 保存原始状态用于撤销
-            self._record_action(target_iid=iid)
-            
             # 更新项目数据
-            original_item = copy.deepcopy(item)
             
             if target_field == "en":
                 item['en'] = new_text
@@ -655,9 +714,22 @@ class TranslationWorkbench(ttk.Frame):
                 self.en_text_display.insert("1.0", new_text)
             
             self._set_dirty(True)
+            
+            # 保存状态用于撤销/重做，与编辑操作使用相同的details结构
+            # 注意：这里在执行替换操作后调用record_operation，与编辑操作的行为保持一致
+            details = {
+                'key': item.get('key', ''),
+                'original_text': target_text,
+                'new_text': new_text,
+                'namespace': ns,
+                'index': idx
+            }
+            self.record_operation('REPLACE', details, target_iid=iid)
 
-        # 替换后查找下一个
-        self.after(10, lambda p=params: self.find_next(p))
+        # 如果当前项目包含要查找的内容并执行了替换，保持在当前项目
+        # 只有当当前项目不包含要查找的内容时，才查找下一个
+        if not found:
+            self.find_next(params)
         
     def _update_item_in_tree(self, iid, item):
         """更新树视图中的项目"""
@@ -666,7 +738,15 @@ class TranslationWorkbench(ttk.Frame):
             display_key = item['key']
             if display_key.startswith('_comment_'):
                 display_key = '_comment'
-            self.trans_tree.item(iid, values=(display_key, item['en'], item.get('zh', ''), item['source']))
+            
+            # 准备新的条目数据
+            new_values = (display_key, item['en'], item.get('zh', ''), item['source'])
+            
+            # 检查当前条目数据是否与新数据相同
+            current_values = self.trans_tree.item(iid, 'values')
+            if current_values != new_values:
+                # 只有当数据实际发生变化时才更新UI
+                self.trans_tree.item(iid, values=new_values)
 
     def replace_all(self, params):
         find_text = params["find_text"]
@@ -684,6 +764,10 @@ class TranslationWorkbench(ttk.Frame):
         # 保存当前选中信息
         saved_selection = self.current_selection_info.copy() if self.current_selection_info else None
         saved_ns_selection = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
+        
+        # 取消当前选中状态，确保当前条目也能被替换
+        self.trans_tree.selection_remove(self.trans_tree.selection())
+        self.current_selection_info = None
         
         # 获取替换参数
         match_case = params["match_case"]
@@ -703,15 +787,24 @@ class TranslationWorkbench(ttk.Frame):
             messagebox.showwarning("范围错误", "请先在左侧选择一个项目以确定替换范围。", parent=self)
             return
         
-        # 保存当前状态用于撤销（使用copy.deepcopy确保状态被正确保存）
+        # 保存当前状态用于撤销/重做（在执行替换操作前保存）
         target_iid = saved_selection['row_id'] if saved_selection else None
-        self.undo_stack.append(copy.deepcopy(self.translation_data))
-        self.undo_targets.append(target_iid)
-        self.redo_stack.clear()
-        self.redo_targets.clear()
-        self._update_history_buttons()
+        details = {
+            'find_text': find_text,
+            'replace_text': replace_text,
+            'match_case': match_case,
+            'scope': scope,
+            'search_column': search_column,
+            'namespaces': namespaces_to_search
+        }
+        self.record_operation('REPLACE_ALL', details, target_iid=target_iid)
         
         replacement_count = 0
+        
+        # 编译正则表达式（带转义），只编译一次
+        escaped_find = re.escape(find_text)
+        flags = 0 if match_case else re.IGNORECASE
+        compiled_re = re.compile(escaped_find, flags)
         
         # 执行替换
         for ns in namespaces_to_search:
@@ -723,11 +816,6 @@ class TranslationWorkbench(ttk.Frame):
                 # 检查是否匹配
                 found = False
                 fields_to_replace = []
-
-                # 编译正则表达式（带转义）
-                escaped_find = re.escape(find_text)
-                flags = 0 if match_case else re.IGNORECASE
-                compiled_re = re.compile(escaped_find, flags)
 
                 # 根据搜索列检查匹配
                 if search_column == "en" or search_column == "all":
@@ -810,53 +898,206 @@ class TranslationWorkbench(ttk.Frame):
         except (ValueError, IndexError):
             return None, None
 
-    def _record_action(self, target_iid: str | None):
-        if self.undo_stack and self.translation_data == self.undo_stack[-1]:
-            return
+    def record_operation(self, operation_type, details=None, target_iid=None):
+        """记录操作到历史
         
-        self.undo_stack.append(copy.deepcopy(self.translation_data))
-        self.undo_targets.append(target_iid)
-        self.redo_stack.clear()
-        self.redo_targets.clear()
+        Args:
+            operation_type: 操作类型
+            details: 操作详细信息
+            target_iid: 目标条目ID
+        """
+        import uuid
+        import time
+        
+        current_time = time.time()
+        
+        # 检查是否可以合并操作
+        can_merge = False
+        if (operation_type == 'EDIT' or operation_type == 'REPLACE') and self.operation_history:
+            last_op = self.operation_history[-1]
+            time_diff = current_time - self.last_operation_time
+            
+            if ((last_op['type'] == 'EDIT' or last_op['type'] == 'REPLACE') and 
+                last_op['target_iid'] == target_iid and 
+                time_diff < self.operation_merge_window):
+                # 合并连续的编辑或替换操作
+                last_op['timestamp'] = datetime.now().isoformat()
+                last_op['details'] = details or {}
+                # 对于编辑或替换操作，只保存被修改的命名空间
+                ns, idx = self._get_ns_idx_from_iid(target_iid)
+                if ns is not None:
+                    last_op['state'] = {
+                        ns: copy.deepcopy(self.translation_data.get(ns, {}))
+                    }
+                else:
+                    last_op['state'] = copy.deepcopy(self.translation_data)
+                can_merge = True
+        
+        if not can_merge:
+            # 创建操作记录
+            # 对于编辑和替换操作，只保存被修改条目的状态，而不是整个translation_data
+            state_to_save = None
+            if (operation_type == 'EDIT' or operation_type == 'REPLACE') and target_iid:
+                # 解析目标条目ID，获取命名空间和索引
+                ns, idx = self._get_ns_idx_from_iid(target_iid)
+                if ns is not None and idx is not None:
+                    # 只保存被修改的命名空间的数据
+                    state_to_save = {
+                        ns: copy.deepcopy(self.translation_data.get(ns, {}))
+                    }
+            
+            # 如果不是编辑操作或无法获取目标条目，保存整个translation_data
+            if state_to_save is None:
+                state_to_save = copy.deepcopy(self.translation_data)
+            
+            operation = {
+                'id': str(uuid.uuid4()),
+                'type': operation_type,
+                'description': self.OPERATION_TYPES.get(operation_type, '其他操作'),
+                'timestamp': datetime.now().isoformat(),
+                'target_iid': target_iid,
+                'details': details or {},
+                'state': state_to_save
+            }
+            
+            # 当添加新操作时，截断操作历史到当前状态索引
+            # 这样之前的灰色重做条目就会被移除
+            if self.current_state_index < len(self.operation_history) - 1:
+                self.operation_history = self.operation_history[:self.current_state_index + 1]
+            
+            # 添加到历史记录
+            self.operation_history.append(operation)
+            
+            # 更新当前状态索引，使其指向最后一个操作
+            self.current_state_index = len(self.operation_history) - 1
+            
+            # 限制历史记录大小
+            if len(self.operation_history) > self.max_history_size:
+                self.operation_history.pop(0)
+                # 当删除最早的记录后，更新当前状态索引
+                self.current_state_index = len(self.operation_history) - 1
+            
+
+        
+        # 更新上次操作时间
+        self.last_operation_time = current_time
+        
+        # 更新按钮状态
         self._update_history_buttons()
+        
+        return operation['id'] if not can_merge else self.operation_history[-1]['id']
+    
+    def _record_action(self, target_iid: str | None):
+        """兼容旧接口"""
+        self.record_operation('OTHER', target_iid=target_iid)
 
     def undo(self, event=None):
-        if len(self.undo_stack) > 1:
-            # 深拷贝当前状态，添加到重做栈
-            self.redo_stack.append(copy.deepcopy(self.translation_data))
-            target_to_reselect = self.undo_targets.pop()
-            self.redo_targets.append(target_to_reselect)
+        """执行撤回操作，基于操作历史"""
+        # 检查是否有可撤回的操作
+        if self.current_state_index > 0:
+            # 获取当前被撤销的操作
+            revoked_operation = self.operation_history[self.current_state_index]
             
-            # 从撤销栈弹出最后一个状态
-            self.undo_stack.pop()
+            # 计算目标状态索引（当前状态索引减一）
+            target_index = self.current_state_index - 1
             
-            # 深拷贝恢复的状态，避免引用问题
-            self.translation_data = copy.deepcopy(self.undo_stack[-1])
+            # 获取目标状态
+            target_state = self.operation_history[target_index]['state']
             
+            # 检查目标状态是否只包含单个命名空间（编辑或替换操作的优化格式）
+            if len(target_state) == 1 and (revoked_operation['type'] == 'EDIT' or revoked_operation['type'] == 'REPLACE'):
+                # 对于编辑或替换操作的优化格式，只更新单个命名空间
+                ns = list(target_state.keys())[0]
+                self.translation_data[ns] = copy.deepcopy(target_state[ns])
+            else:
+                # 对于其他操作，恢复整个状态
+                self.translation_data = copy.deepcopy(target_state)
+            
+            # 更新当前状态索引
+            self.current_state_index = target_index
+            
+            # 确定撤销后要选中的条目
+            # 如果是批量操作，保持当前选中状态；否则选中撤销操作的对应条目
+            target_to_select = None
+            if not self._is_batch_operation(revoked_operation):
+                target_to_select = revoked_operation.get('target_iid')
+            else:
+                # 对于批量操作，保持当前选中状态
+                if self.trans_tree.selection():
+                    target_to_select = self.trans_tree.selection()[0]
+            
+            # 更新UI
             self._set_dirty(True)
-            self._full_ui_refresh(target_to_reselect)
+            self._full_ui_refresh(target_to_select=target_to_select)
             self._update_history_buttons()
+        else:
+            messagebox.showinfo("提示", "没有可以撤销的操作。")
 
     def redo(self, event=None):
-        if self.redo_stack:
-            # 深拷贝当前状态，添加到撤销栈
-            self.undo_stack.append(copy.deepcopy(self.redo_stack[-1]))
-            target_to_reselect = self.redo_targets.pop()
-            self.undo_targets.append(target_to_reselect)
+        """执行重做操作，基于操作历史"""
+        # 检查是否有可重做的操作
+        if self.current_state_index < len(self.operation_history) - 1:
+            # 计算目标状态索引（当前状态索引加一）
+            target_index = self.current_state_index + 1
             
-            # 从重做栈弹出最后一个状态
-            self.redo_stack.pop()
+            # 获取被重做的操作
+            redo_operation = self.operation_history[target_index]
             
-            # 深拷贝恢复的状态，避免引用问题
-            self.translation_data = copy.deepcopy(self.undo_stack[-1])
+            # 获取目标状态
+            target_state = self.operation_history[target_index]['state']
             
+            # 检查目标状态是否只包含单个命名空间（编辑或替换操作的优化格式）
+            if len(target_state) == 1 and (redo_operation['type'] == 'EDIT' or redo_operation['type'] == 'REPLACE'):
+                # 对于编辑或替换操作的优化格式，只更新单个命名空间
+                ns = list(target_state.keys())[0]
+                self.translation_data[ns] = copy.deepcopy(target_state[ns])
+            else:
+                # 对于其他操作，恢复整个状态
+                self.translation_data = copy.deepcopy(target_state)
+            
+            # 更新当前状态索引
+            self.current_state_index = target_index
+            
+            # 确定重做后要选中的条目
+            # 如果是批量操作，保持当前选中状态；否则选中重做操作的对应条目
+            target_to_select = None
+            if not self._is_batch_operation(redo_operation):
+                target_to_select = redo_operation.get('target_iid')
+            else:
+                # 对于批量操作，保持当前选中状态
+                if self.trans_tree.selection():
+                    target_to_select = self.trans_tree.selection()[0]
+            
+            # 更新UI
             self._set_dirty(True)
-            self._full_ui_refresh(target_to_reselect)
+            self._full_ui_refresh(target_to_select=target_to_select)
             self._update_history_buttons()
+        else:
+            messagebox.showinfo("提示", "没有可以重做的操作。")
 
     def _update_history_buttons(self):
-        self.undo_btn.config(state="normal" if len(self.undo_stack) > 1 else "disabled")
-        self.redo_btn.config(state="normal" if self.redo_stack else "disabled")
+        """更新历史按钮的状态"""
+        # 撤回按钮：当当前状态索引大于0时可用
+        self.undo_btn.config(state="normal" if self.current_state_index > 0 else "disabled")
+        # 重做按钮：当当前状态索引小于操作历史长度减1时可用
+        self.redo_btn.config(state="normal" if self.current_state_index < len(self.operation_history) - 1 else "disabled")
+
+    def _is_batch_operation(self, operation: dict) -> bool:
+        """检查操作是否为批量操作（包含多个子操作的复合操作）
+        
+        Args:
+            operation: 操作记录字典
+            
+        Returns:
+            如果是批量操作返回True，否则返回False
+        """
+        batch_types = {
+            'BATCH_PROCESS',  # 批量处理
+            'AI_TRANSLATION', # AI翻译
+            'IMPORT',         # 导入
+            'REPLACE_ALL',    # 全部替换
+        }
+        return operation.get('type') in batch_types
 
     def _select_item_by_id(self, iid: str):
         if not iid or not self.winfo_exists():
@@ -866,35 +1107,83 @@ class TranslationWorkbench(ttk.Frame):
             ns, idx_str = iid.rsplit('___', 1)
             idx = int(idx_str)
             
-            # 先获取命名空间，然后刷新项目列表
+            # 确保命名空间被选中（_full_ui_refresh 中已经处理了，但这里做双重检查）
             if self.ns_tree.exists(ns):
-                self.ns_tree.selection_set(ns)
-                self.ns_tree.focus(ns)
-                self.ns_tree.see(ns)
+                # 临时解绑命名空间选择事件，避免触发 _on_namespace_selected
+                self.ns_tree.unbind("<<TreeviewSelect>>")
                 
-                # 刷新项目列表
-                self._populate_item_list()
+                # 如果当前选中的命名空间不是目标命名空间，切换到目标命名空间
+                current_ns = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
+                if current_ns != ns:
+                    self.ns_tree.selection_set(ns)
+                    self.ns_tree.focus(ns)
+                    self.ns_tree.see(ns)
+                    # 刷新项目列表以显示目标命名空间的条目
+                    self._populate_item_list()
                 
-                # 重新构建iid，因为项目列表已经刷新了
+                # 重新构建iid（因为项目列表可能已刷新）
                 new_iid = f"{ns}___{idx}"
                 
-                # 选择新构建的iid
+                # 选择目标条目
                 if self.trans_tree.exists(new_iid):
+                    # 先清除当前选择信息，避免触发保存逻辑
+                    self.current_selection_info = None
+                    # 临时解绑选择事件，避免递归调用
+                    self.trans_tree.unbind("<<TreeviewSelect>>")
                     self.trans_tree.selection_set(new_iid)
                     self.trans_tree.focus(new_iid)
                     self.trans_tree.see(new_iid)
+                    # 强制刷新界面
+                    self.trans_tree.update()
+                    # 恢复事件绑定
+                    self.trans_tree.bind("<<TreeviewSelect>>", self._on_item_selected)
+                    # 手动更新选择信息和编辑器内容
+                    self.current_selection_info = {'ns': ns, 'idx': idx, 'row_id': new_iid}
+                    # 保存选择信息，防止被 _restore_item_selection 覆盖
+                    self._workbench_item_selection = {'ns': ns, 'idx': idx}
+                    item_data = self.translation_data[ns]['items'][idx]
+                    self.zh_text_input.edit_modified(False)
+                    self._set_editor_content(item_data['en'], item_data.get('zh', ''))
+                    self.zh_text_input.edit_modified(False)
+                    self.status_label.config(text=f"正在编辑: {ns} / {item_data['key']}")
+                    self._show_matching_terms(item_data['en'])
+                
+                # 恢复事件绑定
+                self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
         except Exception as e:
-            logging.warning(f"在撤销/重做后尝试自动选择条目 '{iid}' 时出错: {e}")
+            pass
     
 
     
     def _full_ui_refresh(self, target_to_select: str | None = None):
+        # 获取当前选中的命名空间（在刷新前保存）
         saved_ns = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
+        
+        # 如果有目标条目要选择，解析出目标命名空间
+        target_ns = None
+        if target_to_select:
+            try:
+                target_ns = target_to_select.rsplit('___', 1)[0]
+            except Exception:
+                target_ns = None
         
         self._populate_namespace_tree()
         
-        if saved_ns and self.ns_tree.exists(saved_ns):
+        # 刷新后，优先选择目标条目所在的命名空间
+        if target_ns and self.ns_tree.exists(target_ns):
+            # 临时解绑命名空间选择事件，避免触发 _on_namespace_selected
+            self.ns_tree.unbind("<<TreeviewSelect>>")
+            self.ns_tree.selection_set(target_ns)
+            self.ns_tree.focus(target_ns)
+            self.ns_tree.see(target_ns)
+            # 恢复事件绑定
+            self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
+        elif saved_ns and self.ns_tree.exists(saved_ns):
+            # 临时解绑命名空间选择事件，避免触发 _on_namespace_selected
+            self.ns_tree.unbind("<<TreeviewSelect>>")
             self.ns_tree.selection_set(saved_ns)
+            # 恢复事件绑定
+            self.ns_tree.bind("<<TreeviewSelect>>", self._on_namespace_selected)
         
         self._populate_item_list()
 
@@ -935,9 +1224,9 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#0000cd", "标点修正": "#ff6347", "空": "#808080" }
+        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#ff8c00", "标点修正": "#ff6347", "空": "#808080" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
-        self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'bold'))
+        self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'normal'))
 
     def _populate_namespace_tree(self):
         self.ns_tree.delete(*self.ns_tree.get_children())
@@ -1000,11 +1289,24 @@ class TranslationWorkbench(ttk.Frame):
         self.ns_tree.set(ns, "completed", display_completed)
 
     def _populate_item_list(self):
-        self.trans_tree.delete(*self.trans_tree.get_children())
+        # 检查是否需要更新（避免重复更新）
         selection = self.ns_tree.selection()
-        if not selection or not self.ns_tree.exists(selection[0]): return
+        if not selection or not self.ns_tree.exists(selection[0]):
+            return
         ns = selection[0]
+        
+        # 获取当前树视图中的条目
+        current_items = set(self.trans_tree.get_children())
+        
+        # 计算需要显示的条目
+        expected_items = []
+        items_to_add = []
+        items_to_update = []
+        
         for idx, item_data in enumerate(self.translation_data.get(ns, {}).get('items', [])):
+            iid = f"{ns}___{idx}"
+            expected_items.append(iid)
+            
             # 确定条目的source标签
             en_text = item_data.get('en', '').strip()
             zh_text = item_data.get('zh', '').strip()
@@ -1026,9 +1328,31 @@ class TranslationWorkbench(ttk.Frame):
             display_key = item_data['key']
             if display_key.startswith('_comment_'):
                 display_key = '_comment'
-            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(display_key, item_data['en'], item_data.get('zh', ''), source),
-                                   tags=(source,))
+            
+            # 准备条目数据
+            item_values = (display_key, item_data['en'], item_data.get('zh', ''), source)
+            
+            if iid not in current_items:
+                # 新条目，需要添加
+                items_to_add.append((iid, item_values, (source,)))
+            else:
+                # 现有条目，检查是否需要更新
+                current_values = self.trans_tree.item(iid, 'values')
+                if current_values != item_values:
+                    items_to_update.append((iid, item_values, (source,)))
+        
+        # 删除不存在的条目
+        items_to_delete = [iid for iid in current_items if iid not in expected_items]
+        if items_to_delete:
+            self.trans_tree.delete(*items_to_delete)
+        
+        # 批量添加新条目
+        for iid, values, tags in items_to_add:
+            self.trans_tree.insert("", "end", iid=iid, values=values, tags=tags)
+        
+        # 批量更新现有条目
+        for iid, values, tags in items_to_update:
+            self.trans_tree.item(iid, values=values, tags=tags)
 
     def _sort_items_by_default_order(self):
         """按照默认顺序排序条目，再次点击则反序"""
@@ -1042,39 +1366,16 @@ class TranslationWorkbench(ttk.Frame):
         # 切换排序顺序
         self.trans_items_sort_reverse = not self.trans_items_sort_reverse
         
-        # 清空当前树视图
-        self.trans_tree.delete(*self.trans_tree.get_children())
-        
-        # 按照默认顺序（索引顺序）重新插入条目
+        # 计算排序后的条目顺序
         start_idx = len(items) - 1 if self.trans_items_sort_reverse else 0
         end_idx = -1 if self.trans_items_sort_reverse else len(items)
         step = -1 if self.trans_items_sort_reverse else 1
         
-        for idx in range(start_idx, end_idx, step):
-            item_data = items[idx]
-            en_text = item_data.get('en', '').strip()
-            zh_text = item_data.get('zh', '').strip()
-            source = item_data.get('source', '')
-            
-            # 如果没有source标签或者source标签为默认值，根据内容自动确定
-            if not source or source == '待翻译' and not en_text:
-                if not en_text:
-                    if zh_text:
-                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
-                    else:
-                        source = '空'  # 原文为空且没有译文，标记为空
-                elif not zh_text:
-                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
-                else:
-                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
-            
-            # 前台显示时将 _comment_* 格式的键显示为 _comment
-            display_key = item_data['key']
-            if display_key.startswith('_comment_'):
-                display_key = '_comment'
-            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(display_key, item_data['en'], item_data.get('zh', ''), source),
-                                   tags=(source,))
+        # 通过移动条目来实现排序，避免清空和重新插入
+        for new_index, idx in enumerate(range(start_idx, end_idx, step)):
+            iid = f"{ns}___{idx}"
+            if self.trans_tree.exists(iid):
+                self.trans_tree.move(iid, '', new_index)
     
     def _sort_items_by_source(self):
         """按照来源列排序条目，再次点击则反序"""
@@ -1112,14 +1413,11 @@ class TranslationWorkbench(ttk.Frame):
         # 按照来源排序
         sortable_items.sort(key=lambda x: x[0], reverse=self.source_sort_reverse)
         
-        # 清空当前树视图
-        self.trans_tree.delete(*self.trans_tree.get_children())
-        
-        # 重新插入排序后的条目
-        for source, idx, item_data in sortable_items:
-            self.trans_tree.insert("", "end", iid=f"{ns}___{idx}",
-                                   values=(item_data['key'], item_data['en'], item_data.get('zh', ''), source),
-                                   tags=(source,))
+        # 通过移动条目来实现排序，避免清空和重新插入
+        for new_index, (source, idx, item_data) in enumerate(sortable_items):
+            iid = f"{ns}___{idx}"
+            if self.trans_tree.exists(iid):
+                self.trans_tree.move(iid, '', new_index)
     
     def _on_namespace_selected(self, event=None):
         self._save_current_edit()
@@ -1232,7 +1530,14 @@ class TranslationWorkbench(ttk.Frame):
             item['source'] = new_source
             
             if record_undo:
-                self._record_action(target_iid=info['row_id'])
+                details = {
+                    'key': item['key'],
+                    'original_text': original_zh,
+                    'new_text': new_zh_text,
+                    'namespace': info['ns'],
+                    'index': info['idx']
+                }
+                self.record_operation('EDIT', details, target_iid=info['row_id'])
         else:
             # 译文未变化，保持原有来源不变
             new_source = item.get('source', '')
@@ -1283,8 +1588,7 @@ class TranslationWorkbench(ttk.Frame):
             "module_names": self.module_names,
             "project_name": self.project_name,
             "current_settings": self.current_settings,
-            "undo_stack": self.undo_stack,
-            "redo_stack": self.redo_stack
+            "operation_history": self.operation_history
         }
         try:
             with open(save_path, 'w', encoding='utf-8') as f: 
@@ -1824,7 +2128,12 @@ class TranslationWorkbench(ttk.Frame):
             return
         
         # 保存当前状态用于撤销
-        self._record_action(target_iid=None)
+        details = {
+            'source': 'file' if hasattr(self, '_import_from_file') else 'clipboard',
+            'total_items': len(import_data),
+            'expected_format': 'list of translation items'
+        }
+        self.record_operation('IMPORT', details, target_iid=None)
         
         updated_count = 0
         skipped_count = 0
@@ -1886,6 +2195,8 @@ class TranslationWorkbench(ttk.Frame):
         # 2. 检查缓存，避免重复计算
         cache_key = en_text
         if cache_key in self._term_match_cache:
+            # 从缓存中获取术语并更新访问顺序
+            self._term_match_cache.move_to_end(cache_key)
             # 检查是否为最新请求，只有最新请求才更新UI
             if current_search_id == self._current_search_id:
                 display_terms = self._term_match_cache[cache_key]
@@ -1927,8 +2238,9 @@ class TranslationWorkbench(ttk.Frame):
                 if not en_text:
                     display_terms = []
                     # 清理缓存
-                    self._cleanup_term_cache()
                     self._term_match_cache[cache_key] = display_terms
+                    self._term_match_cache.move_to_end(cache_key)  # 确保新添加的条目在末尾
+                    self._cleanup_term_cache()  # 清理缓存以保持大小
                     # 检查是否为最新请求，只有最新请求才更新UI
                     if current_search_id == self._current_search_id:
                         try:
@@ -2115,10 +2427,10 @@ class TranslationWorkbench(ttk.Frame):
                 # 按照术语在原文中首次出现的位置排序
                 display_terms = sorted(term_with_positions, key=lambda x: x['position'])
                 
-                # 清理缓存
-                self._cleanup_term_cache()
                 # 缓存结果
                 self._term_match_cache[cache_key] = display_terms
+                self._term_match_cache.move_to_end(cache_key)  # 确保新添加的条目在末尾
+                self._cleanup_term_cache()  # 清理缓存以保持大小
                 
                 # 检查是否为最新请求，只有最新请求才更新UI
                 if current_search_id == self._current_search_id:
@@ -2130,8 +2442,8 @@ class TranslationWorkbench(ttk.Frame):
                         # 捕获主线程不在主循环中的错误
                         pass
             
-            # 启动后台线程执行术语匹配
-            threading.Thread(target=background_term_match, daemon=True).start()
+            # 使用线程池执行术语匹配
+            self._thread_pool.submit(background_term_match)
         
         # 延迟执行术语匹配
         self._term_update_id = self.after(self._term_update_delay, delayed_term_match)
@@ -2220,22 +2532,10 @@ class TranslationWorkbench(ttk.Frame):
         """
         清理术语缓存，保持缓存大小在合理范围内
         """
-        if len(self._term_match_cache) > self._term_cache_cleanup_threshold:
-            # 获取缓存项并按访问顺序排序（使用keys()的顺序作为近似）
-            cache_items = list(self._term_match_cache.items())
-            # 保留最新的80%，删除最旧的20%
-            items_to_keep = int(len(cache_items) * 0.8)
-            if items_to_keep < self._term_cache_cleanup_threshold:
-                items_to_keep = self._term_cache_cleanup_threshold
-            
-            # 保留最新的条目（假设字典顺序是插入顺序的近似）
-            new_cache = {}
-            for key, value in cache_items[-items_to_keep:]:
-                new_cache[key] = value
-            
-            # 更新缓存
-            self._term_match_cache = new_cache
-            logging.debug(f"术语缓存已清理，当前大小: {len(self._term_match_cache)}")
+        while len(self._term_match_cache) > self._term_cache_max_size:
+            # 删除最旧的条目（OrderedDict的第一个条目）
+            self._term_match_cache.popitem(last=False)
+        logging.debug(f"术语缓存已清理，当前大小: {len(self._term_match_cache)}")
     
     def reload_term_database(self):
         """
@@ -2243,6 +2543,53 @@ class TranslationWorkbench(ttk.Frame):
         """
         self.term_db.reload()
         self._clear_term_cache()
+    
+    def destroy(self):
+        """
+        销毁TranslationWorkbench实例，释放资源
+        """
+        # 取消所有定时器
+        if hasattr(self, '_term_update_id') and self._term_update_id:
+            try:
+                self.after_cancel(self._term_update_id)
+            except:
+                pass
+        
+        if hasattr(self, '_text_modified_timer') and self._text_modified_timer:
+            try:
+                self.after_cancel(self._text_modified_timer)
+            except:
+                pass
+        
+        if hasattr(self, '_session_save_timer') and self._session_save_timer:
+            try:
+                self.after_cancel(self._session_save_timer)
+            except:
+                pass
+        
+        if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+            try:
+                self.after_cancel(self._auto_save_timer)
+            except:
+                pass
+        
+        # 关闭线程池
+        if hasattr(self, '_thread_pool') and self._thread_pool:
+            try:
+                self._thread_pool.shutdown(wait=False, cancel_futures=True)
+            except:
+                pass
+        
+        # 清除术语匹配缓存
+        if hasattr(self, '_term_match_cache'):
+            self._term_match_cache.clear()
+        
+        # 清除操作历史
+        if hasattr(self, 'operation_history'):
+            self.operation_history.clear()
+        
+        # 调用父类的destroy方法
+        super().destroy()
     
     def _set_editor_content(self, en_text: str, zh_text: str):
         # 设置原文显示
@@ -2304,6 +2651,15 @@ class TranslationWorkbench(ttk.Frame):
         user_dict["by_key"][key] = translation
         user_dict["by_origin_name"][origin_name] = translation
         config_manager.save_user_dict(user_dict)
+        
+        # 记录添加词典操作
+        details = {
+            'key': key,
+            'origin_name': origin_name,
+            'translation': translation
+        }
+        self.record_operation('DICTIONARY_ADD', details, target_iid=info['row_id'])
+        
         self.status_label.config(text=f"成功！已将“{translation}”存入个人词典")
         self._set_dirty(True)
         # 更新按钮状态
@@ -2318,14 +2674,41 @@ class TranslationWorkbench(ttk.Frame):
         DictionarySearchWindow(self.main_window.root, initial_query=initial_query)
         
     def _run_ai_translation_async(self):
+        # 重置取消标志
+        self._ai_translation_cancelled = False
         self._save_current_edit()
         self._update_ui_state(interactive=False, item_selected=False)
         self.status_label.config(text="正在准备AI翻译...")
         self.log_callback("正在准备AI翻译...", "INFO")
-        threading.Thread(target=self._ai_translation_worker, daemon=True).start()
+        # 使用线程池执行AI翻译
+        self._thread_pool.submit(self._ai_translation_worker)
+    
+    def cancel_ai_translation(self):
+        """
+        取消AI翻译操作
+        """
+        self._ai_translation_cancelled = True
+        self.log_callback("AI翻译已取消", "INFO")
+        self.status_label.config(text="AI翻译已取消")
+        # 关闭并重建线程池，以取消所有正在执行的任务
+        try:
+            if hasattr(self, '_thread_pool') and self._thread_pool:
+                self.log_callback("正在终止所有AI翻译线程...", "INFO")
+                self._thread_pool.shutdown(wait=False, cancel_futures=True)
+                # 重建线程池
+                from concurrent.futures import ThreadPoolExecutor
+                self._thread_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ModpackLocalizer")
+                self.log_callback("线程池已重置，所有AI翻译任务已终止", "INFO")
+        except Exception as e:
+            self.log_callback(f"取消AI翻译时发生错误: {e}", "ERROR")
 
     def _ai_translation_worker(self):
         try:
+            # 检查取消标志
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
+            
             items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip() and item.get('en', '').strip()]
             if not items_to_translate_info:
                 try:
@@ -2335,26 +2718,38 @@ class TranslationWorkbench(ttk.Frame):
                     pass
                 self.log_callback("没有需要AI翻译的空缺条目。", "INFO"); return
             
+            # 检查取消标志
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
+            
             texts_to_translate = [info['en'] for info in items_to_translate_info]
             s = self.current_settings
             translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
+            # 保存当前翻译器实例
+            self._current_translator = translator
             
-            # 原文去重处理
-            unique_texts = []
-            text_to_indices = {}
-            for idx, text in enumerate(texts_to_translate):
-                if text not in text_to_indices:
-                    text_to_indices[text] = []
-                    unique_texts.append(text)
-                text_to_indices[text].append(idx)
+            # 检查取消标志
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
             
-            # 分批次处理唯一原文
-            batches = [unique_texts[i:i + s['ai_batch_size']] for i in range(0, len(unique_texts), s['ai_batch_size'])]
+            # 分批次处理文本
+            batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
             total_batches, translations_nested = len(batches), [None] * len(batches)
             
             with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
                 future_map = {executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'], s.get('ai_stream_timeout', 30))): i for i, batch in enumerate(batches)}
                 for i, future in enumerate(as_completed(future_map), 1):
+                    # 检查取消标志
+                    if self._ai_translation_cancelled:
+                        self.log_callback("AI翻译已取消，停止执行", "INFO")
+                        # 取消所有未完成的任务
+                        for f in future_map:
+                            if not f.done():
+                                f.cancel()
+                        break
+                    
                     batch_idx = future_map[future]
                     translations_nested[batch_idx] = future.result()
                     msg = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
@@ -2365,16 +2760,20 @@ class TranslationWorkbench(ttk.Frame):
                         pass
                     self.log_callback(msg, "INFO")
             
+            # 检查取消标志
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
+            
             # 合并翻译结果
-            unique_translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
+            translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
             
-            if len(unique_translations) != len(unique_texts): raise ValueError(f"AI返回数量不匹配! 预期:{len(unique_texts)}, 实际:{len(unique_translations)}")
+            if len(translations) != len(texts_to_translate): raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
             
-            # 构建唯一原文到翻译的映射
-            text_to_translation = {text: trans for text, trans in zip(unique_texts, unique_translations)}
-            
-            # 将翻译结果映射回原始顺序
-            translations = [text_to_translation[text] for text in texts_to_translate]
+            # 检查取消标志
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
             
             try:
                 if self.winfo_exists():
@@ -2383,12 +2782,16 @@ class TranslationWorkbench(ttk.Frame):
                 pass
             
         except Exception as e:
-            try:
-                if self.winfo_exists():
-                    self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}", parent=self))
-            except RuntimeError:
-                pass
-            self.log_callback(f"AI翻译失败: {e}", "ERROR")
+            # 检查是否是取消导致的异常
+            if self._ai_translation_cancelled:
+                self.log_callback("AI翻译已取消", "INFO")
+            else:
+                try:
+                    if self.winfo_exists():
+                        self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}", parent=self))
+                except RuntimeError:
+                    pass
+                self.log_callback(f"AI翻译失败: {e}", "ERROR")
         finally:
             try:
                 if self.winfo_exists():
@@ -2424,18 +2827,16 @@ class TranslationWorkbench(ttk.Frame):
             else:
                 logging.warning(f"AI为 '{info['en']}' 返回的译文 '{translation}' 无效，已忽略。")
         
-        # 直接将当前状态（AI翻译后的状态）添加到撤销栈
-        # 这样撤销时可以恢复到上一个状态，当前状态是AI翻译后的状态
-        self.undo_stack.append(copy.deepcopy(self.translation_data))
+        # 记录AI翻译操作
         target_iid = saved_selection['row_id'] if saved_selection else None
-        self.undo_targets.append(target_iid)
-        
-        # 清空重做栈，因为执行了新的操作
-        self.redo_stack.clear()
-        self.redo_targets.clear()
-        
-        # 更新按钮状态
-        self._update_history_buttons()
+        details = {
+            'batch_size': s.get('ai_batch_size', 10),
+            'max_threads': s.get('ai_max_threads', 5),
+            'model': s.get('model', 'default'),
+            'total_items': len(items_to_translate_info),
+            'valid_translations': valid_translation_count
+        }
+        self.record_operation('AI_TRANSLATION', details, target_iid=target_iid)
         
         # 更新UI状态
         self._set_dirty(True)
@@ -2559,4 +2960,274 @@ class TranslationWorkbench(ttk.Frame):
         else:
             # 更新GitHub上传UI中的命名空间和分支
             self._github_upload_ui.update_namespace_and_branch(current_namespace)
+    
+    def _show_operation_history(self):
+        """显示操作历史窗口"""
+        from tkinter import Toplevel
+        
+        history_window = Toplevel(self)
+        history_window.title("操作历史")
+        history_window.geometry("1000x600")
+        history_window.transient(self)
+        history_window.grab_set()
+        
+        # 创建主框架
+        main_frame = ttk.Frame(history_window, padding=10)
+        main_frame.pack(fill="both", expand=True)
+        
+        # 标题
+        ttk.Label(main_frame, text="操作历史记录", bootstyle="primary").pack(anchor="w", pady=(0, 10))
+        
+        # 搜索框
+        search_frame = ttk.Frame(main_frame)
+        search_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(search_frame, text="搜索:").pack(side="left", padx=(0, 5))
+        search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=search_var, width=40)
+        search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        # 创建历史记录列表
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        # 创建Treeview组件
+        history_tree = ttk.Treeview(tree_frame, columns=("type", "module", "key", "original", "current"), show="headings")
+        
+        # 设置列标题和宽度
+        history_tree.heading("type", text="操作类型")
+        history_tree.heading("module", text="模组")
+        history_tree.heading("key", text="原文键")
+        history_tree.heading("original", text="原内容")
+        history_tree.heading("current", text="现内容")
+        
+        history_tree.column("type", width=120, anchor="center")
+        history_tree.column("module", width=150, anchor="w")
+        history_tree.column("key", width=150, anchor="w")
+        history_tree.column("original", width=250, anchor="w")
+        history_tree.column("current", width=250, anchor="w")
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=history_tree.yview)
+        history_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        history_tree.pack(fill="both", expand=True, side="left")
+        
+        # 定义标签样式，用于区分已撤回和未撤回的操作
+        style = ttk.Style()
+        # 为Treeview项定义样式
+        style.configure("Normal.Treeview.Item", foreground="#000000")  # 正常操作：黑色文本
+        style.configure("Revoked.Treeview.Item", foreground="#808080")  # 已撤回操作：灰色文本
+        
+        # 确保 current_state_index 不超过操作历史的长度
+        if self.current_state_index >= len(self.operation_history):
+            self.current_state_index = len(self.operation_history) - 1
+        
+        def search_history():
+            query = search_var.get().lower()
+            
+            # 清空现有内容
+            for item in history_tree.get_children():
+                history_tree.delete(item)
+            
+            # 按时间正序显示（条目列表形式），跳过初始化操作
+            for i, op in enumerate(self.operation_history):
+                # 跳过初始化操作
+                if op['type'] == 'INIT':
+                    continue
+                
+                description = op['description']
+                details = op['details']
+                target_iid = op.get('target_iid')
+                
+                # 提取模组信息
+                module = ""
+                if target_iid:
+                    try:
+                        module = target_iid.split('___')[0]
+                    except:
+                        module = ""
+                
+                # 提取键、原内容、现内容
+                key = ""
+                original = ""
+                current = ""
+                
+                if details:
+                    if op['type'] == 'EDIT':
+                        key = details.get('key', '')
+                        original = details.get('original_text', '')[:50]  # 限制长度
+                        current = details.get('new_text', '')[:50]
+                    elif op['type'] == 'REPLACE':
+                        key = details.get('key', '')
+                        original = details.get('original_text', '')[:50]
+                        current = details.get('new_text', '')[:50]
+                    elif op['type'] == 'REPLACE_ALL':
+                        key = "全部替换"
+                        original = details.get('find_text', '')[:50]
+                        current = details.get('replace_text', '')[:50]
+                    elif op['type'] == 'AI_TRANSLATION':
+                        key = "AI翻译"
+                        original = f"共 {details.get('total_items', 0)} 条"
+                        current = f"成功 {details.get('valid_translations', 0)} 条"
+                    elif op['type'] == 'IMPORT':
+                        key = "导入"
+                        original = details.get('source', 'file')
+                        current = f"{details.get('total_items', 0)} 条"
+                    elif op['type'] == 'DICTIONARY_ADD':
+                        key = "添加词典"
+                        original = ""
+                        current = details.get('translation', '')[:50]
+                    elif op['type'] == 'BATCH_PROCESS':
+                        process_type = details.get('process_type', 'unknown')
+                        changes = details.get('changes', [])
+                        change_count = len(changes)
+                        
+                        key = "批量处理"
+                        original = process_type
+                        if change_count > 0:
+                            current = f"修改了 {change_count} 条条目"
+                        else:
+                            current = ""
+                    elif op['type'] == 'REDO':
+                        key = "重做"
+                        original = details.get('redo_from', 'stack')
+                        current = ""
+                
+                # 构建搜索文本
+                search_text = f"{description} {module} {key} {original} {current}"
+                
+                # 搜索匹配
+                if not query or query in search_text.lower():
+                    # 确定是否为已撤回的操作
+                    # 已撤回的操作是指索引大于当前状态索引的操作
+                    item_id = str(i)
+                    
+                    # 添加到Treeview
+                    history_tree.insert("", "end", iid=item_id, values=(
+                        description,
+                        module,
+                        key,
+                        original,
+                        current
+                    ))
+                    
+                    # 设置项的标签，用于区分已撤回和未撤回的操作
+                    if i > self.current_state_index:
+                        # 已撤回的操作，设置为灰色
+                        history_tree.item(item_id, tags=("revoked",))
+                    else:
+                        # 未撤回的操作，保持默认颜色
+                        history_tree.item(item_id, tags=("normal",))
+        
+        # 为Treeview定义标签
+        history_tree.tag_configure("normal", foreground="black")
+        history_tree.tag_configure("revoked", foreground="#808080")
+        
+        def jump_to_history(event):
+            """跳转到历史记录中的指定状态"""
+            selected_item = history_tree.selection()
+            if selected_item:
+                index = int(selected_item[0])
+                if 0 <= index < len(self.operation_history):
+                    # 判断是执行撤回还是重做操作
+                    # 如果选中的索引大于当前状态索引，则执行重做操作
+                    is_redo_operation = index > self.current_state_index
+                    
+                    # 保存当前选中状态
+                    saved_selection = self.trans_tree.selection()[0] if self.trans_tree.selection() else None
+                    saved_ns = self.ns_tree.selection()[0] if self.ns_tree.selection() else None
+                    
+                    # 确定要选中的条目
+                    target_to_select = None
+                    
+                    if is_redo_operation:
+                        # 执行重做操作，恢复到选中条目的状态
+                        # 恢复到选中条目的状态
+                        target_state = self.operation_history[index]['state']
+                        # 检查目标状态是否只包含单个命名空间（编辑或替换操作的优化格式）
+                        if len(target_state) == 1 and (self.operation_history[index]['type'] == 'EDIT' or self.operation_history[index]['type'] == 'REPLACE'):
+                            # 对于编辑或替换操作的优化格式，只更新单个命名空间
+                            ns = list(target_state.keys())[0]
+                            self.translation_data[ns] = copy.deepcopy(target_state[ns])
+                        else:
+                            # 对于其他操作，恢复整个状态
+                            self.translation_data = copy.deepcopy(target_state)
+                        
+                        # 更新当前状态索引，以便正确标记已撤回的操作
+                        self.current_state_index = index
+                        
+                        # 不截断历史记录，保持其完整
+                        # 这样用户可以通过再次在历史窗口中选择后续操作来实现重做
+                        
+                        # 确定重做后要选中的条目
+                        # 如果是批量操作，保持当前选中状态；否则选中重做操作的对应条目
+                        if not self._is_batch_operation(self.operation_history[index]):
+                            target_to_select = self.operation_history[index].get('target_iid')
+                        else:
+                            target_to_select = saved_selection
+                        
+                        # 更新UI
+                        self._set_dirty(True)
+                        self._full_ui_refresh(target_to_select=target_to_select)
+                        self._update_history_buttons()
+                        
+                        # 更新历史记录显示的颜色标记
+                        for item in history_tree.get_children():
+                            item_index = int(item)
+                            if item_index > self.current_state_index:
+                                history_tree.item(item, tags=('revoked',))
+                            else:
+                                history_tree.item(item, tags=('normal',))
+                    else:
+                        # 执行撤回操作，恢复到选中条目之前的状态
+                        # 计算要恢复到的状态索引
+                        target_index = max(0, index - 1)
+                        
+                        # 恢复到目标状态（选中条目之前的状态）
+                        target_state = self.operation_history[target_index]['state']
+                        # 检查目标状态是否只包含单个命名空间（编辑或替换操作的优化格式）
+                        if len(target_state) == 1 and (self.operation_history[target_index]['type'] == 'EDIT' or self.operation_history[target_index]['type'] == 'REPLACE'):
+                            # 对于编辑或替换操作的优化格式，只更新单个命名空间
+                            ns = list(target_state.keys())[0]
+                            self.translation_data[ns] = copy.deepcopy(target_state[ns])
+                        else:
+                            # 对于其他操作，恢复整个状态
+                            self.translation_data = copy.deepcopy(target_state)
+                        
+                        # 更新当前状态索引，以便正确标记已撤回的操作
+                        self.current_state_index = target_index
+                        
+                        # 不截断历史记录，保持其完整
+                        # 这样用户可以通过再次在历史窗口中选择后续操作来实现重做
+                        
+                        # 确定撤回后要选中的条目
+                        # 如果是批量操作，保持当前选中状态；否则选中被撤回操作的对应条目
+                        if not self._is_batch_operation(self.operation_history[index]):
+                            target_to_select = self.operation_history[index].get('target_iid')
+                        else:
+                            target_to_select = saved_selection
+                        
+                        # 更新UI
+                        self._set_dirty(True)
+                        self._full_ui_refresh(target_to_select=target_to_select)
+                        self._update_history_buttons()
+                        
+                        # 更新历史记录显示的颜色标记
+                        for item in history_tree.get_children():
+                            item_index = int(item)
+                            if item_index > self.current_state_index:
+                                history_tree.item(item, tags=('revoked',))
+                            else:
+                                history_tree.item(item, tags=('normal',))
+        
+        # 绑定点击事件
+        history_tree.bind("<<TreeviewSelect>>", jump_to_history)
+        
+        ttk.Button(search_frame, text="搜索", command=search_history).pack(side="left")
+        
+        # 初始填充历史记录
+        search_history()
+        
+        # 移除关闭按钮，窗口可通过右上角关闭
         

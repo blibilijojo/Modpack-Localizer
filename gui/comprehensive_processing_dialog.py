@@ -301,16 +301,36 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
     
     def _update_translations(self, items_to_process, translations):
         """更新翻译结果"""
-        # 记录操作前的状态用于撤销
-        self.workbench._record_action(target_iid=None)
-        
+        # 收集修改记录
+        changes = []
         updated_count = 0
         
         for (ns, idx, item), translation in zip(items_to_process, translations):
             if translation and translation.strip():
-                item['zh'] = translation.strip()
+                # 获取原始译文
+                original_translation = item.get('zh', '').strip()
+                new_translation = translation.strip()
+                
+                # 记录修改
+                changes.append({
+                    'ns': ns,
+                    'key': item.get('key', ''),
+                    'original': original_translation,
+                    'new': new_translation
+                })
+                
+                # 更新翻译结果
+                item['zh'] = new_translation
                 item['source'] = 'AI翻译'
                 updated_count += 1
+        
+        # 记录操作前的状态用于撤销
+        details = {
+            'process_type': 'comprehensive',
+            'changes': changes,
+            'updated_count': updated_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
         
         # 更新UI
         self.workbench._populate_namespace_tree()

@@ -265,7 +265,7 @@ class GitHubService:
             for ns, items in translations.items():
                 # 使用传入的project_name和namespace，如果没有则使用默认值
                 current_project_name = project_name or (ns.split(':')[0] if ':' in ns else ns)
-                current_namespace = namespace or current_project_name
+                current_namespace = namespace or (ns.split(':')[0] if ':' in ns else ns)
                 
                 # 构建语言文件路径（按照仓库结构）
                 # 格式: projects/[版本号]/assets/[项目名称]/[命名空间]/lang

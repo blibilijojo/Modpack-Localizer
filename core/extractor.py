@@ -57,6 +57,8 @@ class Extractor:
                 temp_value = temp_value.replace('__NEWLINE__', '\\n')
                 temp_value = temp_value.replace('__TAB__', '\\t')
                 temp_value = temp_value.replace('__CARRIAGE__', '\\r')
+                # 处理引号，将 \" 替换为 "
+                temp_value = temp_value.replace('\\"', '"')
                 # 处理多个_comment条目
                 if key == '_comment':
                     comment_counter += 1
@@ -828,34 +830,41 @@ class Extractor:
         try:
             # 搜索包含curseforge.com的字符串
             import re
-            # 匹配包含curseforge.com的链接
-            curseforge_pattern = re.compile(r'curseforge\.com[^"\']*', re.IGNORECASE)
+            # 匹配完整的curseforge链接，确保捕获完整的URL
+            curseforge_pattern = re.compile(r'(?:https?://)?(?:www\.)?curseforge\.com/[^"\'\s]+', re.IGNORECASE)
             matches = curseforge_pattern.finditer(content)
             
             for match in matches:
                 curseforge_url = match.group(0)
-                # 按照优先级提取curseforge名称
-                # 主提取规则：第三个反斜杠与第四个反斜杠之间的内容
-                parts = curseforge_url.split('/')
-                if len(parts) > 4:
-                    # 有第四个反斜杠
-                    curseforge_name = parts[4]
-                elif len(parts) == 4:
-                    # 没有第四个反斜杠，使用第三个反斜杠后的内容
-                    curseforge_name = parts[3]
-                else:
-                    # 格式不符合要求，跳过
-                    continue
-                
-                # 清理提取的名称，移除可能的查询参数或其他内容
-                curseforge_name = curseforge_name.split('?')[0].split('#')[0]
-                
-                if curseforge_name:
-                    curseforge_names.append({
-                        'curseforge_name': curseforge_name,
-                        'source': str(file_path)
-                    })
-                    return
+                # 确保URL包含完整的路径
+                if 'minecraft/mc-mods/' in curseforge_url:
+                    # 按照优先级提取curseforge名称
+                    # 提取minecraft/mc-mods/后面的内容
+                    parts = curseforge_url.split('minecraft/mc-mods/')
+                    if len(parts) > 1:
+                        curseforge_name = parts[1].split('/')[0]
+                    else:
+                        # 尝试通用提取规则
+                        parts = curseforge_url.split('/')
+                        if len(parts) > 4:
+                            # 有第四个反斜杠
+                            curseforge_name = parts[4]
+                        elif len(parts) == 4:
+                            # 没有第四个反斜杠，使用第三个反斜杠后的内容
+                            curseforge_name = parts[3]
+                        else:
+                            # 格式不符合要求，跳过
+                            continue
+                    
+                    # 清理提取的名称，移除可能的查询参数或其他内容
+                    curseforge_name = curseforge_name.split('?')[0].split('#')[0]
+                    
+                    if curseforge_name and not curseforge_name.endswith(':'):
+                        curseforge_names.append({
+                            'curseforge_name': curseforge_name,
+                            'source': str(file_path)
+                        })
+                        return
         except Exception as e:
             logging.warning(f"从JSON文件提取curseforge名称时发生错误: {file_path} - {e}")
     
@@ -903,34 +912,41 @@ class Extractor:
         try:
             # 搜索包含curseforge.com的字符串
             import re
-            # 匹配包含curseforge.com的链接
-            curseforge_pattern = re.compile(r'curseforge\.com[^"\']*', re.IGNORECASE)
+            # 匹配完整的curseforge链接，确保捕获完整的URL
+            curseforge_pattern = re.compile(r'(?:https?://)?(?:www\.)?curseforge\.com/[^"\'\s]+', re.IGNORECASE)
             matches = curseforge_pattern.finditer(content)
             
             for match in matches:
                 curseforge_url = match.group(0)
-                # 按照优先级提取curseforge名称
-                # 主提取规则：第三个反斜杠与第四个反斜杠之间的内容
-                parts = curseforge_url.split('/')
-                if len(parts) > 4:
-                    # 有第四个反斜杠
-                    curseforge_name = parts[4]
-                elif len(parts) == 4:
-                    # 没有第四个反斜杠，使用第三个反斜杠后的内容
-                    curseforge_name = parts[3]
-                else:
-                    # 格式不符合要求，跳过
-                    continue
-                
-                # 清理提取的名称，移除可能的查询参数或其他内容
-                curseforge_name = curseforge_name.split('?')[0].split('#')[0]
-                
-                if curseforge_name:
-                    curseforge_names.append({
-                        'curseforge_name': curseforge_name,
-                        'source': str(file_path)
-                    })
-                    return
+                # 确保URL包含完整的路径
+                if 'minecraft/mc-mods/' in curseforge_url:
+                    # 按照优先级提取curseforge名称
+                    # 提取minecraft/mc-mods/后面的内容
+                    parts = curseforge_url.split('minecraft/mc-mods/')
+                    if len(parts) > 1:
+                        curseforge_name = parts[1].split('/')[0]
+                    else:
+                        # 尝试通用提取规则
+                        parts = curseforge_url.split('/')
+                        if len(parts) > 4:
+                            # 有第四个反斜杠
+                            curseforge_name = parts[4]
+                        elif len(parts) == 4:
+                            # 没有第四个反斜杠，使用第三个反斜杠后的内容
+                            curseforge_name = parts[3]
+                        else:
+                            # 格式不符合要求，跳过
+                            continue
+                    
+                    # 清理提取的名称，移除可能的查询参数或其他内容
+                    curseforge_name = curseforge_name.split('?')[0].split('#')[0]
+                    
+                    if curseforge_name and not curseforge_name.endswith(':'):
+                        curseforge_names.append({
+                            'curseforge_name': curseforge_name,
+                            'source': str(file_path)
+                        })
+                        return
         except Exception as e:
             logging.warning(f"从TOML文件提取curseforge名称时发生错误: {file_path} - {e}")
     

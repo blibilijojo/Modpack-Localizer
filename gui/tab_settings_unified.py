@@ -865,10 +865,13 @@ CRITICAL: 致命错误，程序即将崩溃
             
             # 需要更新或下载
             if not local_path:
-                # 没有设置本地路径，提示用户
-                if self.winfo_exists():
-                    self.after(0, lambda: ui_utils.show_error("更新失败", "请先配置社区词典文件路径。"))
-                return
+                # 没有设置本地路径，使用默认路径
+                import os
+                default_path = os.path.join(os.getcwd(), "Dict-Community.db")
+                local_path = Path(default_path)
+                # 更新配置中的路径
+                config_manager.update_config("community_dict_path", default_path)
+                self.community_dict_var.set(default_path)
             
             # 弹窗询问用户是否更新
             if self.winfo_exists():

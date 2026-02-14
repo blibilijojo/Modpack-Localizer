@@ -242,6 +242,19 @@ class Extractor:
         
         logging.info(f"  - 正在读取 {len(zip_paths)} 个第三方汉化包...")
         
+        # 构建命名空间映射，用于处理带有格式后缀的命名空间
+        namespace_map = {}
+        for full_namespace in master_english.keys():
+            if ":" in full_namespace:
+                base_namespace = full_namespace.split(":", 1)[0]
+                if base_namespace not in namespace_map:
+                    namespace_map[base_namespace] = []
+                namespace_map[base_namespace].append(full_namespace)
+            else:
+                if full_namespace not in namespace_map:
+                    namespace_map[full_namespace] = []
+                namespace_map[full_namespace].append(full_namespace)
+        
         for zip_path in reversed(zip_paths):
             if not zip_path.exists() or not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
                 logging.warning(f"  - 无效的ZIP文件，已跳过: {zip_path}")
@@ -259,13 +272,26 @@ class Extractor:
                         if result_tuple[0] is None:
                             continue
                         
-                        namespace, _, _, extracted_data, _, _ = result_tuple
+                        namespace, file_format, _, extracted_data, _, _ = result_tuple
                         
                         # 过滤掉与英文相同的翻译
                         for key, zh_value in extracted_data.items():
+                            # 忽略_comment键
+                            if key == '_comment':
+                                continue
+                            
+                            # 尝试匹配原始命名空间
                             en_value = master_english.get(namespace, {}).get(key, None)
                             if en_value and en_value.en != zh_value:
                                 final_pack_chinese_dict[key] = zh_value
+                            else:
+                                # 尝试匹配带有格式后缀的命名空间
+                                if namespace in namespace_map:
+                                    for full_namespace in namespace_map[namespace]:
+                                        en_value = master_english.get(full_namespace, {}).get(key, None)
+                                        if en_value and en_value.en != zh_value:
+                                            final_pack_chinese_dict[key] = zh_value
+                                            break
             except (zipfile.BadZipFile, OSError) as e:
                 logging.error(f"无法读取汉化包: {zip_path.name} - 错误: {e}")
         

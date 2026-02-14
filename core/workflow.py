@@ -47,9 +47,14 @@ class Workflow:
             
             # 执行提取
             logging.info(f"开始从Mods目录提取语言数据: {mods_path}")
+            # 从配置中获取汉化包路径，优先使用community_pack_paths，兼容旧版本的zip_paths
+            pack_paths = context.settings.get('community_pack_paths', [])
+            if not pack_paths:
+                pack_paths = context.settings.get('zip_paths', [])
+            
             extraction_result = self.extractor.run(
                 mods_dir=mods_path,
-                zip_paths=[Path(p) for p in context.settings.get('zip_paths', []) if Path(p).exists()],
+                zip_paths=[Path(p) for p in pack_paths if Path(p).exists()],
                 community_dict_path=context.settings['community_dict_path'],
                 progress_update_callback=context.progress_callback
             )

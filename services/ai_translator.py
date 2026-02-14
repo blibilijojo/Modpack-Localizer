@@ -64,10 +64,26 @@ class KeyManager:
             self.cooldown_keys[key] = cooldown_end_time
             logging.warning(f"密钥 ...{key[-4:]} 调用失败，将被冷却 {cooldown_seconds} 秒。")
 class AITranslator:
-    def __init__(self, api_keys: list[str], api_endpoint: str | None = None, cache_ttl=3600):
-        self.api_endpoint = api_endpoint.strip() if api_endpoint else None
-        self.key_manager = KeyManager(api_keys)
-        self.all_keys = api_keys
+    def __init__(self, api_services: list[dict] = None, cache_ttl=3600):
+        # 处理api_services参数
+        self.api_services = api_services or []
+        
+        # 构建密钥到服务的映射
+        self.key_to_service = {}
+        all_keys = []
+        for service in self.api_services:
+            keys = service.get("keys", [])
+            for key in keys:
+                self.key_to_service[key] = service
+                all_keys.append(key)
+        
+        # 兼容旧的api_keys格式
+        if not self.api_services:
+            # 假设使用默认OpenAI
+            self.api_services = [{"endpoint": None, "keys": all_keys, "max_threads": 4}]
+        
+        self.key_manager = KeyManager(all_keys)
+        self.all_keys = all_keys
         # 初始化翻译缓存，用于存储已翻译的文本
         self.translation_cache = {}
         # 缓存过期时间（秒）
@@ -76,7 +92,11 @@ class AITranslator:
         self.cache_lock = threading.RLock()
         # 取消标志
         self._cancelled = False
-        logging.info(f"翻译器已初始化 (并发模式)。API服务器: {self.api_endpoint or '默认'}, 缓存TTL: {cache_ttl}秒")
+        
+        # 记录初始化信息
+        service_count = len(self.api_services)
+        total_keys = len(all_keys)
+        logging.info(f"翻译器已初始化 (并发模式)。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒")
     
     def cancel(self):
         """
@@ -92,12 +112,15 @@ class AITranslator:
         """
         self._cancelled = False
         logging.info("翻译器取消标志已重置")
-    def _get_client(self, api_key: str, timeout=120.0):
-        if self.api_endpoint:
-            return openai.OpenAI(base_url=self.api_endpoint, api_key=api_key, timeout=timeout)
+    def _get_client(self, api_key: str):
+        # 根据密钥获取对应的服务
+        service = self.key_to_service.get(api_key)
+        endpoint = service.get("endpoint") if service else None
+        if endpoint:
+            return openai.OpenAI(base_url=endpoint, api_key=api_key)
         else:
             # 使用标准OpenAI API配置
-            return openai.OpenAI(api_key=api_key, timeout=timeout)
+            return openai.OpenAI(api_key=api_key)
     
     def _cleanup_cache(self):
         """
@@ -173,12 +196,11 @@ class AITranslator:
         logging.error("所有API密钥均无法获取模型列表")
         return []
     def translate_batch(self, batch_info: tuple) -> list[str]:
-        # 解析批次信息，处理可选的超时参数
+        # 解析批次信息，移除超时参数
         if len(batch_info) == 5:
-            batch_index_inner, batch_inner, model_name, prompt_template, ai_stream_timeout = batch_info
+            batch_index_inner, batch_inner, model_name, prompt_template, _ = batch_info
         else:
             batch_index_inner, batch_inner, model_name, prompt_template = batch_info
-            ai_stream_timeout = 30  # 默认超时时间
         
         # 检查取消标志
         if self._cancelled:
@@ -222,14 +244,15 @@ class AITranslator:
         logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(unique_texts)} 个唯一文本")
         
         attempt = 0
-        while True:
+        max_attempts = 5  # 最大重试次数
+        while attempt < max_attempts:
             # 检查取消标志
             if self._cancelled:
                 logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
                 return [None] * len(batch_inner)
             
             api_key = self.key_manager.get_key()
-            logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
+            logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1}/{max_attempts} 使用密钥 ...{api_key[-4:]}")
             
             # 检查取消标志
             if self._cancelled:
@@ -238,8 +261,15 @@ class AITranslator:
                 return [None] * len(batch_inner)
             
             try:
+                # 根据密钥获取对应的服务，使用该服务的模型设置
                 effective_model_name = model_name
-                client = self._get_client(api_key, timeout=ai_stream_timeout)
+                service = self.key_to_service.get(api_key)
+                if service:
+                    service_model = service.get('model')
+                    if service_model and service_model != "请先获取模型":
+                        effective_model_name = service_model
+                
+                client = self._get_client(api_key)
                 input_dict = dict(enumerate(unique_texts))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
                 # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
@@ -252,7 +282,26 @@ class AITranslator:
                     self.key_manager.release_key(api_key)
                     return [None] * len(batch_inner)
                 
-                response = client.chat.completions.create(**request_params)
+                # 执行API调用
+                try:
+                    # 检查取消标志
+                    if self._cancelled:
+                        logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止API调用")
+                        self.key_manager.release_key(api_key)
+                        return [None] * len(batch_inner)
+                    
+                    # 直接执行API调用，不使用超时机制
+                    response = client.chat.completions.create(**request_params)
+                except Exception as e:
+                    # 检查取消标志
+                    if self._cancelled:
+                        logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                        self.key_manager.release_key(api_key)
+                        return [None] * len(batch_inner)
+                    logging.error(f"批次 {batch_index_inner + 1}：API调用失败: {e}")
+                    self.key_manager.penalize_key(api_key, 10)
+                    self.key_manager.release_key(api_key)
+                    continue
                 
                 # 检查取消标志
                 if self._cancelled:
@@ -299,16 +348,43 @@ class AITranslator:
                 attempt += 1
                 error_str = str(e).lower()
                 cooldown_duration = 2.0 * (2 ** min(attempt, 8))
+                
+                # 网络错误特殊处理
+                is_network_error = any(phrase in error_str for phrase in ["timeout", "connection error", "network error", "connect"])
+                
+                # 账户验证错误处理
+                is_account_error = any(phrase in error_str for phrase in ["403", "verify your account", "account verification"])
+                
                 if any(phrase in error_str for phrase in ["rate limit", "too many requests", "429", "quota exceeded"]):
                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇速率限制。")
                     cooldown_duration = 60
                 elif isinstance(e, ValueError):
                      logging.warning(f"批次 {batch_index_inner + 1} 遭遇内容格式错误。")
                      cooldown_duration = 10
+                elif is_network_error:
+                    logging.warning(f"批次 {batch_index_inner + 1} 遭遇网络错误: {e}")
+                    # 网络错误增加冷却时间
+                    cooldown_duration = 10 * (2 ** min(attempt, 5))
+                elif is_account_error:
+                    logging.error(f"批次 {batch_index_inner + 1} 遭遇账户验证错误: {e}")
+                    logging.error("请验证您的OpenAI账户以继续使用API服务。")
+                    # 账户错误增加冷却时间，因为需要用户操作
+                    cooldown_duration = 30
                 else:
                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇临时错误: {e}")
+                
                 self.key_manager.penalize_key(api_key, cooldown_duration)
-                logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试。")
+                
+                # 检查是否达到最大重试次数
+                if attempt >= max_attempts:
+                    logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
+                    # 返回原文作为回退
+                    for idx, text in enumerate(batch_inner):
+                        if cached_results[idx] is None:
+                            cached_results[idx] = text
+                    return cached_results
+                
+                logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试 ({attempt}/{max_attempts})。")
     def _parse_response(self, response_text: str | None, original_batch: list[str]) -> list[str] | None:
         """
         解析AI响应，提取翻译结果
@@ -513,25 +589,24 @@ class AITranslator:
     async def translate_batch_async(self, batch_info: tuple) -> list[str]:
         """
         异步版本的批量翻译方法
-        
+
         Args:
-            batch_info: 批次信息，包含批次索引、文本批次、模型名称、提示模板和超时时间
-            
+            batch_info: 批次信息，包含批次索引、文本批次、模型名称、提示模板
+
         Returns:
             翻译结果列表
         """
-        # 解析批次信息，处理可选的超时参数
+        # 解析批次信息，移除超时参数
         if len(batch_info) == 5:
-            batch_index_inner, batch_inner, model_name, prompt_template, ai_stream_timeout = batch_info
+            batch_index_inner, batch_inner, model_name, prompt_template, _ = batch_info
         else:
             batch_index_inner, batch_inner, model_name, prompt_template = batch_info
-            ai_stream_timeout = 30  # 默认超时时间
-        
+
         # 文本去重和缓存检查
         unique_texts = []
         text_to_indices = {}
         cached_results = [None] * len(batch_inner)
-        
+
         # 检查缓存，收集需要翻译的文本
         for idx, text in enumerate(batch_inner):
             # 从缓存中获取翻译结果
@@ -544,35 +619,36 @@ class AITranslator:
                     text_to_indices[text] = []
                     unique_texts.append(text)
                 text_to_indices[text].append(idx)
-        
+
         # 如果所有文本都命中缓存，直接返回结果
         if not unique_texts:
             logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需API调用")
             return cached_results
-        
+
         # 对未命中缓存的文本进行翻译
         logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(unique_texts)} 个唯一文本")
-        
+
         attempt = 0
-        while True:
+        max_attempts = 5  # 最大重试次数
+        while attempt < max_attempts:
             try:
                 # 异步获取API密钥
                 api_key = await self.key_manager.async_get_key()
-                logging.debug(f"异步线程 (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1} 使用密钥 ...{api_key[-4:]}")
-                
+                logging.debug(f"异步线程 (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1}/{max_attempts} 使用密钥 ...{api_key[-4:]}")
+
                 effective_model_name = model_name
-                client = self._get_client(api_key, timeout=ai_stream_timeout)
+                client = self._get_client(api_key)
                 input_dict = dict(enumerate(unique_texts))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
                 # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
                 prompt_content = f"{prompt_template}\n\n输入: {input_json}"
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
-                
+
                 # 异步执行API调用
                 response = await asyncio.to_thread(client.chat.completions.create, **request_params)
                 response_text = response.choices[0].message.content
                 translated_unique = self._parse_response(response_text, unique_texts)
-                
+
                 if translated_unique:
                     # 将翻译结果存入缓存并构建完整的结果列表
                     for idx, (text, translation) in enumerate(zip(unique_texts, translated_unique)):
@@ -581,7 +657,7 @@ class AITranslator:
                         # 填充到结果列表中
                         for original_idx in text_to_indices[text]:
                             cached_results[original_idx] = translation
-                    
+
                     # 异步释放API密钥
                     await self.key_manager.async_release_key(api_key)
                     logging.info(f"异步线程 成功完成批次 {batch_index_inner + 1}")
@@ -593,15 +669,41 @@ class AITranslator:
                 attempt += 1
                 error_str = str(e).lower()
                 cooldown_duration = 2.0 * (2 ** min(attempt, 8))
+
+                # 网络错误特殊处理
+                is_network_error = any(phrase in error_str for phrase in ["timeout", "connection error", "network error", "connect"])
+
+                # 账户验证错误处理
+                is_account_error = any(phrase in error_str for phrase in ["403", "verify your account", "account verification"])
+
                 if any(phrase in error_str for phrase in ["rate limit", "too many requests", "429", "quota exceeded"]):
                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇速率限制。")
                     cooldown_duration = 60
                 elif isinstance(e, ValueError):
                      logging.warning(f"批次 {batch_index_inner + 1} 遭遇内容格式错误。")
                      cooldown_duration = 10
+                elif is_network_error:
+                    logging.warning(f"批次 {batch_index_inner + 1} 遭遇网络错误: {e}")
+                    # 网络错误增加冷却时间
+                    cooldown_duration = 10 * (2 ** min(attempt, 5))
+                elif is_account_error:
+                    logging.error(f"批次 {batch_index_inner + 1} 遭遇账户验证错误: {e}")
+                    logging.error("请验证您的OpenAI账户以继续使用API服务。")
+                    # 账户错误增加冷却时间，因为需要用户操作
+                    cooldown_duration = 30
                 else:
                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇临时错误: {e}")
-                
+
                 # 异步惩罚API密钥
                 await self.key_manager.async_penalize_key(api_key, cooldown_duration)
-                logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试。")
+
+                # 检查是否达到最大重试次数
+                if attempt >= max_attempts:
+                    logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
+                    # 返回原文作为回退
+                    for idx, text in enumerate(batch_inner):
+                        if cached_results[idx] is None:
+                            cached_results[idx] = text
+                    return cached_results
+
+                logging.info(f"批次 {batch_index_inner + 1} 将在获取到新密钥后重试 ({attempt}/{max_attempts})。")

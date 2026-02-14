@@ -99,10 +99,9 @@ DEFAULT_PROMPT = """
 """
 
 DEFAULT_CONFIG = {
-    "api_keys": [], "api_keys_raw": "", "model": "gpt-3.5-turbo", "model_list": [],
+    "api_services": [], "model": "gpt-3.5-turbo", "model_list": [],
     "prompt": DEFAULT_PROMPT.strip(),
-    "api_endpoint": "", "use_grounding": False, "ai_batch_size": 50, "ai_max_threads": 4,
-    "ai_stream_timeout": 30,
+    "use_grounding": False, "ai_batch_size": 50, "ai_max_threads": 4,
     "ai_max_retries": 3,
     "ai_retry_initial_delay": 2.0,
     "ai_retry_max_delay": 120.0,
@@ -195,6 +194,26 @@ def load_config() -> dict:
         if "ai_retry_interval" in config:
             del config["ai_retry_interval"]
             config_updated = True
+        
+        # 转换旧的api_keys和api_endpoint格式为新的api_services格式
+        if "api_keys" in config and "api_services" not in config:
+            logging.warning("检测到旧版API密钥配置，将自动转换为新版服务配置格式。")
+            api_keys = config.get("api_keys", [])
+            api_endpoint = config.get("api_endpoint", "")
+            api_keys_raw = config.get("api_keys_raw", "")
+            
+            if api_keys:
+                config["api_services"] = [{
+                    "endpoint": api_endpoint,
+                    "keys": api_keys,
+                    "keys_raw": api_keys_raw
+                }]
+            else:
+                config["api_services"] = []
+            
+            # 保留旧的配置项，以确保兼容性
+            config_updated = True
+        
         for key, value in DEFAULT_CONFIG.items():
             if key not in config:
                 logging.warning(f"配置文件中缺少 '{key}' 项目，将使用默认值进行补充。")

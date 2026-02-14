@@ -238,7 +238,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             s = self.workbench.current_settings
             
             # 初始化翻译器
-            translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
+            translator = AITranslator(s.get('api_services', []))
             
             # 原文去重处理
             unique_texts = []
@@ -256,7 +256,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             
             # 使用线程池执行翻译
             with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
-                future_map = {executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'], s.get('ai_stream_timeout', 30))): i for i, batch in enumerate(batches)}
+                future_map = {executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'])): i for i, batch in enumerate(batches)}
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:

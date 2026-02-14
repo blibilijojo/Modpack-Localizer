@@ -57,6 +57,8 @@ class TranslationWorkbench(ttk.Frame):
         self._ai_translation_cancelled = False
         # 当前的AI翻译器实例
         self._current_translator = None
+        # 当前的AI翻译线程池
+        self._current_ai_executor = None
         
         # 线程池管理
         from concurrent.futures import ThreadPoolExecutor
@@ -2690,6 +2692,22 @@ class TranslationWorkbench(ttk.Frame):
         self._ai_translation_cancelled = True
         self.log_callback("AI翻译已取消", "INFO")
         self.status_label.config(text="AI翻译已取消")
+        # 取消翻译器实例的任务
+        if hasattr(self, '_current_translator') and self._current_translator:
+            try:
+                self._current_translator.cancel()
+                self.log_callback("已通知翻译器取消所有任务", "INFO")
+            except Exception as e:
+                self.log_callback(f"取消翻译器任务时发生错误: {e}", "ERROR")
+        # 关闭当前的AI翻译线程池
+        try:
+            if hasattr(self, '_current_ai_executor') and self._current_ai_executor:
+                self.log_callback("正在终止AI翻译线程池...", "INFO")
+                self._current_ai_executor.shutdown(wait=False, cancel_futures=True)
+                self._current_ai_executor = None
+                self.log_callback("AI翻译线程池已终止", "INFO")
+        except Exception as e:
+            self.log_callback(f"取消AI翻译线程池时发生错误: {e}", "ERROR")
         # 关闭并重建线程池，以取消所有正在执行的任务
         try:
             if hasattr(self, '_thread_pool') and self._thread_pool:
@@ -2725,7 +2743,7 @@ class TranslationWorkbench(ttk.Frame):
             
             texts_to_translate = [info['en'] for info in items_to_translate_info]
             s = self.current_settings
-            translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
+            translator = AITranslator(s.get('api_services', []))
             # 保存当前翻译器实例
             self._current_translator = translator
             
@@ -2738,8 +2756,11 @@ class TranslationWorkbench(ttk.Frame):
             batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
             total_batches, translations_nested = len(batches), [None] * len(batches)
             
-            with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
-                future_map = {executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'], s.get('ai_stream_timeout', 30))): i for i, batch in enumerate(batches)}
+            # 创建并保存AI翻译线程池
+            from concurrent.futures import ThreadPoolExecutor
+            self._current_ai_executor = ThreadPoolExecutor(max_workers=s['ai_max_threads'])
+            try:
+                future_map = {self._current_ai_executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'])): i for i, batch in enumerate(batches)}
                 for i, future in enumerate(as_completed(future_map), 1):
                     # 检查取消标志
                     if self._ai_translation_cancelled:
@@ -2759,6 +2780,11 @@ class TranslationWorkbench(ttk.Frame):
                     except RuntimeError:
                         pass
                     self.log_callback(msg, "INFO")
+            finally:
+                # 关闭线程池
+                if self._current_ai_executor:
+                    self._current_ai_executor.shutdown(wait=False)
+                    self._current_ai_executor = None
             
             # 检查取消标志
             if self._ai_translation_cancelled:

@@ -922,8 +922,12 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         if self.processing:
             # 记录取消操作
             self.workbench.log_callback("用户点击取消按钮，正在终止AI翻译任务...", "INFO")
-            # 取消AI翻译操作
+            # 立即取消AI翻译操作
             self.processing = False
+            # 取消翻译器任务
+            if hasattr(self, 'translator') and self.translator:
+                self.translator.cancel()
+                self.workbench.log_callback("已向翻译器发送取消命令", "INFO")
             # 调用workbench的取消方法，它会处理线程池的关闭和重建
             self.workbench.cancel_ai_translation()
             # 恢复界面状态
@@ -1061,7 +1065,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             s = self.settings
             
             # 初始化翻译器
-            translator = AITranslator(s['api_keys'], s.get('api_endpoint'))
+            translator = AITranslator(s.get('api_services', []))
             
             # 计算批次大小或批次数量
             total_items = len(all_texts_to_translate)
@@ -1175,13 +1179,15 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             # 记录翻译设置
             logging.info(f"AI翻译设置 - 模式: {translation_mode}, 批处理大小: {batch_size}")
             
-            # 使用workbench的线程池执行翻译
-            executor = self.workbench._thread_pool
+            # 创建专用的AI翻译线程池
+            from concurrent.futures import ThreadPoolExecutor
+            ai_executor = ThreadPoolExecutor(max_workers=s.get('ai_max_threads', 4))
             future_map = {}
             
             try:
-                # 保存当前翻译器实例
+                # 保存当前翻译器实例和线程池
                 self.translator = translator
+                self.ai_executor = ai_executor
                 
                 for i, (batch, contexts) in enumerate(batches):
                     # 检查取消标志
@@ -1189,7 +1195,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         break
                     # 根据模式调整提示词
                     batch_prompt = self._adjust_prompt_for_mode(s['prompt'], translation_mode, contexts)
-                    future_map[executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt, s.get('ai_stream_timeout', 30)))] = i
+                    future_map[ai_executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt))] = i
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:
@@ -1203,6 +1209,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         # 取消翻译器任务
                         if hasattr(self, 'translator') and self.translator:
                             self.translator.cancel()
+                        # 关闭线程池
+                        if hasattr(self, 'ai_executor') and self.ai_executor:
+                            try:
+                                self.ai_executor.shutdown(wait=False, cancel_futures=True)
+                                self.workbench.log_callback("已关闭AI翻译线程池", "INFO")
+                            except Exception as e:
+                                self.workbench.log_callback(f"关闭线程池时发生错误: {e}", "ERROR")
                         break
                     
                     batch_idx = future_map[future]
@@ -1222,6 +1235,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 # 取消翻译器任务
                 if hasattr(self, 'translator') and self.translator:
                     self.translator.cancel()
+                # 关闭线程池
+                if hasattr(self, 'ai_executor') and self.ai_executor:
+                    try:
+                        self.ai_executor.shutdown(wait=False, cancel_futures=True)
+                        self.workbench.log_callback("已关闭AI翻译线程池", "INFO")
+                    except Exception as e:
+                        self.workbench.log_callback(f"关闭线程池时发生错误: {e}", "ERROR")
                 return
             
             # 5. 合并翻译结果

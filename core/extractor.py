@@ -59,21 +59,15 @@ class Extractor:
                 temp_value = temp_value.replace('__CARRIAGE__', '\\r')
                 # 处理引号，将 \" 替换为 "
                 temp_value = temp_value.replace('\\"', '"')
-                # 处理多个_comment条目
-                if key == '_comment':
-                    comment_counter += 1
-                    data[f'_comment_{comment_counter}'] = temp_value
-                else:
+                # 忽略_comment条目
+                if key != '_comment':
                     data[key] = temp_value
         elif file_format == 'lang':
             for match in self.LANG_KV_PATTERN.finditer(content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                # 处理多个_comment条目
-                if key == '_comment':
-                    comment_counter += 1
-                    data[f'_comment_{comment_counter}'] = value
-                else:
+                # 忽略_comment条目
+                if key != '_comment':
                     data[key] = value
         return data
     

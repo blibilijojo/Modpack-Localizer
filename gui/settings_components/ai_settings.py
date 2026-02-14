@@ -202,8 +202,8 @@ class AISettings:
         clear_button.pack(side="left", padx=5)
         
         # 获取模型按钮
-        fetch_models_button = ttk.Button(button_frame, text="获取模型", command=self._fetch_models_async, bootstyle="info-outline")
-        fetch_models_button.pack(side="left", padx=5)
+        self.fetch_models_button = ttk.Button(button_frame, text="获取模型", command=self._fetch_models_async, bootstyle="info-outline")
+        self.fetch_models_button.pack(side="left", padx=5)
         
         # 填充服务列表
         self._populate_service_list()

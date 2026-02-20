@@ -1224,6 +1224,8 @@ class MainWindow:
         import sys
         import subprocess
         import os
+        import time
+        import psutil
         from pathlib import Path
         import utils.update_checker as update_checker
         
@@ -1241,34 +1243,39 @@ class MainWindow:
             self.root.after(0, self.later_btn.master.master.destroy)
             return
 
-        # 2. 定位并释放内置的 updater.exe
-        try:
-            # sys._MEIPASS 只有在打包后的exe中才存在
-            updater_path = Path(sys._MEIPASS) / "updater.exe"
-            if not updater_path.exists():
-                 raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
-        except AttributeError:
-            # 如果是直接运行 .py 文件进行开发调试，则无法使用此功能
-            self.root.after(0, lambda: messagebox.showerror("开发模式", "更新功能只能在打包后的 .exe 程序中使用。"))
-            return
-        except FileNotFoundError as e:
-            self.root.after(0, lambda: messagebox.showerror("更新错误", str(e)))
-            return
+        def run_update():
+            try:
+                # 等待主程序进程退出
+                pid = os.getpid()
+                try:
+                    main_process = psutil.Process(pid)
+                    main_process.wait(timeout=10)
+                except psutil.NoSuchProcess:
+                    pass
+                except (psutil.TimeoutExpired, Exception):
+                    try:
+                        main_process.kill()
+                    except psutil.NoSuchProcess:
+                        pass
 
-        # 3. 准备启动更新器所需的所有命令行参数
-        pid = os.getpid()
-        command = [
-            str(updater_path),
-            str(pid),                # 参数1: 主程序的进程ID
-            str(current_exe_path),   # 参数2: 当前(旧版)exe的完整路径
-            str(new_exe_temp_path),  # 参数3: 已下载的新版exe的完整路径
-            str(old_exe_backup_path) # 参数4: 用于备份旧版的路径
-        ]
+                time.sleep(1)
 
-        # 4. 启动 updater.exe 作为一个完全分离的、独立的进程
-        subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+                # 执行文件替换
+                os.rename(current_exe_path, old_exe_backup_path)
+                os.rename(new_exe_temp_path, current_exe_path)
 
-        # 5. 主程序安排自己退出，将控制权完全交给更新器
+                # 重新启动应用程序
+                subprocess.Popen([current_exe_path])
+
+            except Exception as e:
+                with open("updater_error.log", "w", encoding='utf-8') as f:
+                    f.write(f"An error occurred during update: {e}\n")
+
+        # 启动更新线程
+        update_thread = threading.Thread(target=run_update, daemon=True)
+        update_thread.start()
+
+        # 主程序退出
         self.root.after(100, self.root.destroy)
 
     def _show_about(self):

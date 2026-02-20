@@ -35,13 +35,9 @@ jobs:
         if (Test-Path -Path "updater.py" -PathType Leaf) { Write-Output "YES" } else { Write-Output "NO" }
         Get-Content updater.py -ErrorAction SilentlyContinue || Write-Output "Cannot read updater.py"
 
-    - name: Build updater.exe
-      run: |
-        pyinstaller --noconfirm --onefile --name "updater" --hidden-import "psutil" updater.py
-
     - name: Build Main Executable (Modpack-Localizer-Pro.exe)
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." --add-data "core/term_database.json;." `
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "core/term_database.json;." `
           --hidden-import "psutil" `
           --hidden-import "tkinter" `
           --hidden-import "ttkbootstrap" `

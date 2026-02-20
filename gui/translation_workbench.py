@@ -125,7 +125,7 @@ class TranslationWorkbench(ttk.Frame):
             'timestamp': datetime.now().isoformat(),
             'target_iid': None,
             'details': {'project_name': self.project_name},
-            'state': copy.deepcopy(self.translation_data)
+            'state': {}
         }
         self.operation_history = [initial_state]
         self._update_history_buttons()

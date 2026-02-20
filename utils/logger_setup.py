@@ -5,6 +5,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from utils import config_manager
 
+# 处理PyInstaller单文件打包时的路径问题
+def get_app_data_path():
+    if getattr(sys, 'frozen', False):
+        # 单文件打包模式，使用可执行文件所在目录
+        return Path(sys.executable).parent
+    else:
+        # 开发模式，使用当前工作目录
+        return Path.cwd()
+
+APP_DATA_PATH = get_app_data_path()
+
 class LevelFilter(logging.Filter):
     def __init__(self, level):
         super().__init__()
@@ -61,7 +72,7 @@ def setup_logging(gui_callback=None):
         gui_callback: GUI日志回调函数
     """
     # 创建日志文件夹结构
-    root_logs_dir = Path("logs")
+    root_logs_dir = APP_DATA_PATH / "logs"
     root_logs_dir.mkdir(exist_ok=True)
     
     # 创建应用程序日志子文件夹

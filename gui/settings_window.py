@@ -8,7 +8,11 @@ import sys
 base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 
 # 确保导入路径正确
-if not hasattr(sys, 'frozen'):  # 非打包环境
+if hasattr(sys, 'frozen'):  # 单文件打包环境
+    sys.path.append(base_path)
+    sys.path.append(os.path.dirname(base_path))
+    sys.path.append(os.path.dirname(os.path.dirname(base_path)))
+else:  # 非打包环境
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import config_manager

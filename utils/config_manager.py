@@ -5,10 +5,21 @@ import logging
 import base64
 from cryptography.fernet import Fernet, InvalidToken
 import os
+import sys
 
-CONFIG_FILE_PATH = Path("config.json")
-USER_DICT_PATH = Path("Dict-User.db")
-KEY_FILE_PATH = Path(".encryption_key")
+# 处理PyInstaller单文件打包时的路径问题
+def get_app_data_path():
+    if getattr(sys, 'frozen', False):
+        # 单文件打包模式，使用可执行文件所在目录
+        return Path(sys.executable).parent
+    else:
+        # 开发模式，使用当前工作目录
+        return Path.cwd()
+
+APP_DATA_PATH = get_app_data_path()
+CONFIG_FILE_PATH = APP_DATA_PATH / "config.json"
+USER_DICT_PATH = APP_DATA_PATH / "Dict-User.db"
+KEY_FILE_PATH = APP_DATA_PATH / ".encryption_key"
 
 # 加密密钥管理函数
 def _get_encryption_key():

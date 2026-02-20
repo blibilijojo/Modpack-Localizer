@@ -1,19 +1,19 @@
 import json
 import logging
+import sys
+import os
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Union, Set, Type, Callable
 from datetime import datetime
 import re
 import csv
-import sys
 
-def _get_app_data_path():
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent
-    else:
-        return Path.cwd()
+if getattr(sys, 'frozen', False):
+    TERM_DATABASE_DIR = Path(sys.executable).parent
+else:
+    TERM_DATABASE_DIR = Path(__file__).parent
 
-TERM_DATABASE_PATH = _get_app_data_path() / "term_database.json"
+TERM_DATABASE_PATH = TERM_DATABASE_DIR / "term_database.json"
 
 # 导入模式枚举
 class ImportMode:
@@ -210,7 +210,6 @@ class TermDatabase:
                 with open(TERM_DATABASE_PATH, 'r', encoding='utf-8') as f:
                     self.terms = json.load(f)
                 
-                # 数据迁移：将旧格式的字符串translation转换为列表
                 migrated = False
                 for term in self.terms:
                     if isinstance(term.get("translation"), str):
@@ -218,17 +217,39 @@ class TermDatabase:
                         migrated = True
                 
                 if migrated:
-                    # 只有当术语列表不为空时才保存
                     if self.terms:
                         self.save_terms()
                     logging.debug("术语库数据格式已迁移到多译文格式")
                 
                 logging.debug(f"成功加载术语库，共 {len(self.terms)} 个术语")
-                # 构建索引
                 self._build_indexes()
+            elif getattr(sys, 'frozen', False):
+                default_db_path = Path(sys._MEIPASS) / "term_database.json"
+                if default_db_path.exists():
+                    try:
+                        with open(default_db_path, 'r', encoding='utf-8') as f:
+                            self.terms = json.load(f)
+                        
+                        migrated = False
+                        for term in self.terms:
+                            if isinstance(term.get("translation"), str):
+                                term["translation"] = [term["translation"]]
+                                migrated = True
+                        
+                        if migrated and self.terms:
+                            self.save_terms()
+                        
+                        logging.debug(f"成功加载打包内置术语库，共 {len(self.terms)} 个术语")
+                        self._build_indexes()
+                    except Exception as e:
+                        logging.warning(f"加载内置术语库失败: {e}")
+                        self.terms = []
+                        self._build_indexes()
+                else:
+                    self.terms = []
+                    self._build_indexes()
             else:
                 self.terms = []
-                # 初始化空索引
                 self._build_indexes()
         except Exception as e:
             logging.error(f"加载术语库失败: {e}")

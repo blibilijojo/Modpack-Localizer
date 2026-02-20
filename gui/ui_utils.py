@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, Toplevel, Text, Scrollbar, Button, Label
 from tkinter import ttk as tk_ttk
-from utils.error_logger import ErrorLogger, APP_DATA_PATH
+from utils.error_logger import ErrorLogger
 from pathlib import Path
 
 def browse_directory(entry_var, parent=None):
@@ -150,7 +150,7 @@ def show_error_details(title, message, exception=None, parent=None):
     # 查看日志按钮
     def view_logs():
         import webbrowser
-        log_dir = APP_DATA_PATH / "logs"
+        log_dir = Path("logs")
         if log_dir.exists():
             webbrowser.open(str(log_dir))
         else:

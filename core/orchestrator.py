@@ -187,7 +187,7 @@ class Orchestrator:
             self.update_progress(f"错误: {e}", -1)
     def _launch_workbench(self, workbench_data, undo_history=None):
         workbench = TranslationWorkbench(
-            parent=self.root,
+            parent_frame=self.root,
             initial_data=workbench_data,
             namespace_formats=self.namespace_formats,
             raw_english_files=self.raw_english_files,

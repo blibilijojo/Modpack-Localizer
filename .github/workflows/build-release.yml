@@ -41,7 +41,55 @@ jobs:
 
     - name: Build Main Executable (Modpack-Localizer-Pro.exe)
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." main.py
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." `
+          --hidden-import "psutil" `
+          --hidden-import "tkinter" `
+          --hidden-import "ttkbootstrap" `
+          --hidden-import "cryptography" `
+          --hidden-import "requests" `
+          --hidden-import "openai" `
+          --hidden-import "httpx" `
+          --hidden-import "gui" `
+          --hidden-import "gui.main_window" `
+          --hidden-import "gui.settings_window" `
+          --hidden-import "gui.settings_components.basic_settings" `
+          --hidden-import "gui.settings_components.ai_settings" `
+          --hidden-import "gui.settings_components.resource_pack_settings" `
+          --hidden-import "gui.settings_components.github_settings" `
+          --hidden-import "gui.settings_components.advanced_settings" `
+          --hidden-import "gui.tab_pack_settings" `
+          --hidden-import "gui.tab_settings_unified" `
+          --hidden-import "gui.custom_widgets" `
+          --hidden-import "gui.ui_utils" `
+          --hidden-import "gui.dialogs" `
+          --hidden-import "services" `
+          --hidden-import "services.ai_translator" `
+          --hidden-import "services.github_service" `
+          --hidden-import "services.punctuation_corrector" `
+          --hidden-import "utils" `
+          --hidden-import "utils.config_manager" `
+          --hidden-import "utils.logger_setup" `
+          --hidden-import "utils.file_utils" `
+          --hidden-import "utils.error_logger" `
+          --hidden-import "utils.dictionary_searcher" `
+          --hidden-import "utils.update_checker" `
+          --hidden-import "utils.session_manager" `
+          --hidden-import "utils.retry_logic" `
+          --hidden-import "core" `
+          --hidden-import "core.translator" `
+          --hidden-import "core.builder" `
+          --hidden-import "core.extractor" `
+          --hidden-import "core.pack_builder" `
+          --hidden-import "core.dictionary_manager" `
+          --hidden-import "core.term_database" `
+          --hidden-import "core.decision_engine" `
+          --hidden-import "core.data_aggregator" `
+          --hidden-import "core.orchestrator" `
+          --hidden-import "core.quest_converter" `
+          --hidden-import "core.workflow" `
+          --hidden-import "core.models" `
+          --hidden-import "core.exceptions" `
+          main.py
 
     - name: Get release notes from tag
       id: get_release_notes

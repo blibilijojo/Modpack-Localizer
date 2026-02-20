@@ -47,6 +47,10 @@ jobs:
           --hidden-import "ttkbootstrap" `
           --hidden-import "cryptography" `
           --hidden-import "requests" `
+          --hidden-import "charset_normalizer" `
+          --hidden-import "certifi" `
+          --hidden-import "idna" `
+          --hidden-import "urllib3" `
           --hidden-import "openai" `
           --hidden-import "httpx" `
           --hidden-import "gui" `
@@ -62,6 +66,16 @@ jobs:
           --hidden-import "gui.custom_widgets" `
           --hidden-import "gui.ui_utils" `
           --hidden-import "gui.dialogs" `
+          --hidden-import "gui.translation_workbench" `
+          --hidden-import "gui.find_replace_dialog" `
+          --hidden-import "gui.theme_utils" `
+          --hidden-import "gui.dictionary_search_window" `
+          --hidden-import "gui.user_dictionary_editor" `
+          --hidden-import "gui.quest_workflow_manager" `
+          --hidden-import "gui.comprehensive_processing_dialog" `
+          --hidden-import "gui.enhanced_comprehensive_processing" `
+          --hidden-import "gui.github_upload_ui" `
+          --hidden-import "gui.dialog.github_version_select" `
           --hidden-import "services" `
           --hidden-import "services.ai_translator" `
           --hidden-import "services.github_service" `

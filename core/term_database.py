@@ -5,8 +5,15 @@ from typing import List, Dict, Optional, Any, Union, Set, Type, Callable
 from datetime import datetime
 import re
 import csv
+import sys
 
-TERM_DATABASE_PATH = Path("term_database.json")
+def _get_app_data_path():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    else:
+        return Path.cwd()
+
+TERM_DATABASE_PATH = _get_app_data_path() / "term_database.json"
 
 # 导入模式枚举
 class ImportMode:

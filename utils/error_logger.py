@@ -3,8 +3,16 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+import sys
 
-LOG_DIR = Path("logs") / "errors"
+def _get_app_data_path():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    else:
+        return Path.cwd()
+
+APP_DATA_PATH = _get_app_data_path()
+LOG_DIR = APP_DATA_PATH / "logs" / "errors"
 AI_ERROR_LOG_DIR = LOG_DIR / "ai"
 GENERAL_ERROR_LOG_DIR = LOG_DIR / "general"
 MAX_LOG_DAYS = 10

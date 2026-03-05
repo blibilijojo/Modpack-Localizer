@@ -43,6 +43,7 @@ jobs:
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." `
           --hidden-import "psutil" `
+          --hidden-import "collections" `
           --hidden-import "tkinter" `
           --hidden-import "ttkbootstrap" `
           --hidden-import "cryptography" `

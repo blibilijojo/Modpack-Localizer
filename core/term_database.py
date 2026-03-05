@@ -5,19 +5,8 @@ from typing import List, Dict, Optional, Any, Union, Set, Type, Callable
 from datetime import datetime
 import re
 import csv
-import sys
 
-# 处理PyInstaller单文件打包时的路径问题
-def get_app_data_path():
-    if getattr(sys, 'frozen', False):
-        # 单文件打包模式，使用可执行文件所在目录
-        return Path(sys.executable).parent
-    else:
-        # 开发模式，使用当前工作目录
-        return Path.cwd()
-
-APP_DATA_PATH = get_app_data_path()
-TERM_DATABASE_PATH = APP_DATA_PATH / "term_database.json"
+TERM_DATABASE_PATH = Path("term_database.json")
 
 # 导入模式枚举
 class ImportMode:

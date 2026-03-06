@@ -1226,7 +1226,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典[Key]": "#4a037b", "个人词典[原文]": "#4a037b", "模组自带": "#006400", "第三方汉化包": "#008080", "社区词典[Key]": "#00008b", "社区词典[原文]": "#00008b", "待翻译": "#b22222", "AI翻译": "#008b8b", "手动校对": "#ff8c00", "标点修正": "#ff6347", "空": "#808080" }
+        source_colors = { "个人词典 [Key]": "#8B00FF", "个人词典 [原文]": "#8B00FF", "模组自带": "#00AA00", "第三方汉化包": "#00CED1", "社区词典 [Key]": "#4169E1", "社区词典 [原文]": "#4169E1", "待翻译": "#DC143C", "AI 翻译": "#20B2AA", "手动校对": "#FF8C00", "标点修正": "#FF6347", "空": "#A9A9A9" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
         self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'normal'))
 
@@ -1309,13 +1309,13 @@ class TranslationWorkbench(ttk.Frame):
             iid = f"{ns}___{idx}"
             expected_items.append(iid)
             
-            # 确定条目的source标签
+            # 确定条目的 source 标签
             en_text = item_data.get('en', '').strip()
             zh_text = item_data.get('zh', '').strip()
             source = item_data.get('source', '')
             
-            # 如果没有source标签或者source标签为默认值，根据内容自动确定
-            if not source or source == '待翻译' and not en_text:
+            # 如果没有 source 标签或者 source 标签为'待翻译'且原文为空，根据内容自动确定
+            if not source or (source == '待翻译' and not en_text):
                 if not en_text:
                     if zh_text:
                         source = '手动校对'  # 原文为空但有译文，标记为手动校对
@@ -1398,8 +1398,8 @@ class TranslationWorkbench(ttk.Frame):
             zh_text = item_data.get('zh', '').strip()
             source = item_data.get('source', '')
             
-            # 如果没有source标签或者source标签为默认值，根据内容自动确定
-            if not source or source == '待翻译' and not en_text:
+            # 如果没有 source 标签或者 source 标签为'待翻译'且原文为空，根据内容自动确定
+            if not source or (source == '待翻译' and not en_text):
                 if not en_text:
                     if zh_text:
                         source = '手动校对'  # 原文为空但有译文，标记为手动校对

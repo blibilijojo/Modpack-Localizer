@@ -81,6 +81,7 @@ jobs:
           --hidden-import "services.ai_translator" `
           --hidden-import "services.github_service" `
           --hidden-import "services.punctuation_corrector" `
+          --hidden-import "services.space_remover" `
           --hidden-import "utils" `
           --hidden-import "utils.config_manager" `
           --hidden-import "utils.logger_setup" `

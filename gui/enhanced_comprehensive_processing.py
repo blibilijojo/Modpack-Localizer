@@ -75,25 +75,28 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         
         # 操作类型映射
         self.operations_values = {
-            "AI翻译": "ai_translate",
+            "AI 翻译": "ai_translate",
             "导出文本": "export",
             "导入翻译": "import",
-            "标点修正": "punctuation_correct"
+            "标点修正": "punctuation_correct",
+            "去除空格": "remove_space"
         }
         self.operations_reverse_values = {
-            "ai_translate": "AI翻译",
+            "ai_translate": "AI 翻译",
             "export": "导出文本",
             "import": "导入翻译",
-            "punctuation_correct": "标点修正"
+            "punctuation_correct": "标点修正",
+            "remove_space": "去除空格"
         }
         
         self.operation_var = tk.StringVar(value=self.operations_reverse_values.get("ai_translate"))
         
         operations = [
-            "AI翻译",
+            "AI 翻译",
             "导出文本",
             "导入翻译",
-            "标点修正"
+            "标点修正",
+            "去除空格"
         ]
         
         # 使用更现代的Combobox样式
@@ -506,14 +509,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _update_operation_comment(self):
         """更新操作类型注释"""
         operation = self.operation_var.get()
-        if operation == "AI翻译":
-            self.operation_comment_var.set("使用AI对选中模组中的待翻译文本进行批量翻译，支持多种翻译模式")
+        if operation == "AI 翻译":
+            self.operation_comment_var.set("使用 AI 对选中模组中的待翻译文本进行批量翻译，支持多种翻译模式")
         elif operation == "导出文本":
             self.operation_comment_var.set("将选中模组中的文本导出到文件或剪贴板，可选择导出范围和方式")
         elif operation == "导入翻译":
             self.operation_comment_var.set("从文件或剪贴板导入翻译结果，更新选中模组中的翻译内容")
         elif operation == "标点修正":
             self.operation_comment_var.set("自动检测和修正翻译文本中的标点符号，确保中英文标点的一致性和正确性")
+        elif operation == "去除空格":
+            self.operation_comment_var.set("移除翻译文本中多余的空格，清理中文标点符号前后的空格，保持文本整洁")
         else:
             self.operation_comment_var.set("")
     
@@ -544,8 +549,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self.export_options_frame.pack(fill="x", pady=(0, 15))
             self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
             self.cancel_button.pack_forget()
-        elif operation == "punctuation_correct":
-            # 标点修正操作不需要特殊选项，只显示按钮
+        elif operation == "punctuation_correct" or operation == "remove_space":
+            # 标点修正和去除空格操作不需要特殊选项，只显示按钮
             self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
             self.cancel_button.pack_forget()
         
@@ -904,6 +909,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self._start_import(selected_modules)
         elif operation == "punctuation_correct":
             self._start_punctuation_correction(selected_modules)
+        elif operation == "remove_space":
+            self._start_space_removal(selected_modules)
     
     def _on_exit(self):
         """退出翻译控制台模式，返回翻译工作台"""
@@ -1645,6 +1652,150 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         else:
             status_text = f"AI翻译完成，成功更新 {updated_count} 条翻译"
         
+        self.workbench.status_label.config(text=status_text)
+        self.workbench.log_callback(status_text, "SUCCESS")
+        
+        # 更新菜单栏状态
+        if self.workbench.main_window:
+            self.workbench.main_window.update_menu_state()
+    
+    def _start_space_removal(self, selected_modules):
+        """开始去除空格"""
+        # 检查是否有选中的模组
+        if not selected_modules:
+            # 显示提示，要求先选中模组
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            # 恢复界面状态
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        
+        self.workbench.status_label.config(text="正在准备去除空格...")
+        self.workbench.log_callback("正在准备去除空格...", "INFO")
+        
+        # 在工作线程中执行去除空格
+        threading.Thread(target=self._space_removal_worker, args=(selected_modules,), daemon=True).start()
+    
+    def _space_removal_worker(self, selected_modules):
+        """去除空格工作线程"""
+        try:
+            # 导入空格移除器
+            from services.space_remover import space_remover
+            
+            # 收集需要处理的条目
+            all_items = []
+            for ns in selected_modules:
+                items = self.workbench.translation_data.get(ns, {}).get("items", [])
+                for idx, item in enumerate(items):
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    if en_text and zh_text:
+                        all_items.append((ns, idx, item))
+            
+            if not all_items:
+                # 添加安全检查
+                if self.winfo_exists():
+                    from tkinter import messagebox
+                    self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
+                    if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                        self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                    self.after(0, lambda: setattr(self, "processing", False))
+                    if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                        self.after(0, lambda: self.start_button.config(state="normal"))
+                return
+            
+            if not self.processing:
+                return
+            
+            # 执行去除空格
+            self.after(0, lambda: self.workbench.status_label.config(text="正在去除空格..."))
+            
+            removed_count = 0
+            total_count = len(all_items)
+            changes = []
+            
+            # 批量处理
+            batch_size = 10
+            for i in range(0, total_count, batch_size):
+                if not self.processing:
+                    break
+                
+                batch = all_items[i:i+batch_size]
+                for ns, idx, item in batch:
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    
+                    if en_text and zh_text:
+                        # 执行去除空格
+                        cleaned_text = space_remover.process_text(en_text, zh_text)
+                        
+                        # 如果有变化，更新翻译结果
+                        if cleaned_text != zh_text:
+                            # 记录修改
+                            changes.append({
+                                'ns': ns,
+                                'key': item.get('key', ''),
+                                'original': zh_text,
+                                'new': cleaned_text
+                            })
+                            item['zh'] = cleaned_text
+                            item['source'] = '去除空格'
+                            removed_count += 1
+                
+                # 更新进度
+                processed = min(i + batch_size, total_count)
+                status_text = f"去除空格中... 已处理 {processed}/{total_count} 条"
+                # 添加安全检查
+                if self.winfo_exists() and hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+            
+            if not self.processing:
+                return
+            
+            # 更新 UI
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: self._update_space_removal_results(removed_count, total_count, changes))
+            
+        except Exception as e:
+            logging.error(f"去除空格失败：{e}", exc_info=True)
+            # 添加安全检查
+            if self.winfo_exists():
+                from tkinter import messagebox
+                self.after(0, lambda: messagebox.showerror("去除空格失败", f"执行去除空格时发生错误:\n{e}"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败：{str(err)}"))
+        finally:
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
+    
+    def _update_space_removal_results(self, removed_count, total_count, changes):
+        """更新去除空格结果"""
+        # 强制记录当前状态用于撤销
+        details = {
+            'process_type': 'space_removal',
+            'changes': changes,
+            'removed_count': removed_count,
+            'total_count': total_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
+        self.workbench._update_history_buttons()
+        
+        # 更新 UI
+        self.workbench._populate_namespace_tree()
+        self.workbench._populate_item_list()
+        
+        # 设置脏标志
+        if removed_count > 0:
+            self.workbench._set_dirty(True)
+        
+        # 更新状态和日志
+        status_text = f"去除空格完成，成功清理 {removed_count} 条翻译，共处理 {total_count} 条"
         self.workbench.status_label.config(text=status_text)
         self.workbench.log_callback(status_text, "SUCCESS")
         

@@ -13,6 +13,15 @@ from .models import (
 class Translator:
     """翻译决策引擎"""
     
+    # 预编译正则表达式，避免重复编译
+    PLACEHOLDER_PERCENT = re.compile(r'%\d*\$?[a-zA-Z]+')
+    PLACEHOLDER_BRACE = re.compile(r'\$\{[^}]+\}')
+    PLACEHOLDER_DOLLAR = re.compile(r'\$\d+')
+    CHINESE_CHAR = re.compile('[一 - 鿿]')
+    ENGLISH_LETTER = re.compile(r'[a-zA-Z]')
+    JSON_KEY_VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    LANG_KEY_VALUE = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+    
     def __init__(self):
         pass
     
@@ -46,52 +55,28 @@ class Translator:
     
     def _is_valid_translation(self, text: Optional[str]) -> bool:
         """验证翻译是否有效"""
-        if not text:
+        if not text or not text.strip():
             return False
-        if not text.strip():
-            return False
-        if re.search('[一-鿿]', text):
+        
+        # 快速路径：直接包含中文字符
+        if self.CHINESE_CHAR.search(text):
             return True
         
-        # 检查是否包含普通英文字母（非占位符部分）
-        # 占位符格式：%[数字]$?[a-zA-Z]+ 或 ${...}
-        # 保留所有占位符格式，只排除普通英文字母
+        # 移除占位符后检查是否还有英文字母
+        cleaned = self.PLACEHOLDER_PERCENT.sub('', text)
+        cleaned = self.PLACEHOLDER_BRACE.sub('', cleaned)
+        cleaned = self.PLACEHOLDER_DOLLAR.sub('', cleaned)
+        cleaned = cleaned.replace('%', '')
         
-        # 先移除所有占位符，然后检查是否还有普通英文字母
-        cleaned_text = text
-        
-        # 移除 %s, %1$s, %d, %tH 等格式的占位符
-        cleaned_text = re.sub(r'%\d*\$?[a-zA-Z]+', '', cleaned_text)
-        
-        # 移除 ${name} 格式的占位符
-        cleaned_text = re.sub(r'\$\{[^}]+\}', '', cleaned_text)
-        
-        # 移除 $1, $2 等格式的占位符
-        cleaned_text = re.sub(r'\$\d+', '', cleaned_text)
-        
-        # 移除单独的 % 符号
-        cleaned_text = cleaned_text.replace('%', '')
-        
-        # 检查是否还有普通英文字母
-        if re.search(r'[a-zA-Z]', cleaned_text):
-            return False
-        
-        return True
+        return not self.ENGLISH_LETTER.search(cleaned)
     
     def _get_ordered_keys(self, content: str, file_format: str) -> List[str]:
         """获取有序键列表"""
-        keys = []
         if file_format == 'json':
-            # 使用正则表达式解析JSON文件，保持原始顺序
-            JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
-            for match in JSON_KEY_VALUE_PATTERN.finditer(content):
-                key = match.group(1)
-                keys.append(key)
+            return [m.group(1) for m in self.JSON_KEY_VALUE.finditer(content)]
         elif file_format == 'lang':
-            lang_kv_pattern = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
-            for match in lang_kv_pattern.finditer(content):
-                keys.append(match.group(1))
-        return keys
+            return [m.group(1) for m in self.LANG_KEY_VALUE.finditer(content)]
+        return []
     
     def _process_namespace(
         self, 
@@ -109,34 +94,11 @@ class Translator:
         """处理单个命名空间的翻译"""
         ns_result = {}
         
-        # 获取有序键
-        ordered_keys = []
-        if namespace_info.raw_content and namespace_info.file_format:
-            # 从原始文件中提取有序键
-            original_ordered_keys = self._get_ordered_keys(namespace_info.raw_content, namespace_info.file_format)
-            
-            # 处理带有计数器后缀的 _comment 条目
-            comment_counter = 0
-            for key in original_ordered_keys:
-                if key == '_comment':
-                    comment_counter += 1
-                    # 查找对应的带有计数器后缀的键
-                    for entry_key in english_entries.keys():
-                        if entry_key == f'_comment_{comment_counter}':
-                            ordered_keys.append(entry_key)
-                            break
-                else:
-                    # 对于非 _comment 键，直接添加
-                    ordered_keys.append(key)
+        # 优化：直接使用 english_entries 的键，避免复杂的排序逻辑
+        ordered_keys = list(english_entries.keys())
         
-        if not ordered_keys:
-            ordered_keys = list(english_entries.keys())
-        
-        # 确保所有英文词典中的键都被包含
-        all_keys = set(english_entries.keys())
-        ordered_keys_set = set(ordered_keys)
-        missing_keys = all_keys - ordered_keys_set
-        ordered_keys.extend(list(missing_keys))
+        # 预缓存社区词典冲突解决结果
+        community_origin_cache = {}
         
         for key in ordered_keys:
             english_entry = english_entries.get(key)
@@ -152,54 +114,40 @@ class Translator:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
             else:
-                # 按照优先级顺序：模组自带 → 个人词典 → 社区词典key → 社区词典原文
+                # 按照优先级顺序：模组自带 → 个人词典 → 第三方汉化包 → 社区词典
                 
                 # 1. 模组自带中文
                 if key in internal_chinese:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
-                # 2. 个人词典（Key优先）
+                # 2. 个人词典（Key 优先）
                 elif key in user_dict_by_key:
                     translation = user_dict_by_key[key]
-                    source = "个人词典[Key]"
+                    source = "个人词典 [Key]"
                 elif use_origin_name_lookup and english_value in user_dict_by_origin:
                     translation = user_dict_by_origin[english_value]
-                    source = "个人词典[原文]"
+                    source = "个人词典 [原文]"
                 # 3. 第三方汉化包
                 elif key in pack_chinese_dict:
                     translation = pack_chinese_dict[key]
                     source = "第三方汉化包"
-                # 4. 社区词典[Key]
+                # 4. 社区词典 [Key]
                 elif key in community_dict_by_key:
                     translation = community_dict_by_key[key]
-                    source = "社区词典[Key]"
-                # 5. 社区词典[原文]
+                    source = "社区词典 [Key]"
+                # 5. 社区词典 [原文]（使用缓存避免重复计算）
                 elif use_origin_name_lookup and english_value in community_dict_by_origin:
-                    candidates = community_dict_by_origin[english_value]
-                    best_translation = self._resolve_origin_name_conflict(candidates)
+                    if english_value not in community_origin_cache:
+                        candidates = community_dict_by_origin[english_value]
+                        community_origin_cache[english_value] = self._resolve_origin_name_conflict(candidates)
+                    
+                    best_translation = community_origin_cache[english_value]
                     if best_translation:
                         translation = best_translation
-                        source = "社区词典[原文]"
-                # 6. 非英文内容直接保留（包括包含各种占位符的内容）
+                        source = "社区词典 [原文]"
+                # 6. 非英文内容直接保留
                 else:
-                    # 使用与_is_valid_translation相同的逻辑检查是否为非英文内容
-                    # 先移除所有占位符，然后检查是否还有普通英文字母
-                    cleaned_text = english_value
-                    
-                    # 移除 %s, %1$s, %d, %tH 等格式的占位符
-                    cleaned_text = re.sub(r'%\d*\$?[a-zA-Z]+', '', cleaned_text)
-                    
-                    # 移除 ${name} 格式的占位符
-                    cleaned_text = re.sub(r'\$\{[^}]+\}', '', cleaned_text)
-                    
-                    # 移除 $1, $2 等格式的占位符
-                    cleaned_text = re.sub(r'\$\d+', '', cleaned_text)
-                    
-                    # 移除单独的 % 符号
-                    cleaned_text = cleaned_text.replace('%', '')
-                    
-                    # 检查是否还有普通英文字母
-                    if not re.search(r'[a-zA-Z]', cleaned_text):
+                    if self._is_valid_translation(english_value):
                         translation = english_value
                         source = "原文复制"
             
@@ -208,16 +156,13 @@ class Translator:
                 translation = ""
                 source = "待翻译"
             
-            # 创建翻译结果
-            result_entry = LanguageEntry(
+            ns_result[key] = LanguageEntry(
                 key=key,
                 en=english_value,
                 zh=translation,
                 source=source,
                 namespace=namespace
             )
-            
-            ns_result[key] = result_entry
         
         return ns_result
     

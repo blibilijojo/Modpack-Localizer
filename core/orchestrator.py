@@ -176,40 +176,46 @@ class Orchestrator:
             
             self.update_progress("决策完成，准备打开工作台", 90)
             self.log("阶段 3/3: 启动翻译工作台...", "INFO")
-            self.root.after(0, self._launch_workbench, workbench_data)
+            
+            from gui.translation_workbench import TranslationWorkbench
+            workbench = TranslationWorkbench(
+                parent=self.root,
+                initial_data=workbench_data,
+                namespace_formats=self.namespace_formats,
+                raw_english_files=self.raw_english_files,
+                current_settings=self.settings,
+                log_callback=self.log,
+                project_path=self.project_path,
+                finish_button_text="完成并生成资源包",
+                undo_history=None,
+                module_names=self.module_names
+            )
+            workbench.pack(fill="both", expand=True)
+            self.root.update_idletasks()
+            workbench.update_idletasks()
+            
+            def on_workbench_finish(final_translations, final_workbench_data):
+                if final_translations is not None:
+                    self.final_translations = final_translations
+                    self.final_workbench_data = final_workbench_data
+                    self.raw_english_files = workbench.raw_english_files
+                    self.namespace_formats = workbench.namespace_formats
+                    self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+                    self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+                else:
+                    self.log("翻译工作台已取消，操作中止。", "WARNING")
+                    self.update_progress("操作已取消", -2)
+            
+            workbench.finish_callback = on_workbench_finish
         except ValueError as ve:
-            logging.error(f"配置错误: {ve}")
+            logging.error(f"配置错误：{ve}")
             self.root.after(0, lambda: messagebox.showerror("配置错误", f"请检查配置后重试:\n{ve}"))
-            self.update_progress(f"错误: {ve}", -1)
+            self.update_progress(f"错误：{ve}", -1)
         except Exception as e:
-            logging.error(f"翻译处理阶段失败: {e}", exc_info=True)
+            logging.error(f"翻译处理阶段失败：{e}", exc_info=True)
             self.root.after(0, lambda: messagebox.showerror("处理失败", f"在处理文件时发生错误:\n{e}\n请查看日志获取更多详细信息。"))
-            self.update_progress(f"错误: {e}", -1)
-    def _launch_workbench(self, workbench_data, undo_history=None):
-        workbench = TranslationWorkbench(
-            parent=self.root,
-            initial_data=workbench_data,
-            namespace_formats=self.namespace_formats,
-            raw_english_files=self.raw_english_files,
-            current_settings=self.settings,
-            log_callback=self.log,
-            project_path=self.project_path,
-            finish_button_text="完成并生成资源包",
-            undo_history=undo_history,
-            module_names=self.module_names
-        )
-        self.root.wait_window(workbench)
-        if workbench.final_translations is not None:
-            self.final_translations = workbench.final_translations
-            self.final_workbench_data = workbench.translation_data
-            # 更新raw_english_files和namespace_formats，确保再次生成资源包时使用最新数据
-            self.raw_english_files = workbench.raw_english_files
-            self.namespace_formats = workbench.namespace_formats
-            self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
-            self.update_progress("翻译处理完成，现在可以生成资源包", -10)
-        else:
-            self.log("翻译工作台已取消，操作中止。", "WARNING")
-            self.update_progress("操作已取消", -2)
+            self.update_progress(f"错误：{e}", -1)
+    
     def _generate_pack_metadata_values(self) -> dict:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if not self.final_workbench_data:
@@ -327,7 +333,7 @@ class Orchestrator:
     def run_workflow(self):
         if not self.save_data:
             self.log("项目数据未加载，无法直接运行完整工作流。", "ERROR")
-            self.update_progress("错误: 项目数据未加载", -1)
+            self.update_progress("错误：项目数据未加载", -1)
             return
         self.log("从存档文件加载数据并启动工作台...", "INFO")
         self.update_progress("正在加载项目...", 10)
@@ -341,6 +347,35 @@ class Orchestrator:
         
         if not all([self.raw_english_files, self.namespace_formats, workbench_data]):
             self.log("存档文件不完整，缺少核心数据。", "ERROR")
-            self.update_progress("错误: 存档文件不完整", -1)
+            self.update_progress("错误：存档文件不完整", -1)
             return
-        self.root.after(0, self._launch_workbench, workbench_data)
+        
+        workbench = TranslationWorkbench(
+            parent=self.root,
+            initial_data=workbench_data,
+            namespace_formats=self.namespace_formats,
+            raw_english_files=self.raw_english_files,
+            current_settings=self.settings,
+            log_callback=self.log,
+            project_path=self.project_path,
+            finish_button_text="完成并生成资源包",
+            undo_history=None,
+            module_names=self.module_names
+        )
+        workbench.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+        workbench.update_idletasks()
+        
+        def on_workbench_finish(final_translations, final_workbench_data):
+            if final_translations is not None:
+                self.final_translations = final_translations
+                self.final_workbench_data = final_workbench_data
+                self.raw_english_files = workbench.raw_english_files
+                self.namespace_formats = workbench.namespace_formats
+                self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+                self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+            else:
+                self.log("翻译工作台已取消，操作中止。", "WARNING")
+                self.update_progress("操作已取消", -2)
+        
+        workbench.finish_callback = on_workbench_finish

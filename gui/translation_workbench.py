@@ -159,7 +159,7 @@ class TranslationWorkbench(ttk.Frame):
             pass
 
     def _create_widgets(self):
-        self.main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        self.main_pane = tk_ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.main_pane.pack(fill="both", expand=True, padx=5, pady=(5, 0))
 
         self.left_frame = ttk.Frame(self.main_pane, padding=5)
@@ -212,7 +212,7 @@ class TranslationWorkbench(ttk.Frame):
         self.workbench_ui_container = ttk.Frame(right_frame_container)
         self.workbench_ui_container.pack(fill="both", expand=True)
         
-        right_pane = ttk.PanedWindow(self.workbench_ui_container, orient=tk.VERTICAL)
+        right_pane = tk_ttk.PanedWindow(self.workbench_ui_container, orient=tk.VERTICAL)
         right_pane.pack(fill="both", expand=True)
 
         table_container = ttk.Frame(right_pane, padding=5)

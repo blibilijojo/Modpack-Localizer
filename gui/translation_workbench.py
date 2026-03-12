@@ -110,13 +110,10 @@ class TranslationWorkbench(ttk.Frame):
 
         self._create_widgets()
         
-        # 立即设置初始sash位置，确保在所有情况下都能保持1:3的比例
-        self._set_initial_sash_position()
-        # 同时在idle时再次检查，确保窗口完全初始化后比例正确
-        self.after_idle(self._set_initial_sash_position)
+        # 延迟设置初始 sash 位置，避免阻塞初始化
+        self.after(100, self._set_initial_sash_position)
         
-        # 初始化操作历史（不记录为用户操作）
-        # 添加初始状态作为历史记录的基础
+        # 初始化操作历史（简化版，避免深度复制大量数据）
         import uuid
         initial_state = {
             'id': str(uuid.uuid4()),
@@ -125,7 +122,7 @@ class TranslationWorkbench(ttk.Frame):
             'timestamp': datetime.now().isoformat(),
             'target_iid': None,
             'details': {'project_name': self.project_name},
-            'state': copy.deepcopy(self.translation_data)
+            'state': None  # 延迟到真正需要时再保存
         }
         self.operation_history = [initial_state]
         self._update_history_buttons()
@@ -134,9 +131,11 @@ class TranslationWorkbench(ttk.Frame):
         self.bind_all("<Control-s>", lambda e: self._save_project())
 
         self._setup_treeview_tags()
-        self._populate_namespace_tree()
-        self._update_ui_state(interactive=True, item_selected=False)
-        self._set_dirty(False)
+        
+        # 延迟加载命名空间树，避免阻塞 UI
+        self.after_idle(self._populate_namespace_tree)
+        self.after_idle(lambda: self._update_ui_state(interactive=True, item_selected=False))
+        self.after_idle(lambda: self._set_dirty(False))
 
     def get_state(self):
         return {
@@ -149,11 +148,11 @@ class TranslationWorkbench(ttk.Frame):
 
     def _set_initial_sash_position(self):
         try:
-            self.update_idletasks()
+            # 减少 update_idletasks 调用，直接获取宽度
             width = self.winfo_width()
-            # 设置为窗口宽度的25%，保持1:3的比例，但不小于330像素，确保能显示所有列
+            # 设置为窗口宽度的 25%，保持 1:3 的比例，但不小于 330 像素，确保能显示所有列
             initial_pos = max(int(width * 0.25), 330)
-            if initial_pos > 50:
+            if initial_pos > 50 and width > 0:
                 self.main_pane.sashpos(0, initial_pos)
         except tk.TclError:
             pass

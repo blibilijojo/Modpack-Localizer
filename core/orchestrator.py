@@ -196,8 +196,6 @@ class Orchestrator:
                     module_names=self.module_names
                 )
                 workbench.pack(fill="both", expand=True)
-                self.root.update_idletasks()
-                workbench.update_idletasks()
             
             def on_workbench_finish(final_translations, final_workbench_data):
                 if final_translations is not None:
@@ -374,8 +372,6 @@ class Orchestrator:
                 module_names=self.module_names
             )
             workbench.pack(fill="both", expand=True)
-            self.root.update_idletasks()
-            workbench.update_idletasks()
         
         def on_workbench_finish(final_translations, final_workbench_data):
             if final_translations is not None:

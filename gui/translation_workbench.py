@@ -1226,7 +1226,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典 [Key]": "#8B00FF", "个人词典 [原文]": "#8B00FF", "模组自带": "#00AA00", "第三方汉化包": "#00CED1", "社区词典 [Key]": "#4169E1", "社区词典 [原文]": "#4169E1", "待翻译": "#DC143C", "AI 翻译": "#20B2AA", "手动校对": "#FF8C00", "标点修正": "#FF6347", "空": "#A9A9A9" }
+        source_colors = { "个人词典 [Key]": "#8B00FF", "个人词典 [原文]": "#8B00FF", "模组自带": "#00AA00", "第三方汉化包": "#00CED1", "社区词典 [Key]": "#4169E1", "社区词典 [原文]": "#4169E1", "待翻译": "#DC143C", "AI翻译": "#20B2AA", "手动校对": "#FF8C00", "标点修正": "#FF6347", "空": "#A9A9A9" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
         self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'normal'))
 
@@ -2301,9 +2301,11 @@ class TranslationWorkbench(ttk.Frame):
                 
                 # 2. 处理社区词典中的术语
                 config = config_manager.load_config()
-                community_dict_path = config.get("community_dict_path", "")
+                community_dict_dir = config.get("community_dict_dir", "")
                 
-                if community_dict_path:
+                if community_dict_dir:
+                    # 构建完整的文件路径
+                    community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
                     searcher = DictionarySearcher(community_dict_path)
                     if searcher.is_available():
                         # 优化1：只排除已匹配的术语

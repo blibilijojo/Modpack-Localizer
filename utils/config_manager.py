@@ -119,7 +119,7 @@ DEFAULT_CONFIG = {
     "ai_retry_backoff_factor": 2.0,
     "ai_retry_rate_limit_cooldown": 60.0,
     "mods_dir": "", "output_dir": "",
-    "community_dict_path": "",
+    "community_dict_dir": "",
     "community_pack_paths": [],
     "pack_settings_presets": {
         "默认预案": {
@@ -199,8 +199,26 @@ def load_config() -> dict:
              logging.warning("检测到旧的'最后使用的设置'简介，将自动清空。")
              config["last_pack_settings"]["pack_description"] = ""
              config_updated = True
+        # 处理旧的社区词典路径配置
         if "global_dict_path" in config and "community_dict_path" not in config:
             config["community_dict_path"] = config.pop("global_dict_path")
+            config_updated = True
+        
+        # 转换旧的community_dict_path为新的community_dict_dir
+        if "community_dict_path" in config and "community_dict_dir" not in config:
+            import os
+            old_path = config["community_dict_path"]
+            if old_path:
+                # 提取目录部分
+                config["community_dict_dir"] = os.path.dirname(old_path)
+            else:
+                config["community_dict_dir"] = ""
+            del config["community_dict_path"]
+            config_updated = True
+        
+        # 设置默认社区词典目录
+        if not config.get("community_dict_dir"):
+            config["community_dict_dir"] = str(APP_DATA_PATH)
             config_updated = True
         if "ai_retry_interval" in config:
             del config["ai_retry_interval"]

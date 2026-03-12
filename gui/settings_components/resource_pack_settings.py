@@ -29,7 +29,7 @@ class ResourcePackSettings:
     
     def _create_variables(self):
         # 资源包设置
-        self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
+        self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_dir", ""))
         
         # 绑定变量变化事件
         self._bind_events()
@@ -62,7 +62,7 @@ class ResourcePackSettings:
         dict_entry.pack(side="left", fill="x", expand=True, padx=5)
         # 防止自动选中文本
         dict_entry.after_idle(dict_entry.selection_clear)
-        browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline")
+        browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_directory(self.community_dict_var), bootstyle="primary-outline")
         browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新", command=self._check_and_update_dict_async, bootstyle="info")
         self.download_dict_button.pack(side="left", padx=(5, 5))
@@ -136,9 +136,13 @@ class ResourcePackSettings:
                     self.parent.after(0, lambda: ui_utils.show_error("更新失败", "无法获取远程词典信息，请检查网络连接。"))
                 return
             
-            # 获取本地词典路径
-            community_dict_path = self.community_dict_var.get()
-            local_path = Path(community_dict_path) if community_dict_path else None
+            # 获取本地词典目录
+            community_dict_dir = self.community_dict_var.get()
+            if community_dict_dir:
+                # 构建完整的文件路径
+                local_path = Path(community_dict_dir) / "Dict-Community.db"
+            else:
+                local_path = None
             
             # 检查本地词典版本
             local_version = config_manager.load_config().get("last_dict_version", "0.0.0")
@@ -152,10 +156,17 @@ class ResourcePackSettings:
                     return
             
             # 需要更新或下载
-            if not local_path:
-                # 没有设置本地路径，提示用户
+            if not community_dict_dir:
+                # 没有设置本地目录，提示用户
                 if self.parent.winfo_exists():
-                    self.parent.after(0, lambda: ui_utils.show_error("更新失败", "请先配置社区词典文件路径。"))
+                    self.parent.after(0, lambda: ui_utils.show_error("更新失败", "请先配置社区词典目录路径。"))
+                return
+            
+            # 检查目录是否存在
+            dict_dir = Path(community_dict_dir)
+            if not dict_dir.exists() or not dict_dir.is_dir():
+                if self.parent.winfo_exists():
+                    self.parent.after(0, lambda: ui_utils.show_error("更新失败", "社区词典目录不存在或不是有效目录。"))
                 return
             
             # 弹窗询问用户是否更新
@@ -312,10 +323,13 @@ class ResourcePackSettings:
         return None
     
     def _create_term_database(self):
-        community_dict_path = self.community_dict_var.get()
-        if not community_dict_path:
-            ui_utils.show_error("错误", "请先配置社区词典文件路径。")
+        community_dict_dir = self.community_dict_var.get()
+        if not community_dict_dir:
+            ui_utils.show_error("错误", "请先配置社区词典目录路径。")
             return
+        
+        # 构建完整的文件路径
+        community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
         
         try:
             # 显示确认对话框
@@ -506,6 +520,6 @@ class ResourcePackSettings:
     
     def get_config(self):
         return {
-            "community_dict_path": self.community_dict_var.get(),
+            "community_dict_dir": self.community_dict_var.get(),
             "community_pack_paths": list(self.packs_listbox.get(0, tk.END))
         }

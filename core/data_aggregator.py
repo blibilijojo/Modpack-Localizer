@@ -8,10 +8,10 @@ from pathlib import Path
 from utils import file_utils, config_manager
 from collections import defaultdict
 class DataAggregator:
-    def __init__(self, mods_dir: Path, zip_paths: list[Path], community_dict_path: str):
+    def __init__(self, mods_dir: Path, zip_paths: list[Path], community_dict_dir: str):
         self.mods_dir = mods_dir
         self.zip_paths = zip_paths
-        self.community_dict_path = Path(community_dict_path) if community_dict_path else None
+        self.community_dict_dir = community_dict_dir
         self.raw_english_files = {}
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
@@ -53,12 +53,21 @@ class DataAggregator:
     def _load_community_dictionary(self) -> tuple[dict, dict]:
         community_dict_by_key = {}
         community_dict_by_origin = defaultdict(list)
-        if not self.community_dict_path or not self.community_dict_path.is_file():
-            logging.info("  - 未提供社区词典文件或路径无效，跳过加载。")
+        
+        if not self.community_dict_dir:
+            logging.info("  - 未提供社区词典目录，跳过加载。")
             return {}, {}
-        logging.info(f"  - 正在从社区词典加载: {self.community_dict_path.name}")
+        
+        # 构建完整的文件路径
+        dict_file_path = Path(self.community_dict_dir) / "Dict-Community.db"
+        
+        if not dict_file_path.is_file():
+            logging.info(f"  - 社区词典文件不存在: {dict_file_path}，跳过加载。")
+            return {}, {}
+        
+        logging.info(f"  - 正在从社区词典加载: {dict_file_path.name}")
         try:
-            with sqlite3.connect(f"file:{self.community_dict_path}?mode=ro", uri=True) as con:
+            with sqlite3.connect(f"file:{dict_file_path}?mode=ro", uri=True) as con:
                 cur = con.cursor()
                 cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
                 for key, origin_name, trans_name, version in cur.fetchall():
@@ -68,7 +77,7 @@ class DataAggregator:
                         word_count = len(origin_name.split())
                         if 1 <= word_count <= 2:
                             community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
-        except sqlite3.Error as e:
+        except Exception as e:
             logging.error(f"  - 读取社区词典数据库时发生错误: {e}")
         logging.info(f"  - 社区词典加载成功: {len(community_dict_by_key)} 条 [Key] 规则, {len(community_dict_by_origin)} 条 [原文] 规则")
         return community_dict_by_key, dict(community_dict_by_origin)

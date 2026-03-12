@@ -114,7 +114,7 @@ class Extractor:
         
         return namespace, file_format, content, extracted_data, is_english, is_chinese
     
-    def _load_dictionaries(self, community_dict_path: str) -> tuple[Dict, Dict, Dict]:
+    def _load_dictionaries(self, community_dict_dir: str) -> tuple[Dict, Dict, Dict]:
         """加载各种词典"""
         # 加载用户词典
         user_dict = config_manager.load_user_dict()
@@ -125,17 +125,21 @@ class Extractor:
         community_dict_by_key = {}
         community_dict_by_origin = defaultdict(list)
         
-        if community_dict_path and Path(community_dict_path).is_file():
+        if community_dict_dir:
             try:
-                with sqlite3.connect(f"file:{community_dict_path}?mode=ro", uri=True) as con:
-                    cur = con.cursor()
-                    cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
-                    for key, origin_name, trans_name, version in cur.fetchall():
-                        if key:
-                            community_dict_by_key[key] = trans_name
-                        if origin_name and trans_name:
-                            community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
-            except sqlite3.Error as e:
+                # 构建完整的文件路径
+                dict_file_path = Path(community_dict_dir) / "Dict-Community.db"
+                
+                if dict_file_path.is_file():
+                    with sqlite3.connect(f"file:{dict_file_path}?mode=ro", uri=True) as con:
+                        cur = con.cursor()
+                        cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
+                        for key, origin_name, trans_name, version in cur.fetchall():
+                            if key:
+                                community_dict_by_key[key] = trans_name
+                            if origin_name and trans_name:
+                                community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
+            except Exception as e:
                 logging.error(f"读取社区词典数据库时发生错误: {e}")
         
         return user_dict_by_key, user_dict_by_origin, community_dict_by_key
@@ -1009,7 +1013,7 @@ class Extractor:
         except Exception as e:
             logging.warning(f"从TOML文件提取Modrinth名称时发生错误: {file_path} - {e}")
 
-    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_path: str, progress_update_callback=None) -> ExtractionResult:
+    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("--- 阶段 1: 开始聚合所有语言数据 ---")
         

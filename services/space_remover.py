@@ -12,13 +12,9 @@ class SpaceRemover:
         
     def remove_extra_spaces(self, text):
         """
-        移除文本中多余的空格
+        移除文本中所有空格
         
-        规则：
-        1. 移除行首和行尾的空格
-        2. 移除中文标点符号前后的空格
-        3. 移除连续的空格
-        4. 保留中英文混合文本中必要的空格
+        规则：直接删除译文中的全部空格
         
         Args:
             text: 输入文本
@@ -29,30 +25,8 @@ class SpaceRemover:
         if not text:
             return text
         
-        # 按行处理
-        lines = text.split('\n')
-        processed_lines = []
-        
-        for line in lines:
-            # 1. 移除行首和行尾的空格
-            line = line.strip()
-            
-            # 2. 移除中文标点符号前的空格
-            for punct in self.chinese_punctuation:
-                line = line.replace(f' {punct}', punct)
-            
-            # 3. 移除中文标点符号后的空格（除了某些特殊情况）
-            for punct in self.chinese_punctuation:
-                # 避免移除引号后的必要空格
-                if punct not in ['"', "'", ')', '）', ']', '】', '>', '》']:
-                    line = line.replace(f'{punct} ', punct)
-            
-            # 4. 移除连续的空格，替换为单个空格
-            line = re.sub(r' {2,}', ' ', line)
-            
-            processed_lines.append(line)
-        
-        return '\n'.join(processed_lines)
+        # 直接删除所有空格
+        return text.replace(' ', '')
     
     def process_text(self, en_text, zh_text):
         """

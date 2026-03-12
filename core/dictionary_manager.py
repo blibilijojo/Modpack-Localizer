@@ -23,40 +23,46 @@ class DictionaryManager:
             logging.error(f"加载用户词典失败: {e}")
             return {'by_key': {}, 'by_origin_name': {}}
     
-    def load_community_dictionary(self, community_dict_path):
+    def load_community_dictionary(self, community_dict_dir):
         """加载社区词典"""
         community_dict_by_key = {}
         community_dict_by_origin = defaultdict(list)
         
-        if community_dict_path and Path(community_dict_path).is_file():
+        if community_dict_dir:
             try:
-                with sqlite3.connect(f"file:{community_dict_path}?mode=ro", uri=True) as con:
-                    cur = con.cursor()
-                    cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
-                    for key, origin_name, trans_name, version in cur.fetchall():
-                        if key:
-                            community_dict_by_key[key] = trans_name
-                        if origin_name and trans_name:
-                            community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
-                logging.info(f"社区词典加载成功，包含 {len(community_dict_by_key)} 个按键条目和 {len(community_dict_by_origin)} 个按原文条目")
-            except sqlite3.Error as e:
+                # 构建完整的文件路径
+                dict_file_path = Path(community_dict_dir) / "Dict-Community.db"
+                
+                if dict_file_path.is_file():
+                    with sqlite3.connect(f"file:{dict_file_path}?mode=ro", uri=True) as con:
+                        cur = con.cursor()
+                        cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
+                        for key, origin_name, trans_name, version in cur.fetchall():
+                            if key:
+                                community_dict_by_key[key] = trans_name
+                            if origin_name and trans_name:
+                                community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
+                    logging.info(f"社区词典加载成功，包含 {len(community_dict_by_key)} 个按键条目和 {len(community_dict_by_origin)} 个按原文条目")
+                else:
+                    logging.info(f"社区词典文件不存在: {dict_file_path}")
+            except Exception as e:
                 logging.error(f"读取社区词典数据库时发生错误: {e}")
         
         self.community_dict_by_key = community_dict_by_key
         self.community_dict_by_origin = community_dict_by_origin
         return community_dict_by_key, community_dict_by_origin
     
-    def get_all_dictionaries(self, community_dict_path):
+    def get_all_dictionaries(self, community_dict_dir):
         """获取所有词典数据"""
         # 检查缓存
-        cache_key = f"all_dicts_{community_dict_path or 'none'}"
+        cache_key = f"all_dicts_{community_dict_dir or 'none'}"
         if cache_key in self._cache:
             logging.debug("从缓存中获取词典数据")
             return self._cache[cache_key]
         
         # 加载词典
         user_dict = self.load_user_dictionary()
-        community_dict_by_key, community_dict_by_origin = self.load_community_dictionary(community_dict_path)
+        community_dict_by_key, community_dict_by_origin = self.load_community_dictionary(community_dict_dir)
         
         # 缓存结果
         result = (user_dict, community_dict_by_key, community_dict_by_origin)

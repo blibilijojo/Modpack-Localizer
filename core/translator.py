@@ -58,10 +58,6 @@ class Translator:
         if not text or not text.strip():
             return False
         
-        # 快速路径：直接包含中文字符
-        if self.CHINESE_CHAR.search(text):
-            return True
-        
         # 移除占位符后检查是否还有英文字母
         cleaned = self.PLACEHOLDER_PERCENT.sub('', text)
         cleaned = self.PLACEHOLDER_BRACE.sub('', cleaned)

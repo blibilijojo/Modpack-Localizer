@@ -26,6 +26,7 @@ config.json
 user_dict.json
 Dict-Sqlite.db
 Dict-User.db
+Dict-Community.db
 term_database.json
 
 # 排除所有txt和json格式的文件

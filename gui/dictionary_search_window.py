@@ -1,6 +1,7 @@
 import tkinter as tk
 import ttkbootstrap as ttk
 import logging
+from pathlib import Path
 from utils.dictionary_searcher import DictionarySearcher
 from utils.config_manager import load_config
 from gui import ui_utils
@@ -17,7 +18,13 @@ class DictionarySearchWindow(ttk.Toplevel):
         self.initial_query = initial_query
         logging.info("初始化词典查询窗口...")
         self.config = load_config()
-        self.searcher = DictionarySearcher(self.config.get("community_dict_path"))
+        # 构建完整的文件路径
+        community_dict_dir = self.config.get("community_dict_dir")
+        if community_dict_dir:
+            community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
+        else:
+            community_dict_path = ""
+        self.searcher = DictionarySearcher(community_dict_path)
         self._setup_window()
         self._create_widgets()
         if not self.searcher.is_available():

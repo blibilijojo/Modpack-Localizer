@@ -34,51 +34,11 @@ class GitHubService:
     
     def _build_json_file(self, template_content: str, translations: dict) -> str:
         """
-        基于正则表达式的JSON语言文件逆向生成
-        与Builder类中的方法完全相同，确保生成的JSON文件格式一致
+        使用Builder类的方法构建JSON文件，确保与资源包构建使用相同的逻辑
         """
-        # 提取模板中的所有键值对信息
-        key_info = []
-        for match in self.JSON_KEY_VALUE_PATTERN.finditer(template_content):
-            key = match.group(1)
-            original_value = match.group(2)
-            start, end = match.span()
-            key_info.append({
-                'key': key,
-                'original_value': original_value,
-                'start': start,
-                'end': end,
-                'full_match': match.group(0)
-            })
-        
-        # 按出现顺序排序
-        key_info.sort(key=lambda x: x['start'])
-        
-        # 构建输出内容，保留原始格式
-        output = []
-        current_pos = 0
-        
-        for info in key_info:
-            # 添加匹配前的内容
-            output.append(template_content[current_pos:info['start']])
-            
-            # 替换值
-            if info['key'] in translations:
-                translated_value = translations[info['key']]
-                # 保持原始键的格式，只替换值
-                output.append(f'"{info["key"]}":"{translated_value}"')
-            else:
-                # 保留原始值
-                output.append(info['full_match'])
-            
-            current_pos = info['end']
-        
-        # 添加剩余内容
-        output.append(template_content[current_pos:])
-        
-        # 确保返回的字符串只使用\n换行符
-        result = ''.join(output)
-        return result.replace('\r\n', '\n').replace('\r', '\n')
+        from core.builder import Builder
+        builder = Builder()
+        return builder._build_json_file(template_content, translations)
     
     def _parse_repo_url(self, repo_url):
         """解析仓库地址，支持完整URL和直接输入owner/repo格式"""
@@ -109,6 +69,8 @@ class GitHubService:
                 response = requests.post(url, headers=self.headers, **kwargs)
             elif method == 'PATCH':
                 response = requests.patch(url, headers=self.headers, **kwargs)
+            elif method == 'DELETE':
+                response = requests.delete(url, headers=self.headers, **kwargs)
             else:
                 raise ValueError(f'不支持的请求方法: {method}')
             
@@ -155,51 +117,67 @@ class GitHubService:
                 return None
             raise
     
+    def _delete_branch(self):
+        """删除分支"""
+        try:
+            # 删除分支引用
+            endpoint = f'/repos/{self.repo}/git/refs/heads/{self.branch}'
+            result = self._make_request('DELETE', endpoint)
+            if result or result is None:
+                # 删除成功
+                logging.info(f'分支 {self.branch} 删除成功')
+                return True
+        except Exception as e:
+            # 分支不存在或删除失败，记录错误但继续执行
+            logging.warning(f'删除分支失败: {str(e)}')
+            return False
+
     def _check_and_create_branch(self):
-        """检查分支是否存在，如果不存在则创建"""
+        """检查分支是否存在，如果存在则删除后重新创建，如果不存在则创建"""
         try:
             # 尝试获取分支信息
             endpoint = f'/repos/{self.repo}/branches/{self.branch}'
             result = self._make_request('GET', endpoint)
             if result:
-                # 分支存在
+                # 分支存在，删除分支
+                self._delete_branch()
+        except Exception as e:
+            # 分支不存在，继续执行创建
+            pass
+        
+        # 创建新分支
+        try:
+            # 获取默认分支的最新提交
+            repo_info = self.get_repo_info()
+            if not repo_info or 'default_branch' not in repo_info:
+                return False
+            
+            default_branch = repo_info['default_branch']
+            # 获取默认分支的最新提交SHA
+            branch_info = self._make_request('GET', f'/repos/{self.repo}/branches/{default_branch}')
+            if not branch_info or 'commit' not in branch_info:
+                return False
+            
+            sha = branch_info['commit']['sha']
+            
+            # 创建新分支
+            endpoint = f'/repos/{self.repo}/git/refs'
+            data = {
+                'ref': f'refs/heads/{self.branch}',
+                'sha': sha
+            }
+            result = self._make_request('POST', endpoint, json=data)
+            if result:
+                # 分支创建成功
+                logging.info(f'分支 {self.branch} 创建成功')
                 return True
         except Exception as e:
-            # 分支不存在，尝试创建
-            try:
-                # 获取默认分支的最新提交
-                repo_info = self.get_repo_info()
-                if not repo_info or 'default_branch' not in repo_info:
-                    return False
-                
-                default_branch = repo_info['default_branch']
-                # 获取默认分支的最新提交SHA
-                branch_info = self._make_request('GET', f'/repos/{self.repo}/branches/{default_branch}')
-                if not branch_info or 'commit' not in branch_info:
-                    return False
-                
-                sha = branch_info['commit']['sha']
-                
-                # 创建新分支
-                endpoint = f'/repos/{self.repo}/git/refs'
-                data = {
-                    'ref': f'refs/heads/{self.branch}',
-                    'sha': sha
-                }
-                result = self._make_request('POST', endpoint, json=data)
-                if result:
-                    # 分支创建成功
-                    return True
-            except Exception as e:
-                logging.error(f'创建分支失败: {str(e)}')
-                return False
+            logging.error(f'创建分支失败: {str(e)}')
+            return False
         return False
     
     def upload_file(self, path, content, message):
         """上传或更新文件"""
-        # 检查并创建分支
-        self._check_and_create_branch()
-        
         # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
         path = path.replace('\\', '/')
         
@@ -308,7 +286,13 @@ class GitHubService:
                 # 构建zh_cn.lang文件
                 if file_format in ['lang', 'both']:
                     lang_path = lang_dir / 'zh_cn.lang'
-                    lang_content = ''.join([f'{key} = {value}\n' for key, value in items.items()])
+                    # 使用Builder类的方法构建lang文件
+                    from core.builder import Builder
+                    builder = Builder()
+                    # 对于lang文件，我们需要一个模板
+                    # 构建一个简单的模板
+                    template_content = ''.join([f'{key} = {key}\n' for key, value in items.items()])
+                    lang_content = builder._build_lang_file(template_content, items)
                     lang_path.write_text(lang_content, encoding='utf-8')
                     
                     # 构建en_us.lang文件 - 使用原文
@@ -342,6 +326,10 @@ class GitHubService:
             temp_dir = self.build_resource_pack_structure(translations, version, project_name, namespace, file_format, raw_english_files)
             
             try:
+                # 检查并创建分支（只执行一次）
+                if not self._check_and_create_branch():
+                    return False, '分支创建失败'
+                
                 # 遍历所有生成的文件
                 uploaded_files = []
                 for root, dirs, files in os.walk(temp_dir):

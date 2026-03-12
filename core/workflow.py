@@ -20,9 +20,9 @@ class Workflow:
         self.builder = Builder()
         self.dictionary_manager = DictionaryManager()
     
-    def _load_dictionaries(self, community_dict_path: str) -> tuple[Dict, Dict, Dict]:
+    def _load_dictionaries(self, community_dict_dir: str) -> tuple[Dict, Dict, Dict]:
         """加载各种词典"""
-        return self.dictionary_manager.get_all_dictionaries(community_dict_path)
+        return self.dictionary_manager.get_all_dictionaries(community_dict_dir)
     
     def run_extraction(
         self, 
@@ -55,7 +55,7 @@ class Workflow:
             extraction_result = self.extractor.run(
                 mods_dir=mods_path,
                 zip_paths=[Path(p) for p in pack_paths if Path(p).exists()],
-                community_dict_path=context.settings['community_dict_path'],
+                community_dict_dir=context.settings['community_dict_dir'],
                 progress_update_callback=context.progress_callback
             )
             
@@ -150,7 +150,7 @@ class Workflow:
             # 加载词典
             logging.info("开始加载翻译词典...")
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
-                context.settings['community_dict_path']
+                context.settings['community_dict_dir']
             )
             logging.debug(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
             

@@ -213,19 +213,19 @@ CRITICAL: 致命错误，程序即将崩溃
         frame = tk_ttk.LabelFrame(parent, text="资源包设置", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
 
-        self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_path", ""))
+        self.community_dict_var = tk.StringVar(value=self.config.get("community_dict_dir", ""))
         # 添加trace事件监听器，确保值变化时自动保存
         self.community_dict_var.trace_add("write", lambda *args: self._save_all_settings())
         dict_path_frame = ttk.Frame(frame)
         dict_path_frame.pack(fill="x", pady=5)
-        dict_label = ttk.Label(dict_path_frame, text="社区词典文件:", width=15)
+        dict_label = ttk.Label(dict_path_frame, text="社区词典目录:", width=15)
         dict_label.pack(side="left")
-        custom_widgets.ToolTip(dict_label, "可选。一个包含补充翻译的 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
+        custom_widgets.ToolTip(dict_label, "可选。存放社区词典文件的目录，程序会在该目录中使用 Dict-Community.db 文件\n可以从GitHub下载最新的社区维护版本。")
         dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var, takefocus=False)
         dict_entry.pack(side="left", fill="x", expand=True, padx=5)
         # 防止自动选中文本
         dict_entry.after_idle(dict_entry.selection_clear)
-        browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_file(self.community_dict_var, [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]), bootstyle="primary-outline")
+        browse_btn = ttk.Button(dict_path_frame, text="浏览...", command=lambda: ui_utils.browse_directory(self.community_dict_var), bootstyle="primary-outline")
         browse_btn.pack(side="left")
         self.download_dict_button = ttk.Button(dict_path_frame, text="检查/更新", command=self._check_and_update_dict_async, bootstyle="info")
         self.download_dict_button.pack(side="left", padx=(5, 5))
@@ -616,7 +616,7 @@ CRITICAL: 致命错误，程序即将崩溃
     def _save_all_settings(self, *args):
         config = config_manager.load_config()
         config["output_dir"] = self.output_dir_var.get()
-        config["community_dict_path"] = self.community_dict_var.get()
+        config["community_dict_dir"] = self.community_dict_var.get()
         config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
         
         config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
@@ -645,7 +645,7 @@ CRITICAL: 致命错误，程序即将崩溃
     def _refresh_ui_from_config(self):
         # 更新UI控件的值
         self.output_dir_var.set(self.config.get("output_dir", ""))
-        self.community_dict_var.set(self.config.get("community_dict_path", ""))
+        self.community_dict_var.set(self.config.get("community_dict_dir", ""))
         self.use_origin_name_lookup_var.set(self.config.get("use_origin_name_lookup", True))
         self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
         self.log_level_var.set(self.config.get("log_level", "INFO"))
@@ -848,9 +848,19 @@ CRITICAL: 致命错误，程序即将崩溃
                     self.after(0, lambda: ui_utils.show_error("更新失败", "无法获取远程词典信息，请检查网络连接。"))
                 return
             
-            # 获取本地词典路径
-            community_dict_path = self.community_dict_var.get()
-            local_path = Path(community_dict_path) if community_dict_path else None
+            # 获取本地词典目录
+            community_dict_dir = self.community_dict_var.get()
+            if community_dict_dir:
+                # 构建完整的文件路径
+                local_path = Path(community_dict_dir) / "Dict-Community.db"
+            else:
+                # 没有设置本地目录，使用默认目录
+                import os
+                default_dir = os.getcwd()
+                local_path = Path(default_dir) / "Dict-Community.db"
+                # 更新配置中的目录
+                config_manager.update_config("community_dict_dir", default_dir)
+                self.community_dict_var.set(default_dir)
             
             # 检查本地词典版本
             local_version = config_manager.load_config().get("last_dict_version", "0.0.0")
@@ -863,15 +873,12 @@ CRITICAL: 致命错误，程序即将崩溃
                         self.after(0, lambda: ui_utils.show_info("检查完成", "社区词典已是最新版本。"))
                     return
             
-            # 需要更新或下载
-            if not local_path:
-                # 没有设置本地路径，使用默认路径
-                import os
-                default_path = os.path.join(os.getcwd(), "Dict-Community.db")
-                local_path = Path(default_path)
-                # 更新配置中的路径
-                config_manager.update_config("community_dict_path", default_path)
-                self.community_dict_var.set(default_path)
+            # 检查目录是否存在
+            dict_dir = Path(community_dict_dir) if community_dict_dir else Path(os.getcwd())
+            if not dict_dir.exists() or not dict_dir.is_dir():
+                if self.winfo_exists():
+                    self.after(0, lambda: ui_utils.show_error("更新失败", "社区词典目录不存在或不是有效目录。"))
+                return
             
             # 弹窗询问用户是否更新
             if self.winfo_exists():
@@ -1039,10 +1046,13 @@ CRITICAL: 致命错误，程序即将崩溃
         import os
         import math
         
-        community_dict_path = self.community_dict_var.get()
-        if not community_dict_path:
-            ui_utils.show_error("错误", "请先配置社区词典文件路径。")
+        community_dict_dir = self.community_dict_var.get()
+        if not community_dict_dir:
+            ui_utils.show_error("错误", "请先配置社区词典目录路径。")
             return
+        
+        # 构建完整的文件路径
+        community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
         
         try:
             # 显示确认对话框

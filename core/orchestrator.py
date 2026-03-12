@@ -179,6 +179,7 @@ class Orchestrator:
             
             # 使用 _launch_workbench 回调来显示工作台（由 ProjectTab 设置）
             if hasattr(self, '_launch_workbench') and callable(self._launch_workbench):
+                # 回调会处理工作台的显示和 finish_callback 的设置
                 self.root.after(0, self._launch_workbench, workbench_data)
             else:
                 # 如果没有设置回调，直接使用旧方式（兼容模式）
@@ -196,20 +197,22 @@ class Orchestrator:
                     module_names=self.module_names
                 )
                 workbench.pack(fill="both", expand=True)
-            
-            def on_workbench_finish(final_translations, final_workbench_data):
-                if final_translations is not None:
-                    self.final_translations = final_translations
-                    self.final_workbench_data = final_workbench_data
-                    self.raw_english_files = workbench.raw_english_files
-                    self.namespace_formats = workbench.namespace_formats
-                    self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
-                    self.update_progress("翻译处理完成，现在可以生成资源包", -10)
-                else:
-                    self.log("翻译工作台已取消，操作中止。", "WARNING")
-                    self.update_progress("操作已取消", -2)
-            
-            workbench.finish_callback = on_workbench_finish
+                self.root.update_idletasks()
+                workbench.update_idletasks()
+                
+                def on_workbench_finish(final_translations, final_workbench_data):
+                    if final_translations is not None:
+                        self.final_translations = final_translations
+                        self.final_workbench_data = final_workbench_data
+                        self.raw_english_files = workbench.raw_english_files
+                        self.namespace_formats = workbench.namespace_formats
+                        self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+                        self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+                    else:
+                        self.log("翻译工作台已取消，操作中止。", "WARNING")
+                        self.update_progress("操作已取消", -2)
+                
+                workbench.finish_callback = on_workbench_finish
         except ValueError as ve:
             logging.error(f"配置错误：{ve}")
             self.root.after(0, lambda: messagebox.showerror("配置错误", f"请检查配置后重试:\n{ve}"))
@@ -355,6 +358,7 @@ class Orchestrator:
         
         # 使用 _launch_workbench 回调来显示工作台（由 ProjectTab 设置）
         if hasattr(self, '_launch_workbench') and callable(self._launch_workbench):
+            # 回调会处理工作台的显示和 finish_callback 的设置
             self.root.after(0, self._launch_workbench, workbench_data)
         else:
             # 如果没有设置回调，直接使用旧方式（兼容模式）
@@ -372,17 +376,19 @@ class Orchestrator:
                 module_names=self.module_names
             )
             workbench.pack(fill="both", expand=True)
-        
-        def on_workbench_finish(final_translations, final_workbench_data):
-            if final_translations is not None:
-                self.final_translations = final_translations
-                self.final_workbench_data = final_workbench_data
-                self.raw_english_files = workbench.raw_english_files
-                self.namespace_formats = workbench.namespace_formats
-                self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
-                self.update_progress("翻译处理完成，现在可以生成资源包", -10)
-            else:
-                self.log("翻译工作台已取消，操作中止。", "WARNING")
-                self.update_progress("操作已取消", -2)
-        
-        workbench.finish_callback = on_workbench_finish
+            self.root.update_idletasks()
+            workbench.update_idletasks()
+            
+            def on_workbench_finish(final_translations, final_workbench_data):
+                if final_translations is not None:
+                    self.final_translations = final_translations
+                    self.final_workbench_data = final_workbench_data
+                    self.raw_english_files = workbench.raw_english_files
+                    self.namespace_formats = workbench.namespace_formats
+                    self.log("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
+                    self.update_progress("翻译处理完成，现在可以生成资源包", -10)
+                else:
+                    self.log("翻译工作台已取消，操作中止。", "WARNING")
+                    self.update_progress("操作已取消", -2)
+            
+            workbench.finish_callback = on_workbench_finish

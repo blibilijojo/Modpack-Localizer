@@ -179,7 +179,7 @@ class Orchestrator:
             
             from gui.translation_workbench import TranslationWorkbench
             workbench = TranslationWorkbench(
-                parent=self.root,
+                parent_frame=self.root,
                 initial_data=workbench_data,
                 namespace_formats=self.namespace_formats,
                 raw_english_files=self.raw_english_files,
@@ -351,7 +351,7 @@ class Orchestrator:
             return
         
         workbench = TranslationWorkbench(
-            parent=self.root,
+            parent_frame=self.root,
             initial_data=workbench_data,
             namespace_formats=self.namespace_formats,
             raw_english_files=self.raw_english_files,

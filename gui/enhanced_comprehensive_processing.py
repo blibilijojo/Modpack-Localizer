@@ -1016,6 +1016,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 for idx, item in enumerate(items):
                     en_text = item.get("en", "").strip()
                     zh_text = item.get("zh", "").strip()
+                    source = item.get("source", "")
                     
                     if en_text:
                         if translation_mode == "basic" or translation_mode == "hybrid":
@@ -1023,8 +1024,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                             if not zh_text:
                                 all_items.append((ns, idx, item))
                         elif translation_mode == "polish":
-                            # 翻译润色模式：仅处理已翻译文本
-                            if zh_text:
+                            # 翻译润色模式：仅处理已翻译文本，跳过"原文复制"来源
+                            if zh_text and source != "原文复制":
                                 all_items.append((ns, idx, item))
             
             if not all_items:
@@ -1691,7 +1692,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 for idx, item in enumerate(items):
                     en_text = item.get("en", "").strip()
                     zh_text = item.get("zh", "").strip()
-                    if en_text and zh_text:
+                    source = item.get("source", "")
+                    # 跳过"原文复制"来源的条目
+                    if en_text and zh_text and source != "原文复制":
                         all_items.append((ns, idx, item))
             
             if not all_items:
@@ -1975,7 +1978,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 for idx, item in enumerate(items):
                     en_text = item.get("en", "").strip()
                     zh_text = item.get("zh", "").strip()
-                    if en_text and zh_text:
+                    source = item.get("source", "")
+                    # 跳过"原文复制"来源的条目
+                    if en_text and zh_text and source != "原文复制":
                         all_items.append((ns, idx, item))
             
             if not all_items:

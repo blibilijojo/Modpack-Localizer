@@ -319,6 +319,16 @@ class TranslationWorkbench(ttk.Frame):
         self.history_btn.pack(side="right", padx=(btn_padding, btn_padding))
         ToolTip(self.history_btn, "查看和管理操作历史")
         
+        # 导入 JSON 按钮（与操作历史同一列，居左）
+        self.import_json_button = ttk.Button(right_frame, text="导入 JSON", command=self._import_current_namespace_json, bootstyle="info-outline")
+        self.import_json_button.pack(side="left", padx=(btn_padding, btn_padding))
+        ToolTip(self.import_json_button, "从 JSON 文件导入翻译到当前模组")
+        
+        # 导出 JSON 按钮（与操作历史同一列，居左）
+        self.export_json_button = ttk.Button(right_frame, text="导出 JSON", command=self._export_current_namespace_json, bootstyle="info-outline")
+        self.export_json_button.pack(side="left", padx=(btn_padding, btn_padding))
+        ToolTip(self.export_json_button, "导出当前模组的语言文件为 JSON 格式")
+        
         # 添加分隔符
         separator2 = ttk.Separator(right_frame, orient="vertical")
         separator2.pack(side="right", fill="y", padx=(btn_padding, btn_padding))
@@ -360,7 +370,6 @@ class TranslationWorkbench(ttk.Frame):
         
         # 翻译状态显示标签
 
-
         # 功能切换按钮
         self.mode_switch_btn = ttk.Button(btn_frame, text="进入翻译控制台", command=self._toggle_mode, state="disabled", bootstyle="primary")
         self.mode_switch_btn.pack(side="right")
@@ -373,9 +382,9 @@ class TranslationWorkbench(ttk.Frame):
         self.finish_button.pack(side="right", padx=5)
         
         # 上传到汉化仓库按钮 - 放在最左边
-        self.github_upload_button = ttk.Button(btn_frame, text="上传到GitHub", command=self._on_github_upload, bootstyle="warning")
+        self.github_upload_button = ttk.Button(btn_frame, text="上传到 GitHub", command=self._on_github_upload, bootstyle="warning")
         self.github_upload_button.pack(side="right")
-        ToolTip(self.github_upload_button, "进入GitHub汉化仓库上传界面")
+        ToolTip(self.github_upload_button, "进入 GitHub 汉化仓库上传界面")
 
     def _update_theme_colors(self):
         style = ttk.Style.get_instance()
@@ -2156,6 +2165,22 @@ class TranslationWorkbench(ttk.Frame):
                 items = self.translation_data[namespace]['items']
                 for item in items:
                     if item['key'] == key:
+                        # 获取原文和当前译文
+                        en_text = item.get('en', '').strip()
+                        current_zh = item.get('zh', '').strip()
+                        
+                        # 如果导入的文本与当前译文相同，跳过
+                        if zh == current_zh:
+                            skipped_count += 1
+                            found = True
+                            break
+                        
+                        # 如果导入的文本与原文相同，跳过
+                        if zh == en_text:
+                            skipped_count += 1
+                            found = True
+                            break
+                        
                         # 更新翻译
                         if zh:
                             item['zh'] = zh
@@ -2929,12 +2954,196 @@ class TranslationWorkbench(ttk.Frame):
         if self.finish_callback:
             self.finish_callback(final_translations, latest_data)
     
+    def _export_current_namespace_json(self):
+        """导出当前模组的语言文件为 JSON 格式"""
+        self._save_current_edit()
+        
+        # 检查是否有选中的模组（命名空间树）
+        ns_selection = self.ns_tree.selection()
+        if not ns_selection:
+            messagebox.showwarning("提示", "请先在左侧选择一个模组", parent=self)
+            return
+        
+        current_ns = ns_selection[0]  # 获取选中的命名空间 IID
+        
+        # 获取当前命名空间的翻译数据
+        translations = {}
+        ns_data = self.translation_data.get(current_ns, {})
+        for item in ns_data.get('items', []):
+            zh_translation = item.get('zh', '').strip()
+            if zh_translation:
+                translations[item['key']] = zh_translation
+        
+        # 获取原始英文文件内容
+        template_content = self.raw_english_files.get(current_ns, '{}')
+        
+        # 确定文件格式
+        if ":" in current_ns:
+            base_namespace, file_format = current_ns.split(":", 1)
+        else:
+            base_namespace = current_ns
+            file_format = 'json'  # 默认为 json 格式
+        
+        if file_format != 'json':
+            messagebox.showwarning("不支持的格式", f"当前命名空间 {current_ns} 的格式为 {file_format}，暂不支持导出", parent=self)
+            return
+        
+        # 使用 builder 的方法生成 JSON 文件
+        from core.builder import Builder
+        builder = Builder()
+        output_content = builder._build_json_file(template_content, translations)
+        
+        # 选择保存路径
+        default_filename = f"{base_namespace}_zh_cn.json"
+        file_path = filedialog.asksaveasfilename(
+            title="导出 JSON",
+            defaultextension=".json",
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+            initialfile=default_filename
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(output_content)
+            
+            messagebox.showinfo(
+                "导出成功", 
+                f"已成功导出 {len(translations)} 条翻译记录到:\n{file_path}",
+                parent=self
+            )
+            logging.info(f"成功导出命名空间 {current_ns} 的 JSON 文件到 {file_path}")
+        except Exception as e:
+            messagebox.showerror("导出失败", f"导出 JSON 文件时出错：\n{e}", parent=self)
+            logging.error(f"导出 JSON 失败：{e}")
+    
+    def _import_current_namespace_json(self):
+        """从 JSON 文件导入翻译到当前模组"""
+        self._save_current_edit()
+        
+        # 检查是否有选中的模组（命名空间树）
+        ns_selection = self.ns_tree.selection()
+        if not ns_selection:
+            messagebox.showwarning("提示", "请先在左侧选择一个模组", parent=self)
+            return
+        
+        current_ns = ns_selection[0]  # 获取选中的命名空间 IID
+        
+        # 确定文件格式
+        if ":" in current_ns:
+            base_namespace, file_format = current_ns.split(":", 1)
+        else:
+            base_namespace = current_ns
+            file_format = 'json'  # 默认为 json 格式
+        
+        if file_format != 'json':
+            messagebox.showwarning("不支持的格式", f"当前命名空间 {current_ns} 的格式为 {file_format}，暂不支持导入", parent=self)
+            return
+        
+        # 选择要导入的 JSON 文件
+        file_path = filedialog.askopenfilename(
+            title="导入 JSON",
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+            
+            # 验证导入数据格式
+            if not isinstance(import_data, dict):
+                messagebox.showerror("导入失败", "导入数据格式不正确，请确保是有效的 JSON 对象。", parent=self)
+                return
+            
+            # 获取当前命名空间的翻译数据
+            ns_data = self.translation_data.get(current_ns, {})
+            items = ns_data.get('items', [])
+            
+            # 统计导入结果
+            updated_count = 0
+            skipped_count = 0
+            not_found_count = 0
+            
+            # 遍历导入的数据，更新翻译
+            for key, zh_translation in import_data.items():
+                if not isinstance(zh_translation, str):
+                    continue
+                
+                zh_translation = zh_translation.strip()
+                if not zh_translation:
+                    continue
+                
+                # 查找匹配的条目
+                found = False
+                for item in items:
+                    if item['key'] == key:
+                        # 获取原文和当前译文
+                        en_text = item.get('en', '').strip()
+                        current_zh = item.get('zh', '').strip()
+                        
+                        # 如果导入的文本与当前译文相同，跳过
+                        if zh_translation == current_zh:
+                            skipped_count += 1
+                            found = True
+                            break
+                        
+                        # 如果导入的文本与原文相同，跳过
+                        if zh_translation == en_text:
+                            skipped_count += 1
+                            found = True
+                            break
+                        
+                        # 更新翻译
+                        item['zh'] = zh_translation
+                        item['source'] = 'JSON 导入'
+                        updated_count += 1
+                        found = True
+                        break
+                
+                if not found:
+                    not_found_count += 1
+            
+            # 在修改数据之后，保存当前状态用于撤销/重做
+            details = {
+                'source': 'file',
+                'namespace': current_ns,
+                'total_items': len(import_data),
+                'file_path': file_path,
+                'updated_count': updated_count,
+                'not_found_count': not_found_count
+            }
+            self.record_operation('IMPORT', details, target_iid=None)
+            
+            # 更新 UI
+            self._full_ui_refresh()
+            self._set_dirty(True)
+            
+            # 显示导入结果
+            message = f"导入完成！\n"
+            message += f"成功更新：{updated_count} 条\n"
+            message += f"跳过（译文相同或与原文相同）: {skipped_count} 条\n"
+            message += f"未找到匹配项：{not_found_count} 条"
+            messagebox.showinfo("导入结果", message, parent=self)
+            logging.info(f"成功从 {file_path} 导入 {updated_count} 条翻译到命名空间 {current_ns}")
+            
+        except json.JSONDecodeError:
+            messagebox.showerror("导入失败", "JSON 文件格式不正确，请确保是有效的 JSON 格式。", parent=self)
+            logging.error(f"导入 JSON 失败：JSON 格式错误")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"导入 JSON 文件时出错：\n{e}", parent=self)
+            logging.error(f"导入 JSON 失败：{e}")
+    
     def _on_github_upload(self):
-        """GitHub汉化仓库上传按钮点击事件"""
+        """GitHub 汉化仓库上传按钮点击事件"""
         # 保存当前编辑
         self._save_current_edit()
         
-        # 加载GitHub配置
+        # 加载 GitHub 配置
         from utils import config_manager
         config = config_manager.load_config()
         github_config = {

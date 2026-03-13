@@ -110,28 +110,32 @@ class Translator:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
             else:
-                # 按照优先级顺序：模组自带 → 个人词典 → 第三方汉化包 → 社区词典
+                # 按照优先级顺序：原文复制 → 模组自带 → 个人词典 → 第三方汉化包 → 社区词典
                 
-                # 1. 模组自带中文
-                if key in internal_chinese:
+                # 1. 非英文内容直接保留（原文复制）
+                if self._is_valid_translation(english_value):
+                    translation = english_value
+                    source = "原文复制"
+                # 2. 模组自带中文
+                elif key in internal_chinese:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
-                # 2. 个人词典（Key 优先）
+                # 3. 个人词典（Key 优先）
                 elif key in user_dict_by_key:
                     translation = user_dict_by_key[key]
                     source = "个人词典 [Key]"
                 elif use_origin_name_lookup and english_value in user_dict_by_origin:
                     translation = user_dict_by_origin[english_value]
                     source = "个人词典 [原文]"
-                # 3. 第三方汉化包
+                # 4. 第三方汉化包
                 elif key in pack_chinese_dict:
                     translation = pack_chinese_dict[key]
                     source = "第三方汉化包"
-                # 4. 社区词典 [Key]
+                # 5. 社区词典 [Key]
                 elif key in community_dict_by_key:
                     translation = community_dict_by_key[key]
                     source = "社区词典 [Key]"
-                # 5. 社区词典 [原文]（使用缓存避免重复计算）
+                # 6. 社区词典 [原文]（使用缓存避免重复计算）
                 elif use_origin_name_lookup and english_value in community_dict_by_origin:
                     if english_value not in community_origin_cache:
                         candidates = community_dict_by_origin[english_value]
@@ -141,11 +145,6 @@ class Translator:
                     if best_translation:
                         translation = best_translation
                         source = "社区词典 [原文]"
-                # 6. 非英文内容直接保留
-                else:
-                    if self._is_valid_translation(english_value):
-                        translation = english_value
-                        source = "原文复制"
             
             # 验证翻译有效性
             if not self._is_valid_translation(translation):

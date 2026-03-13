@@ -53,27 +53,17 @@ class PunctuationCorrector:
         """
         处理标点对（如括号、引号）
         """
-        # 检测中文文本中是否已有对应的标点对
-        start_punct_zh = self.get_chinese_punct(start_punct)
-        end_punct_zh = self.get_chinese_punct(end_punct)
-        
-        # 统计开始和结束标点的数量
-        start_count = zh_text.count(start_punct_zh)
-        end_count = zh_text.count(end_punct_zh)
-        
-        # 如果开始标点数量大于结束标点数量，添加缺少的结束标点
-        if start_count > end_count:
-            zh_text += end_punct_zh * (start_count - end_count)
-        # 如果结束标点数量大于开始标点数量，添加缺少的开始标点
-        elif end_count > start_count:
-            zh_text = start_punct_zh * (end_count - start_count) + zh_text
-        
+        # 不对括号进行任何添加修改，直接返回原文本
         return zh_text
     
     def process_start_punctuation(self, zh_text, en_punct):
         """
         处理开头标点
         """
+        # 括号不处理
+        if en_punct in '([{<\"\'':
+            return zh_text
+        
         if en_punct and zh_text:
             zh_punct = self.get_chinese_punct(en_punct)
             # 如果英文文本以标点开头，但中文文本没有，添加对应的中文标点
@@ -85,6 +75,10 @@ class PunctuationCorrector:
         """
         处理结尾标点
         """
+        # 括号不处理
+        if en_punct in ')]}>\"\'':
+            return zh_text
+        
         if en_punct and zh_text:
             zh_punct = self.get_chinese_punct(en_punct)
             # 如果英文文本以标点结尾，但中文文本没有，添加对应的中文标点

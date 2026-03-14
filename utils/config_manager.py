@@ -332,15 +332,33 @@ def save_user_dict(dict_data: dict):
         conn = sqlite3.connect(USER_DICT_PATH)
         cursor = conn.cursor()
         
-        # 清空现有数据
-        cursor.execute("DELETE FROM by_key")
-        cursor.execute("DELETE FROM by_origin_name")
+        # 获取当前数据库中的所有键
+        cursor.execute("SELECT key FROM by_key")
+        existing_keys = set(row[0] for row in cursor.fetchall())
         
-        # 插入by_key数据
+        # 获取当前数据库中的所有原文
+        cursor.execute("SELECT origin_name FROM by_origin_name")
+        existing_origins = set(row[0] for row in cursor.fetchall())
+        
+        # 处理by_key数据
+        new_keys = set(dict_data.get("by_key", {}).keys())
+        
+        # 删除不再存在的键
+        for key in existing_keys - new_keys:
+            cursor.execute("DELETE FROM by_key WHERE key = ?", (key,))
+        
+        # 插入或更新新的键值对
         for key, translation in dict_data.get("by_key", {}).items():
             cursor.execute("INSERT OR REPLACE INTO by_key (key, translation) VALUES (?, ?)", (key, translation))
         
-        # 插入by_origin_name数据
+        # 处理by_origin_name数据
+        new_origins = set(dict_data.get("by_origin_name", {}).keys())
+        
+        # 删除不再存在的原文
+        for origin_name in existing_origins - new_origins:
+            cursor.execute("DELETE FROM by_origin_name WHERE origin_name = ?", (origin_name,))
+        
+        # 插入或更新新的原文翻译对
         for origin_name, translation in dict_data.get("by_origin_name", {}).items():
             cursor.execute("INSERT OR REPLACE INTO by_origin_name (origin_name, translation) VALUES (?, ?)", (origin_name, translation))
         

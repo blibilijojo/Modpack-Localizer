@@ -35,6 +35,7 @@ class ProjectTab:
         self.project_type = "mod"
         self.project_info = {}
         self.loading_frame = None
+        self.tab_uuid = None
 
         self.project_type_var = tk.StringVar(value="mod")
         self.mods_dir_var = tk.StringVar()
@@ -56,12 +57,14 @@ class ProjectTab:
             "project_type": self.project_type,
             "project_info": self.project_info,
             "workbench_state": workbench_state,
+            "tab_uuid": self.tab_uuid,
         }
 
     def restore_from_state(self, state_data: dict):
         self.project_name = state_data.get("project_name", "已恢复的项目")
         self.project_type = state_data.get("project_type", "mod")
         self.project_info = state_data.get("project_info", {})
+        self.tab_uuid = state_data.get("tab_uuid")
         workbench_state = state_data.get("workbench_state")
 
         if not workbench_state:

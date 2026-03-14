@@ -2,6 +2,7 @@
 
 import json
 import uuid
+import hashlib
 from pathlib import Path
 import logging
 
@@ -38,60 +39,128 @@ def _save_index(index_data: dict):
         with open(INDEX_FILE, 'w', encoding='utf-8') as f:
             json.dump(index_data, f, indent=4)
     except Exception as e:
-        logging.error(f"保存索引文件时出错: {e}")
+        logging.error(f"保存索引文件时出错：{e}")
+
+def _calculate_content_hash(state: dict) -> str:
+    """计算内容的哈希值，用于检测内容是否变化。"""
+    import copy
+    
+    state_copy = copy.deepcopy(state)
+    
+    state_copy.pop('tab_uuid', None)
+    state_copy.pop('last_save_time', None)
+    state_copy.pop('content_hash', None)
+    state_copy.pop('current_project_path', None)
+    
+    if 'workbench_data' in state_copy:
+        workbench_data = state_copy['workbench_data']
+        if isinstance(workbench_data, dict):
+            for key in list(workbench_data.keys()):
+                if key.startswith('_') or key in ('last_modified', 'timestamp', 'modified_time'):
+                    del workbench_data[key]
+    
+    content_str = json.dumps(state_copy, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return hashlib.md5(content_str.encode('utf-8')).hexdigest()
+
+def _load_cached_tab(tab_uuid: str) -> dict | None:
+    """加载已缓存的标签页数据。"""
+    tab_file = CACHE_ROOT / f"{tab_uuid}.json"
+    if tab_file.exists():
+        try:
+            with open(tab_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            logging.error(f"标签页缓存文件 {tab_file} 格式错误或已损坏。")
+    return None
 
 def save_session(project_tabs: list):
-    """将所有活动标签页的状态保存到缓存文件。"""
+    """增量保存会话状态，只在内容真正变化时才写入文件。"""
     _ensure_cache_dir_exists()
-    session_data = []
     index_data = _load_index()
+    saved_count = 0
+    skipped_count = 0
+    index_changed = False
     
-    # 清理索引中不存在的标签页
     existing_uuids = set()
     
     for tab in project_tabs:
         state = tab.get_state()
-        if state:
-            # 生成或获取标签页的UUID
-            tab_uuid = state.get('tab_uuid')
-            if not tab_uuid:
-                tab_uuid = str(uuid.uuid4())
-                state['tab_uuid'] = tab_uuid
+        if not state:
+            continue
+        
+        tab_uuid = state.get('tab_uuid')
+        if not tab_uuid:
+            tab_uuid = str(uuid.uuid4())
+            state['tab_uuid'] = tab_uuid
+            if hasattr(tab, 'tab_uuid'):
+                tab.tab_uuid = tab_uuid
+        
+        existing_uuids.add(tab_uuid)
+        
+        try:
+            cached_tab = _load_cached_tab(tab_uuid)
             
-            # 保存标签页状态到独立文件
-            tab_file = CACHE_ROOT / f"{tab_uuid}.json"
-            try:
-                with open(tab_file, 'w', encoding='utf-8') as f:
-                    json.dump(state, f, indent=4)
-                existing_uuids.add(tab_uuid)
-                
-                # 更新索引
+            current_hash = _calculate_content_hash(state)
+            
+            need_save = True
+            reason = "首次保存"
+            
+            if cached_tab:
+                cached_hash = cached_tab.get('content_hash')
+                if cached_hash == current_hash:
+                    tab_name = state.get('project_name', f"标签页 {tab_uuid[:8]}")
+                    
+                    old_name = index_data["tabs"].get(tab_uuid)
+                    if old_name != tab_name:
+                        index_data["tabs"][tab_uuid] = tab_name
+                        index_changed = True
+                    
+                    skipped_count += 1
+                    need_save = False
+                    reason = "内容未变化"
+                else:
+                    tab_name = state.get('project_name', f"标签页 {tab_uuid[:8]}")
+                    reason = "内容已变化"
+            else:
                 tab_name = state.get('project_name', f"标签页 {tab_uuid[:8]}")
-                index_data["tabs"][tab_uuid] = tab_name
+                reason = "无缓存文件"
+            
+            if need_save:
+                logging.info(f"保存标签页 '{tab_name}' ({reason})")
                 
-                session_data.append(state)
-            except Exception as e:
-                logging.error(f"保存标签页缓存时出错: {e}")
+                tab_file = CACHE_ROOT / f"{tab_uuid}.json"
+                state['content_hash'] = current_hash
+                
+                with open(tab_file, 'w', encoding='utf-8') as f:
+                    json.dump(state, f, indent=4, ensure_ascii=False)
+                
+                old_name = index_data["tabs"].get(tab_uuid)
+                if old_name != tab_name:
+                    index_changed = True
+                index_data["tabs"][tab_uuid] = tab_name
+                saved_count += 1
+            
+        except Exception as e:
+            logging.error(f"保存标签页缓存时出错：{e}")
     
-    # 清理不存在的标签页文件和索引项
     for tab_uuid in list(index_data["tabs"].keys()):
         if tab_uuid not in existing_uuids:
-            # 删除标签页文件
             tab_file = CACHE_ROOT / f"{tab_uuid}.json"
             if tab_file.exists():
                 try:
                     tab_file.unlink()
                 except OSError as e:
-                    logging.error(f"删除标签页缓存文件时出错: {e}")
-            # 从索引中删除
+                    logging.error(f"删除标签页缓存文件时出错：{e}")
             del index_data["tabs"][tab_uuid]
+            index_changed = True
     
-    # 保存索引
     if existing_uuids:
-        _save_index(index_data)
-        logging.info(f"会话状态已成功缓存到 {CACHE_ROOT}")
+        if index_changed:
+            _save_index(index_data)
+            logging.info(f"会话缓存已更新：{saved_count} 个标签页已保存，{skipped_count} 个未变化")
+        else:
+            logging.debug(f"会话缓存检查完成：{skipped_count} 个标签页均未变化，索引也未变化")
     else:
-        # 没有活动标签页，清除缓存
         clear_session()
 
 def load_session() -> list | None:

@@ -104,9 +104,14 @@ class Translator:
             source = None
             
             if key.startswith('_comment'):
+                # 处理带序号的 _comment 键
                 if key in internal_chinese:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
+                else:
+                    # 如果没有对应的中文，保持为空
+                    translation = ""
+                    source = "待翻译"
             else:
                 # 按照优先级顺序：原文复制 → 模组自带 → 个人词典 → 第三方汉化包 → 社区词典
                 

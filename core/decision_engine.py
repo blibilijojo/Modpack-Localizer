@@ -131,9 +131,14 @@ class DecisionEngine:
             potential_source = None
             
             if key.startswith('_comment'):
+                # 处理带序号的 _comment 键
                 if key in internal_chinese:
                     potential_translation = internal_chinese[key]
                     potential_source = "模组自带"
+                else:
+                    # 如果没有对应的中文，保持为空
+                    potential_translation = ''
+                    potential_source = '待翻译'
             else:
                 # 按照优先级顺序：模组自带 → 个人词典 → 社区词典key → 社区词典原文
                 # 移除术语库在初始翻译决策中的参与

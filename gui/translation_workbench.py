@@ -256,6 +256,9 @@ class TranslationWorkbench(ttk.Frame):
             background=theme_bg_color, foreground=theme_fg_color
         )
         self.en_text_display.bind("<KeyPress>", lambda e: "break")
+        # 添加复制事件处理，允许复制原文
+        self.en_text_display.bind("<Control-c>", self._on_copy_en)
+        self.en_text_display.bind("<Control-C>", self._on_copy_en)
         self.en_text_display.grid(row=1, column=0, sticky="nsew", padx=0, pady=5)
         
         # 右侧：术语提示
@@ -2662,6 +2665,25 @@ class TranslationWorkbench(ttk.Frame):
         # 阻止默认的复制行为
         return "break"
     
+    def _on_copy_en(self, event):
+        """处理原文复制事件，确保只复制实际文本，不包含额外的换行和空格"""
+        # 获取选中文本，如果没有选择则获取全部文本
+        try:
+            selected_text = self.en_text_display.get("sel.first", "sel.last")
+        except tk.TclError:
+            # 如果没有选中任何文本，获取全部文本
+            selected_text = self.en_text_display.get("1.0", "end-1c")
+        
+        # 清理文本，移除多余的空白和换行符
+        cleaned_text = selected_text.strip()
+        
+        # 将清理后的文本放入剪贴板
+        self.en_text_display.clipboard_clear()
+        self.en_text_display.clipboard_append(cleaned_text)
+        
+        # 阻止默认的复制行为
+        return "break"
+    
 
     
 
@@ -2769,7 +2791,9 @@ class TranslationWorkbench(ttk.Frame):
                 return
             
             texts_to_translate = [info['en'] for info in items_to_translate_info]
-            s = self.current_settings
+            # 每次翻译时都从配置文件加载最新设置
+            import utils.config_manager
+            s = utils.config_manager.load_config()
             translator = AITranslator(s.get('api_services', []))
             # 保存当前翻译器实例
             self._current_translator = translator

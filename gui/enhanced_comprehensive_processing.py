@@ -1069,8 +1069,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             # 4. 执行AI翻译
             self.after(0, lambda: self.workbench.status_label.config(text="正在进行AI翻译..."))
             
-            # 获取设置
-            s = self.settings
+            # 每次翻译时都从配置文件加载最新设置
+            import utils.config_manager
+            s = utils.config_manager.load_config()
             
             # 初始化翻译器
             translator = AITranslator(s.get('api_services', []))

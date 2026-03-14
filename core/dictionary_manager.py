@@ -12,6 +12,7 @@ class DictionaryManager:
         self.community_dict_by_key = None
         self.community_dict_by_origin = None
         self._cache = {}
+        self._community_origin_cache = {}
     
     def load_user_dictionary(self):
         """加载用户词典"""
@@ -23,7 +24,7 @@ class DictionaryManager:
             logging.error(f"加载用户词典失败: {e}")
             return {'by_key': {}, 'by_origin_name': {}}
     
-    def load_community_dictionary(self, community_dict_dir):
+    def load_community_dictionary(self, community_dict_dir, progress_callback=None):
         """加载社区词典"""
         community_dict_by_key = {}
         community_dict_by_origin = defaultdict(list)
@@ -36,12 +37,38 @@ class DictionaryManager:
                 if dict_file_path.is_file():
                     with sqlite3.connect(f"file:{dict_file_path}?mode=ro", uri=True) as con:
                         cur = con.cursor()
+                        
+                        # 先获取总记录数，用于计算进度
+                        cur.execute("SELECT COUNT(*) FROM dict")
+                        total_rows = cur.fetchone()[0]
+                        
+                        # 优化：只查询需要的字段，避免不必要的数据传输
                         cur.execute("SELECT key, origin_name, trans_name, version FROM dict")
-                        for key, origin_name, trans_name, version in cur.fetchall():
-                            if key:
-                                community_dict_by_key[key] = trans_name
-                            if origin_name and trans_name:
-                                community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
+                        
+                        # 使用分批获取数据，减少内存占用
+                        batch_size = 1000
+                        processed_rows = 0
+                        
+                        while True:
+                            rows = cur.fetchmany(batch_size)
+                            if not rows:
+                                break
+                            
+                            for key, origin_name, trans_name, version in rows:
+                                if key:
+                                    # 键值对直接存储，保持O(1)查询效率
+                                    community_dict_by_key[key] = trans_name
+                                if origin_name and trans_name:
+                                    # 原文条目存储为列表，便于后续冲突解决
+                                    community_dict_by_origin[origin_name].append({"trans": trans_name, "version": version or "0.0.0"})
+                            
+                            processed_rows += len(rows)
+                            
+                            # 每处理一批数据，更新进度
+                            if progress_callback and total_rows > 0:
+                                progress = min(int((processed_rows / total_rows) * 100), 100)
+                                progress_callback(f"加载社区词典... {progress}%", progress)
+                    
                     logging.info(f"社区词典加载成功，包含 {len(community_dict_by_key)} 个按键条目和 {len(community_dict_by_origin)} 个按原文条目")
                 else:
                     logging.info(f"社区词典文件不存在: {dict_file_path}")
@@ -52,17 +79,19 @@ class DictionaryManager:
         self.community_dict_by_origin = community_dict_by_origin
         return community_dict_by_key, community_dict_by_origin
     
-    def get_all_dictionaries(self, community_dict_dir):
+    def get_all_dictionaries(self, community_dict_dir, progress_callback=None):
         """获取所有词典数据"""
         # 检查缓存
         cache_key = f"all_dicts_{community_dict_dir or 'none'}"
         if cache_key in self._cache:
             logging.debug("从缓存中获取词典数据")
+            if progress_callback:
+                progress_callback("加载词典缓存...", 100)
             return self._cache[cache_key]
         
         # 加载词典
         user_dict = self.load_user_dictionary()
-        community_dict_by_key, community_dict_by_origin = self.load_community_dictionary(community_dict_dir)
+        community_dict_by_key, community_dict_by_origin = self.load_community_dictionary(community_dict_dir, progress_callback)
         
         # 缓存结果
         result = (user_dict, community_dict_by_key, community_dict_by_origin)
@@ -70,9 +99,52 @@ class DictionaryManager:
         
         return result
     
+    def get_community_origin_translation(self, origin_name):
+        """获取社区词典原文翻译，使用缓存避免重复计算"""
+        if origin_name in self._community_origin_cache:
+            return self._community_origin_cache[origin_name]
+        
+        if not self.community_dict_by_origin or origin_name not in self.community_dict_by_origin:
+            return None
+        
+        candidates = self.community_dict_by_origin[origin_name]
+        if not candidates:
+            return None
+        
+        # 解决冲突
+        if len(candidates) == 1:
+            translation = candidates[0]["trans"]
+        else:
+            from collections import Counter
+            from packaging.version import parse as parse_version
+            
+            trans_counts = Counter(c["trans"] for c in candidates)
+            max_freq = max(trans_counts.values())
+            top_candidates = [c for c in candidates if trans_counts[c["trans"]] == max_freq]
+            
+            if len(top_candidates) == 1:
+                translation = top_candidates[0]["trans"]
+            else:
+                # 按版本号排序
+                def get_version_key(candidate):
+                    try:
+                        return parse_version(candidate["version"])
+                    except Exception:
+                        return parse_version("0.0.0")
+                
+                try:
+                    sorted_by_version = sorted(top_candidates, key=get_version_key, reverse=True)
+                    translation = sorted_by_version[0]["trans"]
+                except Exception:
+                    translation = top_candidates[0]["trans"]
+        
+        self._community_origin_cache[origin_name] = translation
+        return translation
+    
     def clear_cache(self):
         """清除缓存"""
         self._cache.clear()
+        self._community_origin_cache.clear()
         logging.debug("词典缓存已清除")
     
     def search_dictionary(self, query, search_type='both'):

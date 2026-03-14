@@ -234,8 +234,9 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             # 提取要翻译的文本
             texts_to_translate = [item[2]['en'] for item in items_to_process]
             
-            # 获取设置
-            s = self.workbench.current_settings
+            # 每次翻译时都从配置文件加载最新设置
+            import utils.config_manager
+            s = utils.config_manager.load_config()
             
             # 初始化翻译器
             translator = AITranslator(s.get('api_services', []))

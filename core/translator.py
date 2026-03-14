@@ -85,16 +85,14 @@ class Translator:
         internal_chinese: Dict[str, LanguageEntry],
         pack_chinese_dict: Dict[str, str],
         use_origin_name_lookup: bool,
-        namespace_info: NamespaceInfo
+        namespace_info: NamespaceInfo,
+        dictionary_manager=None
     ) -> Dict[str, LanguageEntry]:
         """处理单个命名空间的翻译"""
         ns_result = {}
         
         # 优化：直接使用 english_entries 的键，避免复杂的排序逻辑
         ordered_keys = list(english_entries.keys())
-        
-        # 预缓存社区词典冲突解决结果
-        community_origin_cache = {}
         
         for key in ordered_keys:
             english_entry = english_entries.get(key)
@@ -135,16 +133,46 @@ class Translator:
                 elif key in community_dict_by_key:
                     translation = community_dict_by_key[key]
                     source = "社区词典 [Key]"
-                # 6. 社区词典 [原文]（使用缓存避免重复计算）
+                # 6. 社区词典 [原文]（使用全局缓存避免重复计算）
                 elif use_origin_name_lookup and english_value in community_dict_by_origin:
-                    if english_value not in community_origin_cache:
+                    if dictionary_manager:
+                        # 使用词典管理器的全局缓存机制
+                        best_translation = dictionary_manager.get_community_origin_translation(english_value)
+                        if best_translation:
+                            translation = best_translation
+                            source = "社区词典 [原文]"
+                    else:
+                        # 回退到本地缓存机制
+                        from collections import Counter
+                        from packaging.version import parse as parse_version
+                        
                         candidates = community_dict_by_origin[english_value]
-                        community_origin_cache[english_value] = self._resolve_origin_name_conflict(candidates)
-                    
-                    best_translation = community_origin_cache[english_value]
-                    if best_translation:
-                        translation = best_translation
-                        source = "社区词典 [原文]"
+                        if candidates:
+                            if len(candidates) == 1:
+                                best_translation = candidates[0]["trans"]
+                            else:
+                                trans_counts = Counter(c["trans"] for c in candidates)
+                                max_freq = max(trans_counts.values())
+                                top_candidates = [c for c in candidates if trans_counts[c["trans"]] == max_freq]
+                                
+                                if len(top_candidates) == 1:
+                                    best_translation = top_candidates[0]["trans"]
+                                else:
+                                    def get_version_key(candidate):
+                                        try:
+                                            return parse_version(candidate["version"])
+                                        except Exception:
+                                            return parse_version("0.0.0")
+                                    
+                                    try:
+                                        sorted_by_version = sorted(top_candidates, key=get_version_key, reverse=True)
+                                        best_translation = sorted_by_version[0]["trans"]
+                                    except Exception:
+                                        best_translation = top_candidates[0]["trans"]
+                            
+                            if best_translation:
+                                translation = best_translation
+                                source = "社区词典 [原文]"
             
             # 验证翻译有效性
             if not self._is_valid_translation(translation):
@@ -167,7 +195,8 @@ class Translator:
         user_dictionary: Dict,
         community_dict_by_key: Dict[str, str],
         community_dict_by_origin: Dict[str, List[Dict]],
-        use_origin_name_lookup: bool
+        use_origin_name_lookup: bool,
+        dictionary_manager=None
     ) -> TranslationResult:
         """执行翻译决策流程"""
         logging.info("--- 阶段 2: 执行翻译决策逻辑 ---")
@@ -196,7 +225,8 @@ class Translator:
                 internal_chinese=internal_chinese,
                 pack_chinese_dict=extraction_result.pack_chinese,
                 use_origin_name_lookup=use_origin_name_lookup,
-                namespace_info=namespace_info
+                namespace_info=namespace_info,
+                dictionary_manager=dictionary_manager
             )
             
             workbench_data[namespace] = ns_result

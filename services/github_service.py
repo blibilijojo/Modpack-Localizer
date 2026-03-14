@@ -10,15 +10,16 @@ from pathlib import Path
 import logging
 
 class GitHubService:
-    def __init__(self, repo, token, branch='main', pull_before_push=True, push_to_upstream=False, upstream_branch='main', upstream_repo='CFPAOrg/Minecraft-Mod-Language-Package'):
-        # 解析仓库地址，支持完整URL和直接输入owner/repo格式
+    def __init__(self, repo, token, branch='main', pull_before_push=True, push_to_upstream=False, upstream_branch='main', upstream_repo='CFPAOrg/Minecraft-Mod-Language-Package', delete_branch_before_push=False):
+        # 解析仓库地址，支持完整 URL 和直接输入 owner/repo 格式
         self.repo = self._parse_repo_url(repo)
         self.token = token
         self.branch = branch
         self.pull_before_push = pull_before_push
         self.push_to_upstream = push_to_upstream
         self.upstream_branch = upstream_branch
-        # 源仓库地址，默认为CFPAOrg/Minecraft-Mod-Language-Package
+        self.delete_branch_before_push = delete_branch_before_push
+        # 源仓库地址，默认为 CFPAOrg/Minecraft-Mod-Language-Package
         self.upstream_repo = self._parse_repo_url(upstream_repo)
         self.api_base = 'https://api.github.com'
         self.headers = {
@@ -27,10 +28,10 @@ class GitHubService:
         }
         self.retry_count = 3
         self.retry_delay = 2
-        # 正则表达式模式，与Builder类相同
+        # 正则表达式模式，与 Builder 类相同
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
         # 记录初始化参数
-        logging.info(f'初始化GitHubService: repo={self.repo}, branch={self.branch}, push_to_upstream={self.push_to_upstream}, upstream_branch={self.upstream_branch}, upstream_repo={self.upstream_repo}')
+        logging.info(f'初始化 GitHubService: repo={self.repo}, branch={self.branch}, push_to_upstream={self.push_to_upstream}, upstream_branch={self.upstream_branch}, upstream_repo={self.upstream_repo}, delete_branch_before_push={self.delete_branch_before_push}')
     
     def _build_json_file(self, template_content: str, translations: dict) -> str:
         """
@@ -133,14 +134,20 @@ class GitHubService:
             return False
 
     def _check_and_create_branch(self):
-        """检查分支是否存在，如果存在则删除后重新创建，如果不存在则创建"""
+        """检查分支是否存在，根据配置决定是否删除后重新创建"""
         try:
             # 尝试获取分支信息
             endpoint = f'/repos/{self.repo}/branches/{self.branch}'
             result = self._make_request('GET', endpoint)
             if result:
-                # 分支存在，删除分支
-                self._delete_branch()
+                # 分支存在，根据配置决定是否删除
+                if self.delete_branch_before_push:
+                    logging.info(f'分支 {self.branch} 已存在，根据配置删除旧分支')
+                    self._delete_branch()
+                else:
+                    logging.info(f'分支 {self.branch} 已存在，根据配置保留分支')
+                    # 分支已存在且不删除，直接返回成功
+                    return True
         except Exception as e:
             # 分支不存在，继续执行创建
             pass
@@ -416,14 +423,24 @@ class GitHubService:
             else:
                 pr_title = f'更新汉化资源包 {self.branch}'
             
-            # 构建创建PR的请求
-            # 使用源仓库地址，而不是当前的复刻仓库
-            endpoint = f'/repos/{self.upstream_repo}/pulls'
-            # 构建PR数据，head格式为: {fork_owner}:{branch}
             # 从当前仓库地址中提取fork的所有者
             fork_owner = self.repo.split('/')[0]
             head_branch = f'{fork_owner}:{self.branch}'
             
+            # 检查是否已存在PR
+            endpoint = f'/repos/{self.upstream_repo}/pulls'
+            params = {'state': 'open'}
+            existing_prs = self._make_request('GET', endpoint, params=params)
+            
+            if existing_prs:
+                for pr in existing_prs:
+                    if pr.get('head', {}).get('ref') == self.branch and pr.get('head', {}).get('user', {}).get('login') == fork_owner:
+                        # PR已存在
+                        pr_url = pr.get('html_url', '')
+                        logging.info(f'PR已存在: {pr_url}')
+                        return True, f'PR已存在: {pr_url}'
+            
+            # 构建创建PR的请求
             data = {
                 'title': pr_title,
                 'head': head_branch,  # 格式: {fork_owner}:{branch}

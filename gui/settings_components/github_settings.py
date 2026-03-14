@@ -16,7 +16,6 @@ class GitHubSettings:
     def _create_variables(self):
         self.repo_var = tk.StringVar()
         self.token_var = tk.StringVar()
-        self.sync_with_upstream_var = tk.BooleanVar(value=True)
         self.show_token_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="")
         
@@ -26,12 +25,10 @@ class GitHubSettings:
     def _bind_events(self):
         self.repo_var.trace_add("write", lambda *args: self._save_settings())
         self.token_var.trace_add("write", lambda *args: self._save_settings())
-        self.sync_with_upstream_var.trace_add("write", lambda *args: self._save_settings())
     
     def _load_config(self):
         self.repo_var.set(self.config.get('github_repo', ''))
         self.token_var.set(self.config.get('github_token', ''))
-        self.sync_with_upstream_var.set(self.config.get('github_sync_with_upstream', True))
     
     def _create_widgets(self):
         main_frame = ttk.Frame(self.parent)
@@ -60,8 +57,6 @@ class GitHubSettings:
         
         advanced_frame = tk_ttk.LabelFrame(parent, text="高级选项", padding="10")
         advanced_frame.pack(fill="x", pady=(0, 10), padx=5)
-        
-        ttk.Checkbutton(advanced_frame, text="上传前同步原仓库", variable=self.sync_with_upstream_var).pack(anchor="w", pady=5, padx=5)
         
         self._create_buttons(parent)
     
@@ -133,8 +128,7 @@ class GitHubSettings:
     def _save_settings(self):
         github_config = {
             'github_repo': self.repo_var.get().strip(),
-            'github_token': self.token_var.get().strip(),
-            'github_sync_with_upstream': self.sync_with_upstream_var.get()
+            'github_token': self.token_var.get().strip()
         }
         
         self.config.update(github_config)
@@ -144,6 +138,5 @@ class GitHubSettings:
     def get_config(self):
         return {
             'github_repo': self.repo_var.get().strip(),
-            'github_token': self.token_var.get().strip(),
-            'github_sync_with_upstream': self.sync_with_upstream_var.get()
+            'github_token': self.token_var.get().strip()
         }

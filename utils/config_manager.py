@@ -166,7 +166,6 @@ DEFAULT_CONFIG = {
     # GitHub汉化仓库上传设置
     "github_repo": "",
     "github_token": "",
-    "github_sync_with_upstream": True,
     
     # AI翻译批次处理默认值
     "ai_batch_count": 10,       # 批次数默认值

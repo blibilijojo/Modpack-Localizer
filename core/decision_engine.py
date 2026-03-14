@@ -149,8 +149,8 @@ class DecisionEngine:
                 elif use_origin_name_lookup and english_value in user_dict_by_origin:
                     potential_translation = user_dict_by_origin[english_value]
                     potential_source = "个人词典[原文]"
-                # 3. 非英文内容直接保留
-                elif not re.search(r'[a-zA-Z]', english_value):
+                # 3. 非英文内容直接保留，或者只有符号和字母s的内容（如%s）
+                elif not re.search(r'[a-zA-Z]', english_value) or re.match(r'^[\W\s]*s*[\W\s]*$', english_value):
                     potential_translation = english_value
                     potential_source = "原文复制"
                 # 4. 第三方汉化包

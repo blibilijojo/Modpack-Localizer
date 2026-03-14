@@ -19,7 +19,13 @@ class GitHubUploadUI(tk.Frame):
         self.last_used_version = config.get('last_used_version', '1.21')
         self.saved_versions = config.get('github_versions', [])
         
-        # 初始化UI
+        # 自动填充标志，防止自动填充时触发保存逻辑
+        self._is_auto_filling = False
+        
+        # 会话缓存防抖保存定时器
+        self._session_save_timer = None
+        
+        # 初始化 UI
         self._create_widgets()
         
         # 自动填充模组名称
@@ -88,16 +94,20 @@ class GitHubUploadUI(tk.Frame):
         self.path_var = tk.StringVar(value="")
         ttk.Label(advanced_frame, text="上传路径:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         path_entry = ttk.Entry(advanced_frame, textvariable=self.path_var, width=60, state="disabled")
-        path_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        path_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5, columnspan=2)
         path_entry.configure(style="Disabled.TEntry")
         
         # 推送到源仓库选项
-        self.push_to_upstream_var = tk.BooleanVar(value=self.github_config.get('push_to_upstream', False))
-        ttk.Checkbutton(advanced_frame, text="推送到源仓库", variable=self.push_to_upstream_var).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=5)
+        self.push_to_upstream_var = tk.BooleanVar(value=self.github_config.get('push_to_upstream', True))
+        ttk.Checkbutton(advanced_frame, text="推送到源仓库", variable=self.push_to_upstream_var).grid(row=1, column=0, sticky="w", padx=5, pady=5)
         
-        # PR标题配置项（改为预览模式，不可编辑）
+        # 删除旧分支选项
+        self.delete_branch_var = tk.BooleanVar(value=self.github_config.get('delete_branch_before_push', False))
+        ttk.Checkbutton(advanced_frame, text="删除旧分支全新上传", variable=self.delete_branch_var).grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        
+        # PR 标题配置项（改为预览模式，不可编辑）
         self.pr_title_var = tk.StringVar(value="")
-        ttk.Label(advanced_frame, text="PR标题:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        ttk.Label(advanced_frame, text="PR 标题:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
         pr_title_entry = ttk.Entry(advanced_frame, textvariable=self.pr_title_var, width=60, state="disabled")
         pr_title_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5, columnspan=2)
         pr_title_entry.configure(style="Disabled.TEntry")
@@ -129,7 +139,7 @@ class GitHubUploadUI(tk.Frame):
         self.project_name_var.trace_add("write", lambda *args: self._update_path_display())
         self.namespace_var.trace_add("write", lambda *args: self._update_path_display())
         
-        # 绑定模组名称和简述变化事件，实时更新PR标题预览
+        # 绑定模组名称和简述变化事件，实时更新 PR 标题预览
         def update_pr_title(*args):
             mod_name = self.mod_name_var.get().strip()
             desc = self.desc_var.get().strip() or "翻译提交"
@@ -140,6 +150,10 @@ class GitHubUploadUI(tk.Frame):
         
         self.mod_name_var.trace_add("write", update_pr_title)
         self.desc_var.trace_add("write", update_pr_title)
+        
+        # 绑定项目名称和模组名称变化事件，保存到 translation_data
+        self.project_name_var.trace_add("write", self._save_names_to_cache)
+        self.mod_name_var.trace_add("write", self._save_names_to_cache)
     
         # 状态标签
         self.status_var = tk.StringVar(value="请填写上传信息")
@@ -294,6 +308,7 @@ class GitHubUploadUI(tk.Frame):
         # 在后台线程中执行上传
         def upload_task():
             try:
+                import logging
                 from services.github_service import GitHubService
                 
                 # 使用对话框中设置的分支名称
@@ -311,7 +326,7 @@ class GitHubUploadUI(tk.Frame):
                             if 'display_name' in mod_data:
                                 mod_display_name = mod_data['display_name']
                 
-                # 初始化GitHub服务
+                # 初始化 GitHub 服务
                 github_service = GitHubService(
                     self.github_config['repo'], 
                     self.github_config['token'], 
@@ -319,19 +334,19 @@ class GitHubUploadUI(tk.Frame):
                     pull_before_push=self.github_config.get('pull_before_push', True),
                     push_to_upstream=self.push_to_upstream_var.get(),
                     upstream_branch=self.github_config.get('upstream_branch', 'main'),
-                    upstream_repo='CFPAOrg/Minecraft-Mod-Language-Package'  # 源仓库地址
+                    upstream_repo='CFPAOrg/Minecraft-Mod-Language-Package',  # 源仓库地址
+                    delete_branch_before_push=self.delete_branch_var.get()
                 )
                 
-                # 检查是否需要同步原仓库
-                if self.github_config.get('github_sync_with_upstream', True):
-                    self.status_var.set("正在检查并同步原仓库...")
-                    sync_success, sync_message = github_service.sync_with_upstream()
-                    if not sync_success:
-                        # 同步失败，显示错误信息但继续执行上传
-                        logging.warning(f'同步原仓库失败: {sync_message}')
-                        self.status_var.set(f"同步原仓库失败: {sync_message}，继续执行上传")
-                    else:
-                        self.status_var.set(f"同步原仓库成功: {sync_message}")
+                # 自动同步原仓库（系统运行的必要操作）
+                self.status_var.set("正在检查并同步原仓库...")
+                sync_success, sync_message = github_service.sync_with_upstream()
+                if not sync_success:
+                    # 同步失败，显示错误信息但继续执行上传
+                    logging.warning(f'同步原仓库失败: {sync_message}')
+                    self.status_var.set(f"同步原仓库失败: {sync_message}，继续执行上传")
+                else:
+                    self.status_var.set(f"同步原仓库成功: {sync_message}")
                 # 设置PR标题
                 mod_name = self.mod_name_var.get().strip()
                 desc = self.desc_var.get().strip() or "翻译提交"
@@ -432,42 +447,50 @@ class GitHubUploadUI(tk.Frame):
     
     def _auto_fill_mod_name(self):
         """自动填充模组名称"""
-        if hasattr(self.workbench, 'ns_tree'):
-            selection = self.workbench.ns_tree.selection()
-            if selection:
-                current_mod = selection[0]
-                if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
-                    mod_data = self.workbench.translation_data[current_mod]
-                    # 恢复原始逻辑：使用 mod_name 作为模组名称
-                    if 'mod_name' in mod_data:
-                        mod_name = mod_data['mod_name']
-                    elif 'display_name' in mod_data:
-                        # 从display_name中提取模组名称（去掉括号中的内容）
-                        display_name = mod_data['display_name']
-                        if ' (' in display_name:
-                            mod_name = display_name.split(' (')[0]
+        # 设置自动填充标志，防止触发保存逻辑
+        self._is_auto_filling = True
+        try:
+            if hasattr(self.workbench, 'ns_tree'):
+                selection = self.workbench.ns_tree.selection()
+                if selection:
+                    current_mod = selection[0]
+                    if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
+                        mod_data = self.workbench.translation_data[current_mod]
+                        # 恢复原始逻辑：使用 mod_name 作为模组名称
+                        if 'mod_name' in mod_data:
+                            mod_name = mod_data['mod_name']
+                        elif 'display_name' in mod_data:
+                            # 从 display_name 中提取模组名称（去掉括号中的内容）
+                            display_name = mod_data['display_name']
+                            if ' (' in display_name:
+                                mod_name = display_name.split(' (')[0]
+                            else:
+                                mod_name = display_name
                         else:
-                            mod_name = display_name
-                    else:
-                        mod_name = current_mod
-                    
-                    # 只更新模组名称，不更新项目名称
-                    self.mod_name_var.set(mod_name)
-                    
-                    # 单独处理项目名称：优先使用 curseforge_name，然后是 modrinth_name
-                    project_name = ""
-                    if 'curseforge_name' in mod_data and mod_data['curseforge_name']:
-                        project_name = mod_data['curseforge_name']
-                    elif 'modrinth_name' in mod_data and mod_data['modrinth_name']:
-                        project_name = mod_data['modrinth_name']
-                    self.project_name_var.set(project_name)
-                    
-                    # 更新PR标题预览
-                    def update_pr_title(*args):
-                        desc = self.desc_var.get().strip() or "翻译提交"
-                        pr_title = f"{mod_name} {desc}" if mod_name else desc
-                        self.pr_title_var.set(pr_title)
-                    update_pr_title()
+                            mod_name = current_mod
+                        
+                        # 只更新模组名称，不更新项目名称
+                        self.mod_name_var.set(mod_name)
+                        
+                        # 单独处理项目名称：优先使用 git_name，然后是 curseforge_name，最后是 modrinth_name
+                        project_name = ""
+                        if 'git_name' in mod_data and mod_data['git_name']:
+                            project_name = mod_data['git_name']
+                        elif 'curseforge_name' in mod_data and mod_data['curseforge_name']:
+                            project_name = mod_data['curseforge_name']
+                        elif 'modrinth_name' in mod_data and mod_data['modrinth_name']:
+                            project_name = mod_data['modrinth_name']
+                        self.project_name_var.set(project_name)
+                        
+                        # 更新 PR 标题预览
+                        def update_pr_title(*args):
+                            desc = self.desc_var.get().strip() or "翻译提交"
+                            pr_title = f"{mod_name} {desc}" if mod_name else desc
+                            self.pr_title_var.set(pr_title)
+                        update_pr_title()
+        finally:
+            # 重置自动填充标志
+            self._is_auto_filling = False
     
     def _on_sync(self):
         """手动同步原仓库按钮点击事件"""
@@ -527,7 +550,53 @@ class GitHubUploadUI(tk.Frame):
         import threading
         threading.Thread(target=sync_task, daemon=True).start()
     
+    def _save_names_to_cache(self, *args):
+        """保存项目名称和模组名称到 translation_data 缓存，使用 1 秒防抖机制"""
+        # 如果是自动填充操作，不触发保存逻辑
+        if getattr(self, '_is_auto_filling', False):
+            return
+        
+        if hasattr(self.workbench, 'ns_tree'):
+            selection = self.workbench.ns_tree.selection()
+            if selection:
+                current_mod = selection[0]
+                if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
+                    mod_data = self.workbench.translation_data[current_mod]
+                    
+                    # 保存模组名称
+                    mod_name = self.mod_name_var.get().strip()
+                    mod_data['mod_name'] = mod_name
+                    
+                    # 保存 GitHub 项目名称到 git_name 字段（允许为空）
+                    project_name = self.project_name_var.get().strip()
+                    mod_data['git_name'] = project_name
+                    
+                    # 同时更新树视图中的显示文本
+                    display_text = project_name or mod_name or current_mod
+                    self.workbench.ns_tree.item(current_mod, text=display_text)
+                    
+                    # 使用防抖机制保存会话缓存（1 秒无操作后保存）
+                    self._schedule_session_save()
+    
+    def _schedule_session_save(self):
+        """调度会话缓存保存，使用 1 秒防抖机制"""
+        # 取消之前的定时器
+        if hasattr(self, '_session_save_timer') and self._session_save_timer is not None:
+            self.after_cancel(self._session_save_timer)
+            self._session_save_timer = None
+        
+        # 设置新的定时器，1 秒后执行保存
+        self._session_save_timer = self.after(1000, self._save_session_with_delay)
+    
+    def _save_session_with_delay(self):
+        """延迟保存会话缓存"""
+        # 重置定时器引用
+        self._session_save_timer = None
+        
+        if hasattr(self.workbench, 'main_window') and self.workbench.main_window:
+            self.workbench.main_window._save_current_session()
+    
     def _on_cancel(self):
         """取消按钮点击事件"""
-        # 调用workbench的方法切换回翻译工作台模式
+        # 调用 workbench 的方法切换回翻译工作台模式
         self.workbench._toggle_github_upload_mode(False)

@@ -20,9 +20,9 @@ class Workflow:
         self.builder = Builder()
         self.dictionary_manager = DictionaryManager()
     
-    def _load_dictionaries(self, community_dict_dir: str) -> tuple[Dict, Dict, Dict]:
+    def _load_dictionaries(self, community_dict_dir, progress_callback=None) -> tuple[Dict, Dict, Dict]:
         """加载各种词典"""
-        return self.dictionary_manager.get_all_dictionaries(community_dict_dir)
+        return self.dictionary_manager.get_all_dictionaries(community_dict_dir, progress_callback)
     
     def run_extraction(
         self, 
@@ -150,7 +150,8 @@ class Workflow:
             # 加载词典
             logging.info("开始加载翻译词典...")
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
-                context.settings['community_dict_dir']
+                context.settings['community_dict_dir'],
+                lambda msg, progress: context.progress_callback(50 + progress // 2, 100) if context.progress_callback else None
             )
             logging.debug(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
             
@@ -161,7 +162,8 @@ class Workflow:
                 user_dictionary=user_dict,
                 community_dict_by_key=community_dict_by_key,
                 community_dict_by_origin=community_dict_by_origin,
-                use_origin_name_lookup=context.settings.get('use_origin_name_lookup', True)
+                use_origin_name_lookup=context.settings.get('use_origin_name_lookup', True),
+                dictionary_manager=self.dictionary_manager
             )
             
             context.translation_result = translation_result

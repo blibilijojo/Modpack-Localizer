@@ -2155,6 +2155,12 @@ class TranslationWorkbench(ttk.Frame):
         
         for import_item in import_data:
             key = import_item.get('key')
+            
+            # 忽略 _comment 键值的条目
+            if key == '_comment' or (key and key.startswith('_comment_')):
+                skipped_count += 1
+                continue
+            
             zh = import_item.get('zh', '').strip()
             
             if not key:
@@ -3077,7 +3083,32 @@ class TranslationWorkbench(ttk.Frame):
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                import_data = json.load(f)
+                file_content = f.read()
+            
+            # 使用正则表达式解析 JSON 文件，避免 json.load() 自动转义
+            import_data = {}
+            JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+            for match in JSON_KEY_VALUE_PATTERN.finditer(file_content):
+                key = match.group(1)
+                value = match.group(2)
+                # 处理 Unicode 转义序列（如\u963f），但保留\n等转义字符
+                # 先将\n、\t等常见转义字符暂时替换为占位符
+                temp_value = value.replace('\\n', '__NEWLINE__')
+                temp_value = temp_value.replace('\\t', '__TAB__')
+                temp_value = temp_value.replace('\\r', '__CARRIAGE__')
+                # 处理 Unicode 转义序列
+                temp_value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), temp_value)
+                # 恢复占位符为原始转义字符
+                temp_value = temp_value.replace('__NEWLINE__', '\\n')
+                temp_value = temp_value.replace('__TAB__', '\\t')
+                temp_value = temp_value.replace('__CARRIAGE__', '\\r')
+                # 处理引号，将 \" 替换为 "
+                temp_value = temp_value.replace('\\"', '"')
+                # 处理 _comment 条目，为每个 _comment 添加序号
+                if key == '_comment':
+                    continue  # 跳过 _comment 键
+                else:
+                    import_data[key] = temp_value
             
             # 验证导入数据格式
             if not isinstance(import_data, dict):
@@ -3095,6 +3126,10 @@ class TranslationWorkbench(ttk.Frame):
             
             # 遍历导入的数据，更新翻译
             for key, zh_translation in import_data.items():
+                # 忽略 _comment 键值的条目
+                if key == '_comment' or key.startswith('_comment_'):
+                    continue
+                
                 if not isinstance(zh_translation, str):
                     continue
                 

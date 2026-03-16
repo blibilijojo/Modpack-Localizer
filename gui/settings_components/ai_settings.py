@@ -264,18 +264,25 @@ class AISettings:
         keys_text = self.service_keys_text.get("1.0", "end-1c")
         model = self.service_model_var.get()
         
-        # 处理密钥
+        # 处理密钥：支持逗号和换行分隔
         text_with_newlines = keys_text.replace(',', '\n')
         keys = [key.strip() for key in text_with_newlines.split('\n') if key.strip()]
         
         # 更新服务
         if keys:
+            # 将格式化后的密钥（换行分隔）保存回 keys_raw
+            formatted_keys_text = '\n'.join(keys)
             self.api_services[index] = {
                 "endpoint": endpoint,
                 "keys": keys,
-                "keys_raw": keys_text,
+                "keys_raw": formatted_keys_text,
                 "model": model
             }
+            # 更新文本框显示，将逗号分隔转换为换行分隔
+            current_text = self.service_keys_text.get("1.0", "end-1c")
+            if ',' in current_text:
+                self.service_keys_text.delete("1.0", "end")
+                self.service_keys_text.insert("1.0", formatted_keys_text)
             self._populate_service_list()
             self.save_callback()
     
@@ -393,10 +400,20 @@ class AISettings:
             service["name"] = self.service_name_var.get().strip() or "新服务"
             service["endpoint"] = self.service_endpoint_var.get().strip()
             keys_text = self.service_keys_text.get("1.0", "end-1c")
-            service["keys"] = [key.strip() for key in keys_text.split('\n') if key.strip()]
-            service["keys_raw"] = keys_text
+            # 处理密钥：支持逗号和换行分隔
+            text_with_newlines = keys_text.replace(',', '\n')
+            keys = [key.strip() for key in text_with_newlines.split('\n') if key.strip()]
+            # 将格式化后的密钥（换行分隔）保存
+            formatted_keys_text = '\n'.join(keys)
+            service["keys"] = keys
+            service["keys_raw"] = formatted_keys_text
             service["model"] = self.service_model_var.get()
             service["max_threads"] = self.service_max_threads_var.get()
+            
+            # 更新文本框显示，将逗号分隔转换为换行分隔
+            if ',' in keys_text:
+                self.service_keys_text.delete("1.0", "end")
+                self.service_keys_text.insert("1.0", formatted_keys_text)
         
         # 获取新选中的服务信息
         service = self.api_services[index]

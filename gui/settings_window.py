@@ -50,6 +50,9 @@ class SettingsWindow(ttk.Toplevel):
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(fill="both", expand=True)
         
+        # 绑定选项卡切换事件
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        
         # 创建各个选项卡，添加异常处理
         tab_creation_methods = [
             self._create_basic_tab,
@@ -156,6 +159,22 @@ class SettingsWindow(ttk.Toplevel):
             self.loading_label = None
         self.loading = False
         self.update_idletasks()
+    
+    def _on_tab_changed(self, event):
+        """选项卡切换时的处理"""
+        # 获取当前选中的选项卡
+        current_tab_id = self.notebook.select()
+        # 将选项卡ID转换为widget对象
+        current_tab = self.notebook.nametowidget(current_tab_id)
+        # 清除当前选项卡中所有Entry组件的文本选中状态
+        self._clear_entry_selections(current_tab)
+    
+    def _clear_entry_selections(self, widget):
+        """递归清除widget及其子widget中所有Entry的文本选中状态"""
+        if isinstance(widget, (ttk.Entry, tk.Entry)):
+            widget.after_idle(widget.selection_clear)
+        for child in widget.winfo_children():
+            self._clear_entry_selections(child)
     
     def destroy(self):
         """关闭窗口时保存配置"""

@@ -32,7 +32,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
         title_label.pack(anchor="w", pady=(0, 20))
         
         # 1. 选择操作类型
-        operation_frame = ttk.LabelFrame(main_frame, text="操作类型", padding="10")
+        operation_frame = ttk.LabelFrame(main_frame, text="操作类型")
         operation_frame.pack(fill="x", pady=(0, 15))
         
         self.operation_var = tk.StringVar(value="ai_translate")
@@ -47,7 +47,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             ttk.Radiobutton(operation_frame, text=text, variable=self.operation_var, value=value, bootstyle="primary").pack(anchor="w", pady=2)
         
         # 2. 选择处理范围
-        scope_frame = ttk.LabelFrame(main_frame, text="处理范围", padding="10")
+        scope_frame = ttk.LabelFrame(main_frame, text="处理范围")
         scope_frame.pack(fill="x", pady=(0, 15))
         
         self.scope_var = tk.StringVar(value="current")
@@ -61,7 +61,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             ttk.Radiobutton(scope_frame, text=text, variable=self.scope_var, value=value, bootstyle="primary").pack(anchor="w", pady=2)
         
         # 3. 选择内容类型
-        content_frame = ttk.LabelFrame(main_frame, text="内容类型", padding="10")
+        content_frame = ttk.LabelFrame(main_frame, text="内容类型")
         content_frame.pack(fill="x", pady=(0, 15))
         
         self.content_var = tk.StringVar(value="pending")
@@ -76,7 +76,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             ttk.Radiobutton(content_frame, text=text, variable=self.content_var, value=value, bootstyle="primary").pack(anchor="w", pady=2)
         
         # 4. 导入选项（仅在导入操作时显示）
-        self.import_options_frame = ttk.LabelFrame(main_frame, text="导入选项", padding="10")
+        self.import_options_frame = ttk.LabelFrame(main_frame, text="导入选项")
         self.import_options_frame.pack(fill="x", pady=(0, 15))
         self.import_options_frame.pack_forget()
         
@@ -91,7 +91,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             ttk.Radiobutton(self.import_options_frame, text=text, variable=self.import_source_var, value=value, bootstyle="primary").pack(anchor="w", pady=2)
         
         # 5. AI翻译选项（仅在AI翻译时显示）
-        self.ai_options_frame = ttk.LabelFrame(main_frame, text="AI翻译选项", padding="10")
+        self.ai_options_frame = ttk.LabelFrame(main_frame, text="AI翻译选项")
         self.ai_options_frame.pack(fill="x", pady=(0, 15))
         self.ai_options_frame.pack_forget()
         

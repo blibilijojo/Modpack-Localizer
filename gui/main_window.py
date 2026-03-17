@@ -448,7 +448,7 @@ class ProjectTab:
         main_container.rowconfigure(1, weight=1)
         
         # 搜索和筛选区域
-        search_frame = ttk.LabelFrame(main_container, text="搜索", padding=10)
+        search_frame = ttk.LabelFrame(main_container, text="搜索")
         search_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
         
         # 搜索输入框
@@ -478,7 +478,7 @@ class ProjectTab:
         ttk.Button(filter_frame, text="搜索", command=self.start_modrinth_search, bootstyle="primary").pack(side="right", padx=5, pady=5)
         
         # 模组列表区域（左侧）
-        results_frame = ttk.LabelFrame(main_container, text="模组列表", padding=10)
+        results_frame = ttk.LabelFrame(main_container, text="模组列表")
         results_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10), padx=(0, 5))
         
         # 模组列表
@@ -503,7 +503,7 @@ class ProjectTab:
         ttk.Button(results_button_frame, text="下载并汉化", command=self.download_and_localize, bootstyle="success").pack(side="right", padx=5)
         
         # 文件列表区域（右侧）
-        files_label_frame = ttk.LabelFrame(main_container, text="文件列表", padding=10)
+        files_label_frame = ttk.LabelFrame(main_container, text="文件列表")
         files_label_frame.grid(row=1, column=1, sticky="nsew", pady=(0, 10), padx=(5, 0))
         
         # 文件列表
@@ -1328,12 +1328,22 @@ class MainWindow:
                 method()
 
     def open_settings_window(self):
+        # 从当前活动的ProjectTab实例中获取workbench_instance
+        workbench_instance = None
+        current_tab_id = self.notebook.select()
+        if current_tab_id and current_tab_id in self.project_tabs:
+            project_tab = self.project_tabs[current_tab_id]
+            if hasattr(project_tab, 'workbench_instance'):
+                workbench_instance = project_tab.workbench_instance
+        
         if self.settings_window and self.settings_window.winfo_exists():
+            # 如果窗口已存在，更新workbench_instance
+            self.settings_window.workbench_instance = workbench_instance
             self.settings_window.lift()
             self.settings_window.focus_set()
             return
 
-        self.settings_window = SettingsWindow(self.root)
+        self.settings_window = SettingsWindow(self.root, workbench_instance=workbench_instance)
         self.settings_window.transient(self.root)
 
     def _create_widgets(self):

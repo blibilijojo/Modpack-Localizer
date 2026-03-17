@@ -26,13 +26,14 @@ from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
 
 class SettingsWindow(ttk.Toplevel):
-    def __init__(self, parent, title="设置"):
+    def __init__(self, parent, title="设置", workbench_instance=None):
         super().__init__(parent)
         self.parent = parent
         self.title(title)
         self.geometry("800x750")
         self.minsize(700, 600)
         self.config = config_manager.load_config()
+        self.workbench_instance = workbench_instance
         
         # 添加加载状态
         self.loading = False
@@ -110,6 +111,10 @@ class SettingsWindow(ttk.Toplevel):
                 self._collect_all_configs()
             
             config_manager.save_config(self.config)
+            
+            # 如果有workbench实例，通知它更新显示
+            if self.workbench_instance and hasattr(self.workbench_instance, 'update_all_namespace_displays'):
+                self.workbench_instance.update_all_namespace_displays()
         except Exception as e:
             ui_utils.show_error("保存失败", f"保存配置时发生错误：{str(e)}")
     

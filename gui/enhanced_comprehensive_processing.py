@@ -35,7 +35,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         main_frame.pack(fill="both", expand=True)
         
         # 右侧：配置和操作面板（不再需要主面板和模组管理面板）
-        self.operation_panel = ttk.LabelFrame(main_frame, text="操作配置", padding="10")
+        self.operation_panel = ttk.LabelFrame(main_frame, text="操作配置")
         self.operation_panel.pack(fill="both", expand=True)
         
 
@@ -70,7 +70,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         # 使用更现代的卡片式设计
         
         # 操作类型选择卡片
-        operation_card = ttk.LabelFrame(self.operation_panel, text="操作类型", padding="15", bootstyle="primary")
+        operation_card = ttk.LabelFrame(self.operation_panel, text="操作类型", bootstyle="primary")
         operation_card.pack(fill="x", pady=(0, 20))
         
         # 操作类型映射
@@ -125,11 +125,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.operation_comment.pack(anchor="w", pady=(5, 0))
         
         # AI翻译选项卡片
-        self.ai_options_frame = ttk.LabelFrame(self.operation_panel, text="AI翻译选项", padding="8", bootstyle="success")
+        self.ai_options_frame = ttk.LabelFrame(self.operation_panel, text="AI翻译选项", bootstyle="success")
         self.ai_options_frame.pack(fill="x", pady=(0, 10))
         
         # AI翻译工作模式选择
-        mode_card = ttk.LabelFrame(self.ai_options_frame, text="翻译模式", padding="8")
+        mode_card = ttk.LabelFrame(self.ai_options_frame, text="翻译模式")
         mode_card.pack(fill="x", pady=(0, 10))
         
         # 翻译模式映射
@@ -179,7 +179,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.translation_mode_var.trace_add("write", lambda *args: [self._save_config(), self._update_mode_comment(), self._update_batch_preview()])
         
         # 智能翻译算法卡片
-        algorithm_card = ttk.LabelFrame(self.ai_options_frame, text="翻译控制台设置", padding="6")
+        algorithm_card = ttk.LabelFrame(self.ai_options_frame, text="翻译控制台设置")
         algorithm_card.pack(fill="x", pady=(0, 8))
         
         # 优化布局：使用网格布局，充分利用宽度
@@ -367,7 +367,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.start_button.pack(side="right")
         
         # 导入选项卡片（仅在导入操作时显示）
-        self.import_options_frame = ttk.LabelFrame(self.operation_panel, text="导入选项", padding="15", bootstyle="info")
+        self.import_options_frame = ttk.LabelFrame(self.operation_panel, text="导入选项", bootstyle="info")
         self.import_options_frame.pack(fill="x", pady=(0, 20))
         self.import_options_frame.pack_forget()
         
@@ -406,12 +406,12 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.import_source_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.import_source_combo))
         
         # 导出选项卡片（仅在导出操作时显示）
-        self.export_options_frame = ttk.LabelFrame(self.operation_panel, text="导出选项", padding="15", bootstyle="warning")
+        self.export_options_frame = ttk.LabelFrame(self.operation_panel, text="导出选项", bootstyle="warning")
         self.export_options_frame.pack(fill="x", pady=(0, 20))
         self.export_options_frame.pack_forget()
         
         # 导出范围选项
-        export_scope_card = ttk.LabelFrame(self.export_options_frame, text="导出范围", padding="12")
+        export_scope_card = ttk.LabelFrame(self.export_options_frame, text="导出范围")
         export_scope_card.pack(fill="x", pady=(0, 15))
         
         # 导出范围映射
@@ -448,7 +448,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.export_scope_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.export_scope_combo))
         
         # 导出方式选项
-        export_method_card = ttk.LabelFrame(self.export_options_frame, text="导出方式", padding="12")
+        export_method_card = ttk.LabelFrame(self.export_options_frame, text="导出方式")
         export_method_card.pack(fill="x")
         
         self.export_method_var = tk.StringVar(value="导出到文件")

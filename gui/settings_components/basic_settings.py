@@ -24,6 +24,9 @@ class BasicSettings:
         # 翻译匹配设置
         self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
         
+        # 模组任务列表名称显示模式
+        self.mod_list_name_mode_var = tk.StringVar(value=self.config.get("mod_list_name_mode", "namespace"))
+        
         # 绑定变量变化事件
         self._bind_events()
     
@@ -32,6 +35,7 @@ class BasicSettings:
         self.output_dir_var.trace_add("write", lambda *args: self.save_callback())
         self.pack_as_zip_var.trace_add("write", lambda *args: self.save_callback())
         self.use_origin_name_lookup_var.trace_add("write", lambda *args: self.save_callback())
+        self.mod_list_name_mode_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
         # 创建主容器
@@ -67,6 +71,47 @@ class BasicSettings:
         origin_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
         
+        # 模组任务列表名称显示模式
+        name_mode_frame = tk_ttk.LabelFrame(frame, text="模组任务列表名称显示模式", padding="10")
+        name_mode_frame.pack(fill="x", pady=(0, 10))
+        
+        # 创建下拉框
+        mode_label = ttk.Label(name_mode_frame, text="显示模式:")
+        mode_label.pack(side="left", padx=5, pady=5)
+        
+        # 定义选项
+        mode_options = [
+            ("命名空间（文件名称）", "namespace_jar"),
+            ("文件名称（命名空间）", "jar_namespace"),
+            ("命名空间", "namespace"),
+            ("文件名称", "jar")
+        ]
+        
+        # 创建下拉框
+        mode_combobox = ttk.Combobox(name_mode_frame, state="readonly")
+        mode_combobox['values'] = [option[0] for option in mode_options]
+        
+        # 设置默认值
+        current_value = self.mod_list_name_mode_var.get()
+        for i, (option_text, option_value) in enumerate(mode_options):
+            if option_value == current_value:
+                mode_combobox.current(i)
+                break
+        
+        mode_combobox.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+        
+        # 绑定变化事件
+        def on_mode_change(event):
+            selected_index = mode_combobox.current()
+            if selected_index != -1:
+                selected_value = mode_options[selected_index][1]
+                self.mod_list_name_mode_var.set(selected_value)
+                self.save_callback()
+                # 清除文本选中状态
+                mode_combobox.after_idle(lambda: mode_combobox.selection_clear())
+        
+        mode_combobox.bind("<<ComboboxSelected>>", on_mode_change)
+        
 
     
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
@@ -88,5 +133,6 @@ class BasicSettings:
         return {
             "output_dir": self.output_dir_var.get(),
             "pack_as_zip": self.pack_as_zip_var.get(),
-            "use_origin_name_lookup": self.use_origin_name_lookup_var.get()
+            "use_origin_name_lookup": self.use_origin_name_lookup_var.get(),
+            "mod_list_name_mode": self.mod_list_name_mode_var.get()
         }

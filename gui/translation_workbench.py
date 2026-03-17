@@ -1269,7 +1269,27 @@ class TranslationWorkbench(ttk.Frame):
                     display_untranslated += 1
                 # 原文和译文都为空的不统计到待翻译
             
-            display_text = data.get('display_name', f"{ns} ({data.get('jar_name', 'Unknown')})")
+            # 根据设置中的模式生成display_text
+            import utils.config_manager
+            config = utils.config_manager.load_config()
+            name_mode = config.get('mod_list_name_mode', 'namespace')
+            
+            # 获取必要的信息
+            namespace = ns
+            jar_name = data.get('jar_name', '')
+            
+            # 根据模式生成不同的显示文本
+            if name_mode == 'namespace_jar':
+                display_text = f"{namespace} ({jar_name})"
+            elif name_mode == 'jar_namespace':
+                display_text = f"{jar_name} ({namespace})"
+            elif name_mode == 'namespace':
+                display_text = namespace
+            elif name_mode == 'jar':
+                display_text = jar_name
+            else:
+                # 默认使用命名空间
+                display_text = namespace
             self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(display_untranslated, display_completed))
 
     def _update_namespace_summary(self, ns: str):
@@ -1301,6 +1321,43 @@ class TranslationWorkbench(ttk.Frame):
         
         self.ns_tree.set(ns, "pending", display_untranslated)
         self.ns_tree.set(ns, "completed", display_completed)
+        
+        # 更新显示文本
+        self._update_namespace_display(ns)
+    
+    def _update_namespace_display(self, ns: str):
+        """更新指定命名空间的显示文本"""
+        if not self.ns_tree.exists(ns):
+            return
+        
+        data = self.translation_data[ns]
+        import utils.config_manager
+        config = utils.config_manager.load_config()
+        name_mode = config.get('mod_list_name_mode', 'namespace')
+        
+        # 获取必要的信息
+        namespace = ns
+        jar_name = data.get('jar_name', '')
+        
+        # 根据模式生成不同的显示文本
+        if name_mode == 'namespace_jar':
+            display_text = f"{namespace} ({jar_name})"
+        elif name_mode == 'jar_namespace':
+            display_text = f"{jar_name} ({namespace})"
+        elif name_mode == 'namespace':
+            display_text = namespace
+        elif name_mode == 'jar':
+            display_text = jar_name
+        else:
+            # 默认使用命名空间
+            display_text = namespace
+        
+        self.ns_tree.item(ns, text=display_text)
+    
+    def update_all_namespace_displays(self):
+        """更新所有命名空间的显示文本，用于设置更改后即刻生效"""
+        for ns in self.translation_data:
+            self._update_namespace_display(ns)
 
     def _populate_item_list(self):
         # 检查是否需要更新（避免重复更新）

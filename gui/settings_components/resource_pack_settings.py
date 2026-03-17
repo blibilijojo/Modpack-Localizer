@@ -140,7 +140,7 @@ class ResourcePackSettings:
             community_dict_dir = self.community_dict_var.get()
             if community_dict_dir:
                 # 构建完整的文件路径
-                local_path = Path(community_dict_dir) / "Dict-Community.db"
+                local_path = Path(community_dict_dir) / "Dict-Sqlite.db"
             else:
                 local_path = None
             

@@ -153,10 +153,11 @@ class Orchestrator:
                 jar_name = jar_name.jar_name if jar_name else 'Unknown'
                 
                 # 尝试使用提取到的模组名称
-                display_name = f"{ns} ({jar_name})"  # 始终使用命名空间作为前缀
+                display_name = ns  # 只使用命名空间，不包含jar_name
                 mod_name = ""  # 默认设置为空字符串
                 curseforge_name = ""  # 默认设置为空字符串
                 modrinth_name = ""  # 默认设置为空字符串
+                git_name = ""  # 默认设置为空字符串
                 jar_name_without_ext = jar_name[:-4] if jar_name.endswith('.jar') else jar_name
                 if jar_name_without_ext.lower() in module_names_dict:
                     mod_name = module_names_dict[jar_name_without_ext.lower()]  # 使用提取到的模组名称
@@ -171,6 +172,7 @@ class Orchestrator:
                     'display_name': display_name,
                     'curseforge_name': curseforge_name,
                     'modrinth_name': modrinth_name,
+                    'git_name': git_name,
                     'items': items
                 }
             

@@ -21,7 +21,7 @@ class DictionarySearchWindow(ttk.Toplevel):
         # 构建完整的文件路径
         community_dict_dir = self.config.get("community_dict_dir")
         if community_dict_dir:
-            community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
+            community_dict_path = str(Path(community_dict_dir) / "Dict-Sqlite.db")
         else:
             community_dict_path = ""
         self.searcher = DictionarySearcher(community_dict_path)

@@ -59,7 +59,7 @@ class DataAggregator:
             return {}, {}
         
         # 构建完整的文件路径
-        dict_file_path = Path(self.community_dict_dir) / "Dict-Community.db"
+        dict_file_path = Path(self.community_dict_dir) / "Dict-Sqlite.db"
         
         if not dict_file_path.is_file():
             logging.info(f"  - 社区词典文件不存在: {dict_file_path}，跳过加载。")

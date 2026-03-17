@@ -32,7 +32,7 @@ class DictionaryManager:
         if community_dict_dir:
             try:
                 # 构建完整的文件路径
-                dict_file_path = Path(community_dict_dir) / "Dict-Community.db"
+                dict_file_path = Path(community_dict_dir) / "Dict-Sqlite.db"
                 
                 if dict_file_path.is_file():
                     with sqlite3.connect(f"file:{dict_file_path}?mode=ro", uri=True) as con:

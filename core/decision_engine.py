@@ -85,7 +85,8 @@ class DecisionEngine:
         """
         ns_data = {
             'jar_name': jar_name,
-            'display_name': f"{namespace} ({jar_name})",
+            'display_name': namespace,  # 只使用命名空间，不包含jar_name
+            'git_name': "",  # 默认设置为空字符串
             'items': []
         }
         ns_source_counts = Counter()

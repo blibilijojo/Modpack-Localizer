@@ -37,8 +37,8 @@ class GitHubUploadUI(tk.Frame):
         main_frame.pack(fill="both", expand=True)
         
         # 创建输入表单框架
-        form_frame = ttk.LabelFrame(main_frame, text="GitHub汉化仓库上传", padding=15)
-        form_frame.pack(fill="both", expand=True, pady=(0, 15))
+        form_frame = ttk.LabelFrame(main_frame, text="GitHub汉化仓库上传")
+        form_frame.pack(fill="both", expand=True, pady=(0, 15), padx=15, ipady=15)
         
         # 配置网格列权重
         form_frame.columnconfigure(0, weight=0, minsize=120)
@@ -86,7 +86,7 @@ class GitHubUploadUI(tk.Frame):
         format_entry.configure(style="Disabled.TEntry")
         
         # 高级选项
-        advanced_frame = ttk.LabelFrame(form_frame, text="高级选项", padding=10)
+        advanced_frame = ttk.LabelFrame(form_frame, text="高级选项")
         advanced_frame.grid(row=5, column=0, columnspan=3, sticky="ew", padx=5, pady=10)
         advanced_frame.columnconfigure(1, weight=1)
         

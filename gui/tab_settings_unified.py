@@ -17,6 +17,7 @@ class UnifiedSettingsTab(ttk.Frame):
         super().__init__(parent)
         self.config = config_manager.load_config()
         self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
+        self.mod_list_name_mode_var = tk.StringVar(value=self.config.get("mod_list_name_mode", "namespace"))
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -113,10 +114,20 @@ class UnifiedSettingsTab(ttk.Frame):
         origin_check = ttk.Checkbutton(matching_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
         origin_check.pack(anchor="w", pady=5, padx=5)
         custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+        
+        # 模组任务列表名称显示模式
+        name_mode_frame = tk_ttk.LabelFrame(frame, text="模组任务列表名称显示模式", padding="10")
+        name_mode_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Radiobutton(name_mode_frame, text="命名空间（文件名称）", variable=self.mod_list_name_mode_var, value="namespace_jar", bootstyle="primary").pack(anchor="w", pady=2, padx=5)
+        ttk.Radiobutton(name_mode_frame, text="文件名称（命名空间）", variable=self.mod_list_name_mode_var, value="jar_namespace", bootstyle="primary").pack(anchor="w", pady=2, padx=5)
+        ttk.Radiobutton(name_mode_frame, text="命名空间", variable=self.mod_list_name_mode_var, value="namespace", bootstyle="primary").pack(anchor="w", pady=2, padx=5)
+        ttk.Radiobutton(name_mode_frame, text="文件名称", variable=self.mod_list_name_mode_var, value="jar", bootstyle="primary").pack(anchor="w", pady=2, padx=5)
 
         # 绑定设置保存事件
         self.use_origin_name_lookup_var.trace_add("write", lambda *args: self._save_all_settings())
         self.pack_as_zip_var.trace_add("write", lambda *args: self._save_all_settings())
+        self.mod_list_name_mode_var.trace_add("write", lambda *args: self._save_all_settings())
 
     def _create_advanced_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="高级设置", padding="10")
@@ -642,6 +653,7 @@ CRITICAL: 致命错误，程序即将崩溃
         config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
         config["pack_as_zip"] = self.pack_as_zip_var.get()
         config["log_level"] = self.log_level_var.get()
+        config["mod_list_name_mode"] = self.mod_list_name_mode_var.get()
         
         # 保存API服务配置
         config["api_services"] = self.api_services
@@ -669,6 +681,7 @@ CRITICAL: 致命错误，程序即将崩溃
         self.use_origin_name_lookup_var.set(self.config.get("use_origin_name_lookup", True))
         self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
         self.log_level_var.set(self.config.get("log_level", "INFO"))
+        self.mod_list_name_mode_var.set(self.config.get("mod_list_name_mode", "namespace"))
         
         
         
@@ -872,12 +885,12 @@ CRITICAL: 致命错误，程序即将崩溃
             community_dict_dir = self.community_dict_var.get()
             if community_dict_dir:
                 # 构建完整的文件路径
-                local_path = Path(community_dict_dir) / "Dict-Community.db"
+                local_path = Path(community_dict_dir) / "Dict-Sqlite.db"
             else:
                 # 没有设置本地目录，使用默认目录
                 import os
                 default_dir = os.getcwd()
-                local_path = Path(default_dir) / "Dict-Community.db"
+                local_path = Path(default_dir) / "Dict-Sqlite.db"
                 # 更新配置中的目录
                 config_manager.update_config("community_dict_dir", default_dir)
                 self.community_dict_var.set(default_dir)

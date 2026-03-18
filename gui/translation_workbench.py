@@ -2395,8 +2395,7 @@ class TranslationWorkbench(ttk.Frame):
                 community_dict_dir = config.get("community_dict_dir", "")
                 
                 if community_dict_dir:
-                    # 构建完整的文件路径
-                    community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
+                    community_dict_path = str(Path(community_dict_dir) / "Dict-Sqlite.db")
                     searcher = DictionarySearcher(community_dict_path)
                     if searcher.is_available():
                         # 优化1：只排除已匹配的术语

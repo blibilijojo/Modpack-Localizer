@@ -56,22 +56,33 @@ class ProjectTab:
                 return {
                     "project_name": self.project_name,
                     "project_type": self.project_type,
-                    "project_info": self.project_info,
+                    "project_info": self._clean_project_info(),
                     "workbench_state": self._restored_state_data.get("workbench_state"),
                     "tab_uuid": self.tab_uuid,
                     "namespace_summary": self._restored_state_data.get("namespace_summary", []),
                 }
             return None
-        
+
         workbench_state = self.workbench_instance.get_state()
         return {
             "project_name": self.project_name,
             "project_type": self.project_type,
-            "project_info": self.project_info,
+            "project_info": self._clean_project_info(),
             "workbench_state": workbench_state,
             "tab_uuid": self.tab_uuid,
             "namespace_summary": self._get_namespace_summary(),
         }
+
+    def _clean_project_info(self):
+        """清理项目信息，移除临时目录路径"""
+        if not self.project_info:
+            return {}
+        cleaned = {}
+        for key, value in self.project_info.items():
+            if key == 'mods_dir' and value and 'AppData\\Local\\Temp' in str(value):
+                continue
+            cleaned[key] = value
+        return cleaned
 
     def _get_namespace_summary(self):
         """获取namespace摘要信息，用于懒加载恢复"""
@@ -583,7 +594,7 @@ class ProjectTab:
         filter_frame.pack(fill="x")
         
         ttk.Label(filter_frame, text="平台:", width=10).pack(side="left", padx=5, pady=5)
-        self.platform_var = tk.StringVar(value="Modrinth")
+        self.platform_var = tk.StringVar(value="CurseForge")
         platform_combo = ttk.Combobox(filter_frame, textvariable=self.platform_var, values=["Modrinth", "CurseForge"], state="readonly", width=15)
         platform_combo.pack(side="left", padx=5, pady=5)
         platform_combo.bind("<<ComboboxSelected>>", lambda e: platform_combo.selection_clear())
@@ -641,13 +652,15 @@ class ProjectTab:
         files_label_frame.grid(row=1, column=1, sticky="nsew", pady=(0, 10), padx=(5, 0))
         
         # 文件列表
-        self.files_tree = ttk.Treeview(files_label_frame, columns=("name", "version", "size", "date"), show="headings")
+        self.files_tree = ttk.Treeview(files_label_frame, columns=("name", "mod_version", "game_version", "size", "date"), show="headings")
         self.files_tree.heading("name", text="文件名")
-        self.files_tree.heading("version", text="版本")
+        self.files_tree.heading("mod_version", text="模组版本")
+        self.files_tree.heading("game_version", text="游戏版本")
         self.files_tree.heading("size", text="大小")
         self.files_tree.heading("date", text="上传日期")
         self.files_tree.column("name", width=200)
-        self.files_tree.column("version", width=100)
+        self.files_tree.column("mod_version", width=80)
+        self.files_tree.column("game_version", width=80)
         self.files_tree.column("size", width=80, anchor="center")
         self.files_tree.column("date", width=120)
         
@@ -985,6 +998,7 @@ class ProjectTab:
                 formatted_file = {
                     "id": file_info.get("id"),
                     "version_number": file_info.get("displayName"),
+                    "game_versions": file_info.get("gameVersions", []),
                     "date_published": file_info.get("fileDate"),
                     "files": [{
                         "primary": True,
@@ -1024,7 +1038,9 @@ class ProjectTab:
                     file_size = asset.get("size", 0)
                     break
             
-            version = file_info.get("version_number", "")
+            mod_version = file_info.get("version_number", "")
+            game_versions = file_info.get("game_versions", [])
+            game_version = ", ".join(game_versions) if game_versions else ""
             date = file_info.get("date_published", "")
             
             # 格式化大小
@@ -1033,7 +1049,7 @@ class ProjectTab:
             # 格式化日期
             date_str = date[:10] if date else ""
             
-            self.files_tree.insert("", "end", values=(file_name, version, size_str, date_str), tags=(file_info.get("id"),))
+            self.files_tree.insert("", "end", values=(file_name, mod_version, game_version, size_str, date_str), tags=(file_info.get("id"),))
         
         # 更新状态
         self.status_var.set(f"获取完成，找到 {len(self.current_files)} 个文件")
@@ -1228,11 +1244,12 @@ class ProjectTab:
             "output_dir": self.project_info.get('output_dir')
         }
         
-        # 保存配置（不保存临时目录路径，只保存输出目录）
+        # 先保存配置（不包含临时目录），然后再设置运行时需要的 mods_dir
         from utils import config_manager
         config = config_manager.load_config()
         config['output_dir'] = self.project_info.get('output_dir')
-        config_manager.save_config(config)
+        config_manager.save_config(config)  # 保存时不包含 temp_mods_dir
+        config['mods_dir'] = temp_mods_dir  # 仅在运行时使用，不保存
         
         # 开始汉化流程
         self._prepare_ui_for_workflow(1)

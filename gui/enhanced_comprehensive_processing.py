@@ -1568,9 +1568,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         stats['similar_contexts'] += 1
         
         stats['total_contexts_generated'] = stats['group_contexts'] + stats['similar_contexts']
-        
-        # 记录统计信息
-        logging.info(f"上下文生成统计: {stats}")
+
+        logging.info(
+            f"上下文统计 - 总上下文数: {stats['total_contexts_generated']} "
+            f"(分组上下文: {stats['group_contexts']}, "
+            f"相似上下文: {stats['similar_contexts']}), "
+            f"过滤常用词: {stats['common_words_filtered']}个, "
+            f"处理关键词: {stats['unique_words_processed']}个"
+        )
         
         if context_parts:
             return "\n".join(context_parts)

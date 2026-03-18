@@ -329,7 +329,7 @@ class ResourcePackSettings:
             return
         
         # 构建完整的文件路径
-        community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
+        community_dict_path = str(Path(community_dict_dir) / "Dict-Sqlite.db")
         
         try:
             # 显示确认对话框

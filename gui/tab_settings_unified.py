@@ -231,7 +231,7 @@ CRITICAL: 致命错误，程序即将崩溃
         dict_path_frame.pack(fill="x", pady=5)
         dict_label = ttk.Label(dict_path_frame, text="社区词典目录:", width=15)
         dict_label.pack(side="left")
-        custom_widgets.ToolTip(dict_label, "可选。存放社区词典文件的目录，程序会在该目录中使用 Dict-Community.db 文件\n可以从GitHub下载最新的社区维护版本。")
+        custom_widgets.ToolTip(dict_label, "可选。存放社区词典文件的目录，程序会在该目录中使用 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
         dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var, takefocus=False)
         dict_entry.pack(side="left", fill="x", expand=True, padx=5)
         # 防止自动选中文本
@@ -897,6 +897,8 @@ CRITICAL: 致命错误，程序即将崩溃
             
             # 检查本地词典版本
             local_version = config_manager.load_config().get("last_dict_version", "0.0.0")
+            if local_version.startswith("v"):
+                local_version = local_version[1:]
             remote_version = remote_info.get("version", "0.0.0")
             
             # 比较版本
@@ -1058,7 +1060,9 @@ CRITICAL: 致命错误，程序即将崩溃
             response = requests.get(api_url, timeout=15)
             response.raise_for_status()
             data = response.json()
-            version = data.get("tag_name")
+            version = data.get("tag_name", "")
+            if version.startswith("v"):
+                version = version[1:]
             url = next((asset.get("browser_download_url") for asset in data.get("assets", []) if asset.get("name") == "Dict-Sqlite.db"), None)
             if version and url: return {"version": version, "url": url}
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
@@ -1085,7 +1089,7 @@ CRITICAL: 致命错误，程序即将崩溃
             return
         
         # 构建完整的文件路径
-        community_dict_path = str(Path(community_dict_dir) / "Dict-Community.db")
+        community_dict_path = str(Path(community_dict_dir) / "Dict-Sqlite.db")
         
         try:
             # 显示确认对话框

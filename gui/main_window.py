@@ -1228,10 +1228,9 @@ class ProjectTab:
             "output_dir": self.project_info.get('output_dir')
         }
         
-        # 保存配置
+        # 保存配置（不保存临时目录路径，只保存输出目录）
         from utils import config_manager
         config = config_manager.load_config()
-        config['mods_dir'] = temp_mods_dir
         config['output_dir'] = self.project_info.get('output_dir')
         config_manager.save_config(config)
         

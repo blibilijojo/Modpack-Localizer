@@ -207,12 +207,12 @@ class AITranslator:
             logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
             return [None] * len(batch_inner)
         
-        # 文本去重和缓存检查
-        unique_texts = []
-        text_to_indices = {}
+        # 缓存检查
         cached_results = [None] * len(batch_inner)
         
         # 检查缓存，收集需要翻译的文本
+        texts_to_translate = []
+        text_indices = {}
         for idx, text in enumerate(batch_inner):
             # 检查取消标志
             if self._cancelled:
@@ -225,10 +225,8 @@ class AITranslator:
                 cached_results[idx] = cached_translation
                 logging.debug(f"批次 {batch_index_inner + 1}：文本 '{text}' 命中缓存")
             else:
-                if text not in text_to_indices:
-                    text_to_indices[text] = []
-                    unique_texts.append(text)
-                text_to_indices[text].append(idx)
+                texts_to_translate.append(text)
+                text_indices[len(texts_to_translate) - 1] = idx
         
         # 检查取消标志
         if self._cancelled:
@@ -236,12 +234,12 @@ class AITranslator:
             return [None] * len(batch_inner)
         
         # 如果所有文本都命中缓存，直接返回结果
-        if not unique_texts:
-            logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需API调用")
+        if not texts_to_translate:
+            logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需 API 调用")
             return cached_results
         
         # 对未命中缓存的文本进行翻译
-        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(unique_texts)} 个唯一文本")
+        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本")
         
         attempt = 0
         max_attempts = 5  # 最大重试次数
@@ -270,7 +268,7 @@ class AITranslator:
                         effective_model_name = service_model
                 
                 client = self._get_client(api_key)
-                input_dict = dict(enumerate(unique_texts))
+                input_dict = dict(enumerate(texts_to_translate))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
                 # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
                 prompt_content = f"{prompt_template}\n\n输入: {input_json}"
@@ -310,7 +308,7 @@ class AITranslator:
                     return [None] * len(batch_inner)
                 
                 response_text = response.choices[0].message.content
-                translated_unique = self._parse_response(response_text, unique_texts)
+                translated_texts = self._parse_response(response_text, texts_to_translate)
                 
                 # 检查取消标志
                 if self._cancelled:
@@ -318,20 +316,22 @@ class AITranslator:
                     self.key_manager.release_key(api_key)
                     return [None] * len(batch_inner)
                 
-                if translated_unique:
+                if translated_texts:
                     # 将翻译结果存入缓存并构建完整的结果列表
-                    for idx, (text, translation) in enumerate(zip(unique_texts, translated_unique)):
+                    for idx, translation in enumerate(translated_texts):
                         # 检查取消标志
                         if self._cancelled:
                             logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
                             self.key_manager.release_key(api_key)
                             return [None] * len(batch_inner)
                         
+                        # 获取原始文本
+                        text = texts_to_translate[idx]
                         # 缓存翻译结果
                         self._cache_translation(text, translation)
                         # 填充到结果列表中
-                        for original_idx in text_to_indices[text]:
-                            cached_results[original_idx] = translation
+                        original_idx = text_indices[idx]
+                        cached_results[original_idx] = translation
                     
                     logging.info(f"线程 {threading.get_ident()} 成功完成批次 {batch_index_inner + 1}")
                     self.key_manager.release_key(api_key)
@@ -602,12 +602,12 @@ class AITranslator:
         else:
             batch_index_inner, batch_inner, model_name, prompt_template = batch_info
 
-        # 文本去重和缓存检查
-        unique_texts = []
-        text_to_indices = {}
+        # 缓存检查
         cached_results = [None] * len(batch_inner)
-
+        
         # 检查缓存，收集需要翻译的文本
+        texts_to_translate = []
+        text_indices = {}
         for idx, text in enumerate(batch_inner):
             # 从缓存中获取翻译结果
             cached_translation = self._get_cached_translation(text)
@@ -615,18 +615,16 @@ class AITranslator:
                 cached_results[idx] = cached_translation
                 logging.debug(f"批次 {batch_index_inner + 1}：文本 '{text}' 命中缓存")
             else:
-                if text not in text_to_indices:
-                    text_to_indices[text] = []
-                    unique_texts.append(text)
-                text_to_indices[text].append(idx)
-
+                texts_to_translate.append(text)
+                text_indices[len(texts_to_translate) - 1] = idx
+        
         # 如果所有文本都命中缓存，直接返回结果
-        if not unique_texts:
-            logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需API调用")
+        if not texts_to_translate:
+            logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需 API 调用")
             return cached_results
-
+        
         # 对未命中缓存的文本进行翻译
-        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(unique_texts)} 个唯一文本")
+        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本")
 
         attempt = 0
         max_attempts = 5  # 最大重试次数
@@ -638,7 +636,7 @@ class AITranslator:
 
                 effective_model_name = model_name
                 client = self._get_client(api_key)
-                input_dict = dict(enumerate(unique_texts))
+                input_dict = dict(enumerate(texts_to_translate))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
                 # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
                 prompt_content = f"{prompt_template}\n\n输入: {input_json}"
@@ -647,16 +645,17 @@ class AITranslator:
                 # 异步执行API调用
                 response = await asyncio.to_thread(client.chat.completions.create, **request_params)
                 response_text = response.choices[0].message.content
-                translated_unique = self._parse_response(response_text, unique_texts)
+                translated_texts = self._parse_response(response_text, texts_to_translate)
 
-                if translated_unique:
+                if translated_texts:
                     # 将翻译结果存入缓存并构建完整的结果列表
-                    for idx, (text, translation) in enumerate(zip(unique_texts, translated_unique)):
+                    for idx, translation in enumerate(translated_texts):
                         # 缓存翻译结果
+                        text = texts_to_translate[idx]
                         self._cache_translation(text, translation)
                         # 填充到结果列表中
-                        for original_idx in text_to_indices[text]:
-                            cached_results[original_idx] = translation
+                        original_idx = text_indices[idx]
+                        cached_results[original_idx] = translation
 
                     # 异步释放API密钥
                     await self.key_manager.async_release_key(api_key)

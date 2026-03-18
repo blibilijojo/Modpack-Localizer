@@ -36,10 +36,13 @@ class ProjectTab:
         self.project_info = {}
         self.loading_frame = None
         self.tab_uuid = None
+        self._is_fully_loaded = False
+        self._restored_state_data = None
 
         self.project_type_var = tk.StringVar(value="mod")
         self.mods_dir_var = tk.StringVar()
         self.output_dir_var = tk.StringVar()
+        self.jar_dir_var = tk.StringVar()
         self.instance_dir_var = tk.StringVar()
         self.modpack_name_var = tk.StringVar()
 
@@ -49,6 +52,15 @@ class ProjectTab:
 
     def get_state(self):
         if not self.workbench_instance:
+            if self._restored_state_data:
+                return {
+                    "project_name": self.project_name,
+                    "project_type": self.project_type,
+                    "project_info": self.project_info,
+                    "workbench_state": self._restored_state_data.get("workbench_state"),
+                    "tab_uuid": self.tab_uuid,
+                    "namespace_summary": self._restored_state_data.get("namespace_summary", []),
+                }
             return None
         
         workbench_state = self.workbench_instance.get_state()
@@ -58,21 +70,42 @@ class ProjectTab:
             "project_info": self.project_info,
             "workbench_state": workbench_state,
             "tab_uuid": self.tab_uuid,
+            "namespace_summary": self._get_namespace_summary(),
         }
 
-    def restore_from_state(self, state_data: dict):
-        self.project_name = state_data.get("project_name", "已恢复的项目")
-        self.project_type = state_data.get("project_type", "mod")
-        self.project_info = state_data.get("project_info", {})
-        self.tab_uuid = state_data.get("tab_uuid")
-        workbench_state = state_data.get("workbench_state")
+    def _get_namespace_summary(self):
+        """获取namespace摘要信息，用于懒加载恢复"""
+        if not self.workbench_instance or not self.workbench_instance.translation_data:
+            return []
+        
+        summary = []
+        for ns, data in sorted(self.workbench_instance.translation_data.items()):
+            items = data.get('items', [])
+            total_count = len(items)
+            completed = sum(1 for item in items if item.get('zh', '').strip())
+            summary.append({
+                'ns': ns,
+                'jar_name': data.get('jar_name', ''),
+                'total': total_count,
+                'completed': completed
+            })
+        return summary
 
+    def _lazy_load_workbench(self):
+        """懒加载工作台数据"""
+        if self._is_fully_loaded or not self._restored_state_data:
+            return
+        
+        state_data = self._restored_state_data
+        self._restored_state_data = None
+        self._is_fully_loaded = True
+        
+        workbench_state = state_data.get('workbench_state')
         if not workbench_state:
             self.log_message("会话状态不完整，无法恢复工作台。", "ERROR")
             self._show_welcome_view()
             return
-            
-        self.main_window.update_tab_title(self.tab_id, self.project_name)
+        
         current_settings = config_manager.load_config()
         finish_text = ""
 
@@ -83,7 +116,6 @@ class ProjectTab:
                 root_window=self.root,
                 log_callback=self.log_message
             )
-            # 初始化Orchestrator的raw_english_files和namespace_formats
             self.orchestrator.raw_english_files = workbench_state['raw_english_files']
             self.orchestrator.namespace_formats = workbench_state['namespace_formats']
             finish_text = "完成并生成资源包"
@@ -109,6 +141,81 @@ class ProjectTab:
             finish_button_text=finish_text
         )
         self.log_message(f"项目 '{self.project_name}' 已从缓存中成功恢复。", "SUCCESS")
+
+    def restore_from_state(self, state_data: dict):
+        self.project_name = state_data.get("project_name", "已恢复的项目")
+        self.project_type = state_data.get("project_type", "mod")
+        self.project_info = state_data.get("project_info", {})
+        self.tab_uuid = state_data.get("tab_uuid")
+        
+        self.main_window.update_tab_title(self.tab_id, self.project_name)
+        
+        namespace_summary = state_data.get("namespace_summary", [])
+        workbench_state = state_data.get("workbench_state")
+        
+        if not workbench_state:
+            self.log_message("会话状态不完整，无法恢复工作台。", "ERROR")
+            self._show_welcome_view()
+            return
+        
+        self._restored_state_data = state_data
+        self._is_fully_loaded = False
+        
+        self._show_lazy_loaded_view(namespace_summary)
+        self.log_message(f"项目 '{self.project_name}' 已恢复（懒加载模式）。", "INFO")
+
+    def _show_lazy_loaded_view(self, namespace_summary: list):
+        """显示懒加载视图，只显示namespace名称列表"""
+        self._clear_content_frame()
+        if self.log_pane_visible:
+            self._toggle_log_pane()
+        
+        container = ttk.Frame(self.content_frame)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ttk.Label(container, text=f"项目: {self.project_name}", font=("-size 14 -weight bold")).pack(anchor="w", pady=(0, 10))
+        
+        info_label = ttk.Label(container, text="点击下方按钮加载项目数据，或双击项目列表中的项目标签加载", bootstyle="secondary")
+        info_label.pack(anchor="w", pady=(0, 20))
+        
+        load_btn = ttk.Button(container, text="加载项目", command=self._lazy_load_workbench, bootstyle="primary")
+        load_btn.pack(anchor="w", pady=(0, 20))
+        
+        if namespace_summary:
+            summary_frame = tk_ttk.LabelFrame(container, text="项目概览", padding=10)
+            summary_frame.pack(fill="both", expand=True)
+            
+            summary_tree = ttk.Treeview(summary_frame, columns=("namespace", "jar", "total", "completed"), show="headings", height=15)
+            summary_tree.heading("namespace", text="命名空间")
+            summary_tree.heading("jar", text="来源")
+            summary_tree.heading("total", text="总条目")
+            summary_tree.heading("completed", text="已翻译")
+            
+            summary_tree.column("namespace", width=200)
+            summary_tree.column("jar", width=150)
+            summary_tree.column("total", width=80, anchor="center")
+            summary_tree.column("completed", width=80, anchor="center")
+            
+            scrollbar = ttk.Scrollbar(summary_frame, orient="vertical", command=summary_tree.yview)
+            summary_tree.configure(yscroll=scrollbar.set)
+            scrollbar.pack(side="right", fill="y")
+            summary_tree.pack(fill="both", expand=True)
+            
+            total_items = 0
+            total_completed = 0
+            for item in namespace_summary:
+                ns = item.get('ns', '')
+                jar = item.get('jar_name', '未知')
+                total = item.get('total', 0)
+                completed = item.get('completed', 0)
+                summary_tree.insert("", "end", values=(ns, jar, total, completed))
+                total_items += total
+                total_completed += completed
+            
+            ttk.Label(summary_frame, text=f"总计: {total_items} 条条目, {total_completed} 条已翻译", bootstyle="secondary").pack(anchor="w", pady=(10, 0))
+        
+        self.content_frame.update_idletasks()
+        self.main_window.update_menu_state()
 
     def _create_widgets(self):
         self.frame.columnconfigure(0, weight=1)
@@ -186,9 +293,9 @@ class ProjectTab:
         mod_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="推荐流程。扫描Mods文件夹，生成标准汉化资源包。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
-        modrinth_rb = ttk.Radiobutton(new_project_frame, text="Modrinth搜索", variable=self.project_type_var, value="modrinth", style="TRadiobutton")
-        modrinth_rb.pack(anchor="w", pady=(5, 0))
-        ttk.Label(new_project_frame, text="从Modrinth平台搜索模组，自动下载并启动汉化流程。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+        mod_search_rb = ttk.Radiobutton(new_project_frame, text="模组搜索", variable=self.project_type_var, value="modsearch", style="TRadiobutton")
+        mod_search_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="从Modrinth和CurseForge平台搜索模组，自动下载并启动汉化流程。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
         quest_rb = ttk.Radiobutton(new_project_frame, text="任务汉化", variable=self.project_type_var, value="quest", style="TRadiobutton")
         quest_rb.pack(anchor="w", pady=(5, 0))
@@ -234,16 +341,21 @@ class ProjectTab:
             
             start_command = self._setup_new_mod_project
         
-        elif self.project_type == "modrinth":
-            self.main_window.update_tab_title(self.tab_id, "Modrinth搜索设置")
+        elif self.project_type == "modsearch":
+            self.main_window.update_tab_title(self.tab_id, "模组搜索设置")
             config = config_manager.load_config()
             self.output_dir_var.set(config.get("output_dir", ""))
+            self.jar_dir_var.set(config.get("jar_dir", ""))
 
-            ttk.Label(container, text="输出文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
+            ttk.Label(container, text="汉化包输出:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
             ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=1, column=2, padx=5, pady=8)
-            
-            start_command = self._setup_new_modrinth_project
+
+            ttk.Label(container, text="JAR 下载:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=self.jar_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.jar_dir_var)).grid(row=2, column=2, padx=5, pady=8)
+
+            start_command = self._setup_new_mod_search_project
         
         elif self.project_type == "quest":
             self.main_window.update_tab_title(self.tab_id, "任务汉化设置")
@@ -411,28 +523,33 @@ class ProjectTab:
 
         threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True).start()
     
-    def _setup_new_modrinth_project(self):
+    def _setup_new_mod_search_project(self):
         output_dir = self.output_dir_var.get()
+        jar_dir = self.jar_dir_var.get()
         if not output_dir:
-            ui_utils.show_error("输入不能为空", "请指定输出文件夹。", parent=self.root)
+            ui_utils.show_error("输入不能为空", "请指定汉化包输出文件夹。", parent=self.root)
+            return
+        if not jar_dir:
+            ui_utils.show_error("输入不能为空", "请指定 JAR 下载文件夹。", parent=self.root)
             return
 
-        self.project_type = "modrinth"
-        self.project_name = "Modrinth搜索"
-        self.project_info = {"output_dir": output_dir}
-        self.log_message("Modrinth搜索项目已配置，开始搜索界面...", "INFO")
-        self.main_window.update_tab_title(self.tab_id, "Modrinth搜索")
-        
+        self.project_type = "modsearch"
+        self.project_name = "模组搜索"
+        self.project_info = {"output_dir": output_dir, "jar_dir": jar_dir}
+        self.log_message("模组搜索项目已配置，开始搜索界面...", "INFO")
+        self.main_window.update_tab_title(self.tab_id, "模组搜索")
+
         # 保存配置
         config = config_manager.load_config()
         config['output_dir'] = output_dir
+        config['jar_dir'] = jar_dir
         config_manager.save_config(config)
-        
-        # 显示Modrinth搜索界面
-        self._show_modrinth_view()
+
+        # 显示模组搜索界面
+        self._show_mod_search_view()
     
-    def _show_modrinth_view(self):
-        """显示Modrinth界面"""
+    def _show_mod_search_view(self):
+        """显示模组搜索界面"""
         self._clear_content_frame()
         if not self.log_pane_visible:
             self._toggle_log_pane()
@@ -459,23 +576,40 @@ class ProjectTab:
         self.search_var = tk.StringVar()
         search_entry = ttk.Entry(search_input_frame, textvariable=self.search_var, width=60)
         search_entry.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-        search_entry.bind("<Return>", lambda e: self.start_modrinth_search())
+        search_entry.bind("<Return>", lambda e: self.start_mod_search())
         
         # 筛选选项
         filter_frame = ttk.Frame(search_frame)
         filter_frame.pack(fill="x")
         
+        ttk.Label(filter_frame, text="平台:", width=10).pack(side="left", padx=5, pady=5)
+        self.platform_var = tk.StringVar(value="Modrinth")
+        platform_combo = ttk.Combobox(filter_frame, textvariable=self.platform_var, values=["Modrinth", "CurseForge"], state="readonly", width=15)
+        platform_combo.pack(side="left", padx=5, pady=5)
+        platform_combo.bind("<<ComboboxSelected>>", lambda e: platform_combo.selection_clear())
+
         ttk.Label(filter_frame, text="游戏版本:", width=10).pack(side="left", padx=5, pady=5)
         self.game_version_var = tk.StringVar(value="全部")
-        game_version_combo = ttk.Combobox(filter_frame, textvariable=self.game_version_var, values=["全部", "1.20.1", "1.19.4", "1.18.2", "1.17.1", "1.16.5"], state="readonly", width=15)
+        game_versions = [
+            "全部", "1.21", "1.20.4", "1.20.2", "1.20.1", "1.20", "1.19.4",
+            "1.19.3", "1.19.2", "1.19.1", "1.19", "1.18.2", "1.18.1", "1.18",
+            "1.17.1", "1.17", "1.16.5", "1.16.4", "1.16.3", "1.16.2", "1.16.1", "1.16",
+            "1.15.2", "1.15.1", "1.15", "1.14.4", "1.14.3", "1.14.2", "1.14.1", "1.14",
+            "1.13.2", "1.13.1", "1.13", "1.12.2", "1.12.1", "1.12", "1.11.2", "1.11.1", "1.11",
+            "1.10.2", "1.10.1", "1.10", "1.9.4", "1.9.3", "1.9.2", "1.9.1", "1.9",
+            "1.8.9", "1.8.8", "1.8.7", "1.8.6", "1.8.5", "1.8.4", "1.8.3", "1.8.2", "1.8.1", "1.8"
+        ]
+        game_version_combo = ttk.Combobox(filter_frame, textvariable=self.game_version_var, values=game_versions, state="readonly", width=15)
         game_version_combo.pack(side="left", padx=5, pady=5)
-        
+        game_version_combo.bind("<<ComboboxSelected>>", lambda e: game_version_combo.selection_clear())
+
         ttk.Label(filter_frame, text="加载器:", width=10).pack(side="left", padx=5, pady=5)
         self.mod_loader_var = tk.StringVar(value="全部")
         mod_loader_combo = ttk.Combobox(filter_frame, textvariable=self.mod_loader_var, values=["全部", "fabric", "forge", "quilt"], state="readonly", width=15)
         mod_loader_combo.pack(side="left", padx=5, pady=5)
+        mod_loader_combo.bind("<<ComboboxSelected>>", lambda e: mod_loader_combo.selection_clear())
         
-        ttk.Button(filter_frame, text="搜索", command=self.start_modrinth_search, bootstyle="primary").pack(side="right", padx=5, pady=5)
+        ttk.Button(filter_frame, text="搜索", command=self.start_mod_search, bootstyle="primary").pack(side="right", padx=5, pady=5)
         
         # 模组列表区域（左侧）
         results_frame = ttk.LabelFrame(main_container, text="模组列表")
@@ -527,13 +661,14 @@ class ProjectTab:
         self.current_mod = None
         self.current_files = []
     
-    def start_modrinth_search(self):
+    def start_mod_search(self):
         """启动搜索"""
         query = self.search_var.get().strip()
         if not query:
             messagebox.showinfo("提示", "请输入搜索关键词。")
             return
         
+        platform = self.platform_var.get()
         game_version = self.game_version_var.get()
         mod_loader = self.mod_loader_var.get()
         
@@ -542,11 +677,14 @@ class ProjectTab:
             self.results_tree.delete(item)
         
         # 更新状态
-        self.status_var.set("正在搜索Modrinth...")
-        self.log_message(f"开始搜索: {query}", "INFO")
+        self.status_var.set(f"正在搜索{platform}...")
+        self.log_message(f"开始搜索: {query} (平台: {platform})", "INFO")
         
         # 在后台线程中执行搜索
-        threading.Thread(target=self.search_modrinth, args=(query, game_version, mod_loader), daemon=True).start()
+        if platform == "Modrinth":
+            threading.Thread(target=self.search_modrinth, args=(query, game_version, mod_loader), daemon=True).start()
+        else:
+            threading.Thread(target=self.search_curseforge, args=(query, game_version, mod_loader), daemon=True).start()
     
     def search_modrinth(self, query, game_version=None, mod_loader=None):
         """执行Modrinth搜索请求"""
@@ -584,7 +722,120 @@ class ProjectTab:
                     "follows": hit.get("follows", 0),
                     "license": hit.get("license"),
                     "slug": hit.get("slug"),
-                    "versions": []
+                    "versions": [],
+                    "platform": "Modrinth"
+                }
+                results.append(mod_data)
+            
+            self.all_results = results
+            self.root.after(0, self.update_results)
+        except Exception as e:
+            error_msg = f"搜索失败: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+    
+    def search_curseforge(self, query, game_version=None, mod_loader=None):
+        """执行CurseForge搜索请求"""
+        try:
+            import requests
+            config = config_manager.load_config()
+            api_key = config.get('curseforge_api_key', '')
+
+            if not api_key:
+                self.root.after(0, lambda: messagebox.showwarning("警告", "请先在设置中配置CurseForge API密钥"))
+                self.root.after(0, lambda: self.status_var.set("未配置API密钥"))
+                return
+
+            # 构建API请求URL
+            base_urls = [
+                "https://api.curseforge.com",
+                "https://cfapi.mod.gg"  # 镜像源
+            ]
+            
+            # 构建查询参数
+            import urllib.parse
+            params = {
+                "gameId": 432,
+                "sortField": 2,
+                "sortOrder": "desc",
+                "pageSize": 40,
+                "classId": 6  # Mod 分类
+            }
+            
+            # 添加游戏版本筛选
+            if game_version and game_version != "全部":
+                params["gameVersion"] = game_version
+            
+            # 添加加载器筛选
+            if mod_loader and mod_loader != "全部":
+                mod_loader_map = {
+                    "forge": 1,
+                    "fabric": 4,
+                    "quilt": 5
+                }
+                if mod_loader in mod_loader_map:
+                    params["modLoaderType"] = mod_loader_map[mod_loader]
+            
+            # 添加搜索关键词
+            if query:
+                params["searchFilter"] = query
+            
+            # 发送API请求，尝试多个源
+            response = None
+            for base_url in base_urls:
+                try:
+                    address = f"{base_url}/v1/mods/search"
+                    headers = {
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json"
+                    }
+                    
+                    # 打印请求信息以便调试
+                    self.log_message(f"尝试CurseForge API请求: {address}?{urllib.parse.urlencode(params)}", "INFO")
+                    
+                    response = requests.get(address, params=params, headers=headers, timeout=15)
+                    
+                    # 打印响应状态码
+                    self.log_message(f"CurseForge API响应状态: {response.status_code}", "INFO")
+                    if response.status_code == 200:
+                        break
+                    else:
+                        self.log_message(f"CurseForge API错误: {response.text}", "ERROR")
+                except Exception as e:
+                    self.log_message(f"尝试{base_url}失败: {str(e)}", "WARNING")
+                    continue
+            
+            if not response or response.status_code != 200:
+                raise Exception("无法连接到CurseForge API，请检查网络连接或稍后再试")
+            
+            data = response.json()
+            
+            # 处理结果
+            results = []
+            for mod in data.get("data", []):
+                # 解析作者信息
+                author_name = "未知"
+                if mod.get("authors"):
+                    author_name = mod.get("authors")[0].get("name", "未知")
+                
+                # 解析许可证信息
+                license_name = None
+                if mod.get("license"):
+                    license_name = mod.get("license").get("name")
+                
+                # 构建模组数据
+                mod_data = {
+                    "project_id": mod.get("id"),
+                    "title": mod.get("name"),
+                    "author": author_name,
+                    "description": mod.get("summary"),
+                    "downloads": mod.get("downloadCount", 0),
+                    "follows": mod.get("popularityScore", 0),
+                    "license": license_name,
+                    "slug": mod.get("slug"),
+                    "versions": [],
+                    "platform": "CurseForge"
                 }
                 results.append(mod_data)
             
@@ -621,29 +872,135 @@ class ProjectTab:
         item = selected_items[0]
         tags = self.results_tree.item(item, "tags")
         if not tags:
+            messagebox.showinfo("错误", "无法获取模组ID。")
             return
         
         project_id = tags[0]
-        mod = next((m for m in self.all_results if m["project_id"] == project_id), None)
+        mod = next((m for m in self.all_results if str(m["project_id"]) == project_id), None)
         if not mod:
+            messagebox.showinfo("错误", "无法找到选中的模组。")
             return
-        
+
         self.current_mod = mod
         self.status_var.set("正在获取文件列表...")
         self.log_message(f"获取模组文件: {mod['title']}", "INFO")
         
         # 在后台线程中获取文件
-        threading.Thread(target=self.get_mod_files, args=(project_id,), daemon=True).start()
+        if mod.get("platform") == "Modrinth":
+            threading.Thread(target=self.get_mod_files, args=(project_id,), daemon=True).start()
+        else:
+            threading.Thread(target=self.get_curseforge_files, args=(project_id,), daemon=True).start()
     
     def get_mod_files(self, project_id):
-        """获取模组文件"""
+        """获取Modrinth模组文件"""
         try:
             import requests
             response = requests.get(f"https://api.modrinth.com/v2/project/{project_id}/version", timeout=30)
             response.raise_for_status()
             files = response.json()
             
+            # 添加平台信息
+            for file_info in files:
+                file_info["platform"] = "Modrinth"
+            
             self.current_files = files
+            self.root.after(0, self.update_files_list)
+        except Exception as e:
+            error_msg = f"获取文件失败: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
+            self.root.after(0, lambda: self.status_var.set("错误"))
+    
+    def get_curseforge_files(self, project_id):
+        """获取CurseForge模组文件"""
+        try:
+            import requests
+            config = config_manager.load_config()
+            api_key = config.get('curseforge_api_key', '')
+
+            if not api_key:
+                self.root.after(0, lambda: messagebox.showwarning("警告", "请先在设置中配置CurseForge API密钥"))
+                self.root.after(0, lambda: self.status_var.set("未配置API密钥"))
+                return
+
+            # 构建API请求URL，尝试多个源
+            base_urls = [
+                "https://api.curseforge.com",
+                "https://cfapi.mod.gg"  # 镜像源
+            ]
+            
+            headers = {
+                "x-api-key": api_key,
+                "Content-Type": "application/json"
+            }
+            
+            # 发送API请求，尝试多个源
+            response = None
+            for base_url in base_urls:
+                try:
+                    address = f"{base_url}/v1/mods/{project_id}/files"
+                    
+                    # 打印请求信息以便调试
+                    self.log_message(f"尝试CurseForge文件API请求: {address}", "INFO")
+                    
+                    response = requests.get(address, headers=headers, timeout=15)
+                    
+                    # 打印响应状态码
+                    self.log_message(f"CurseForge文件API响应状态: {response.status_code}", "INFO")
+                    if response.status_code == 200:
+                        break
+                    else:
+                        self.log_message(f"CurseForge文件API错误: {response.text}", "ERROR")
+                except Exception as e:
+                    self.log_message(f"尝试{base_url}失败: {str(e)}", "WARNING")
+                    continue
+            
+            if not response or response.status_code != 200:
+                raise Exception("无法连接到CurseForge API，请检查网络连接或稍后再试")
+            
+            data = response.json()
+            files = data.get("data", [])
+            
+            # 转换为与Modrinth类似的格式
+            formatted_files = []
+            for file_info in files:
+                # 构建下载URL
+                download_url = file_info.get("downloadUrl")
+                if not download_url:
+                    # 如果没有直接的下载URL，构建一个备用URL
+                    file_id = file_info.get("id")
+                    file_name = file_info.get("fileName")
+                    if file_id and file_name:
+                        download_url = f"https://edge.forgecdn.net/files/{str(file_id)[:4]}/{str(file_id)[4:]}/{file_name}"
+                
+                # 添加镜像源下载链接
+                download_urls = [download_url]
+                mirror_url = None
+                if download_url:
+                    # 添加镜像源
+                    mirror_url = download_url.replace("https://edge.forgecdn.net", "https://cdn.mod.gg")
+                    download_urls.append(mirror_url)
+                
+                # 构建文件信息
+                formatted_file = {
+                    "id": file_info.get("id"),
+                    "version_number": file_info.get("displayName"),
+                    "date_published": file_info.get("fileDate"),
+                    "files": [{
+                        "primary": True,
+                        "filename": file_info.get("fileName"),
+                        "size": file_info.get("fileLength"),
+                        "url": download_url,
+                        "mirror_url": mirror_url
+                    }],
+                    "platform": "CurseForge"
+                }
+                formatted_files.append(formatted_file)
+            
+            # 按发布日期排序，最新的在前
+            formatted_files.sort(key=lambda x: x.get("date_published", ""), reverse=True)
+            
+            self.current_files = formatted_files
             self.root.after(0, self.update_files_list)
         except Exception as e:
             error_msg = f"获取文件失败: {str(e)}"
@@ -705,12 +1062,15 @@ class ProjectTab:
             return
         
         project_id = tags[0]
-        mod = next((m for m in self.all_results if m["project_id"] == project_id), None)
+        mod = next((m for m in self.all_results if str(m["project_id"]) == project_id), None)
         if not mod:
             return
-        
+
         # 打开模组页面
-        url = f"https://modrinth.com/mod/{mod['slug']}"
+        if mod.get("platform") == "Modrinth":
+            url = f"https://modrinth.com/mod/{mod['slug']}"
+        else:
+            url = f"https://www.curseforge.com/minecraft/mc-mods/{mod['slug']}"
         webbrowser.open(url)
     
     def download_and_localize(self):
@@ -727,7 +1087,7 @@ class ProjectTab:
             return
         
         file_id = tags[0]
-        file_info = next((f for f in self.current_files if f["id"] == file_id), None)
+        file_info = next((f for f in self.current_files if str(f["id"]) == file_id), None)
         if not file_info:
             return
         
@@ -758,41 +1118,66 @@ class ProjectTab:
             import os
             from pathlib import Path
             
-            # 获取输出目录
+            # 获取JAR下载目录和汉化包输出目录
+            jar_dir = self.project_info.get('jar_dir')
             output_dir = self.project_info.get('output_dir')
-            if not output_dir:
-                error_msg = "输出目录未设置"
+            if not jar_dir:
+                error_msg = "JAR下载目录未设置"
                 self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
                 self.root.after(0, lambda: self.log_message(f"错误: {error_msg}", "ERROR"))
                 self.root.after(0, lambda: self.status_var.set("错误"))
                 return
-            
-            # 确保输出目录存在
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-            
-            # 下载文件
-            file_path = output_path / file_name
+
+            # 确保JAR下载目录存在
+            jar_path = Path(jar_dir)
+            jar_path.mkdir(parents=True, exist_ok=True)
+
+            # 下载文件到JAR目录
+            file_path = jar_path / file_name
             self.log_message(f"正在下载到: {file_path}", "INFO")
             
-            response = requests.get(url, stream=True, timeout=30)
-            response.raise_for_status()
+            # 准备下载链接列表
+            download_urls = [url]
             
-            # 获取文件大小
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded_size = 0
+            # 检查是否有镜像链接
+            if file_info and file_info.get('files'):
+                mirror_url = file_info['files'][0].get('mirror_url')
+                if mirror_url:
+                    download_urls.append(mirror_url)
             
-            # 写入文件
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        
-                        # 更新下载进度
-                        if total_size > 0:
-                            progress = int((downloaded_size / total_size) * 100)
-                            self.root.after(0, lambda p=progress: self.status_var.set(f"下载中... {p}%"))
+            # 尝试从多个链接下载
+            success = False
+            for download_url in download_urls:
+                try:
+                    self.log_message(f"尝试从: {download_url} 下载", "INFO")
+                    response = requests.get(download_url, stream=True, timeout=30)
+                    response.raise_for_status()
+                    
+                    # 获取文件大小
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded_size = 0
+                    
+                    # 写入文件
+                    with open(file_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
+                                
+                                # 更新下载进度
+                                if total_size > 0:
+                                    progress = int((downloaded_size / total_size) * 100)
+                                    self.root.after(0, lambda p=progress: self.status_var.set(f"下载中... {p}%"))
+                    
+                    # 下载成功
+                    success = True
+                    break
+                except Exception as e:
+                    self.log_message(f"从 {download_url} 下载失败: {str(e)}", "WARNING")
+                    continue
+            
+            if not success:
+                raise Exception("所有下载链接都失败了，请稍后再试")
             
             # 下载完成
             self.root.after(0, lambda: self.status_var.set("下载完成，准备汉化流程..."))
@@ -1154,6 +1539,11 @@ class MainWindow:
     def update_menu_state(self, event=None):
         """更新菜单状态"""
         current_tab = self._get_current_tab()
+        
+        if current_tab:
+            if not current_tab.workbench_instance and current_tab._restored_state_data and not current_tab._is_fully_loaded:
+                current_tab._lazy_load_workbench()
+        
         state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
         
         # 为编辑菜单的每个命令设置状态

@@ -172,6 +172,8 @@ DEFAULT_CONFIG = {
     "ai_batch_items": 200,      # 每批次条目数默认值
     "ai_batch_words": 2000,      # 每批次单词数默认值
 
+    # CurseForge API设置
+    "curseforge_api_key": "",    # CurseForge API密钥
 }
 
 def load_config() -> dict:

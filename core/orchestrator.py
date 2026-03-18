@@ -158,13 +158,53 @@ class Orchestrator:
                 curseforge_name = ""  # 默认设置为空字符串
                 modrinth_name = ""  # 默认设置为空字符串
                 git_name = ""  # 默认设置为空字符串
-                jar_name_without_ext = jar_name[:-4] if jar_name.endswith('.jar') else jar_name
-                if jar_name_without_ext.lower() in module_names_dict:
-                    mod_name = module_names_dict[jar_name_without_ext.lower()]  # 使用提取到的模组名称
+                
+                # 处理jar_name，移除(both formats)后缀和.jar后缀
+                jar_name_without_ext = jar_name
+                if " (both formats)" in jar_name_without_ext:
+                    jar_name_without_ext = jar_name_without_ext.replace(" (both formats)", "")
+                if jar_name_without_ext.endswith('.jar'):
+                    jar_name_without_ext = jar_name_without_ext[:-4]
+                
+                # 查找模组名称和git_name
+                curseforge_slug = ""
+                modrinth_slug = ""
+                
+                # 查找CurseForge信息
                 if jar_name_without_ext.lower() in curseforge_names_dict:
-                    curseforge_name = curseforge_names_dict[jar_name_without_ext.lower()]  # 使用提取到的curseforge名称
+                    curseforge_entry = None
+                    for entry in self.curseforge_names:
+                        source = entry['source']
+                        if source.endswith('.jar'):
+                            source = source[:-4]
+                        if source.lower() == jar_name_without_ext.lower():
+                            curseforge_entry = entry
+                            break
+                    if curseforge_entry:
+                        curseforge_name = curseforge_entry.get('curseforge_name', '')
+                        # 从CurseForge获取git_name，使用slug
+                        if 'slug' in curseforge_entry:
+                            git_name = curseforge_entry['slug']
+                
+                # 查找Modrinth信息
                 if jar_name_without_ext.lower() in modrinth_names_dict:
-                    modrinth_name = modrinth_names_dict[jar_name_without_ext.lower()]  # 使用提取到的Modrinth名称
+                    modrinth_entry = None
+                    for entry in self.modrinth_names:
+                        source = entry['source']
+                        if source.endswith('.jar'):
+                            source = source[:-4]
+                        if source.lower() == jar_name_without_ext.lower():
+                            modrinth_entry = entry
+                            break
+                    if modrinth_entry:
+                        modrinth_name = modrinth_entry.get('modrinth_name', '')
+                        # 从Modrinth获取git_name，使用slug并添加modrinth-前缀
+                        if 'slug' in modrinth_entry:
+                            git_name = f"modrinth-{modrinth_entry['slug']}"
+                
+                # 查找模组名称（如果还没有设置）
+                if not mod_name and jar_name_without_ext.lower() in module_names_dict:
+                    mod_name = module_names_dict[jar_name_without_ext.lower()]  # 使用提取到的模组名称
                 
                 workbench_data[ns] = {
                     'mod_name': mod_name,

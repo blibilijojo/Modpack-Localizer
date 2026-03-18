@@ -21,6 +21,7 @@ from gui.settings_components.basic_settings import BasicSettings
 from gui.settings_components.ai_settings import AISettings
 from gui.settings_components.resource_pack_settings import ResourcePackSettings
 from gui.settings_components.github_settings import GitHubSettings
+from gui.settings_components.curseforge_settings import CurseForgeSettings
 
 from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
@@ -59,6 +60,7 @@ class SettingsWindow(ttk.Toplevel):
             self._create_ai_tab,
             self._create_resource_pack_tab,
             self._create_github_tab,
+            self._create_curseforge_tab,
             self._create_pack_settings_tab,
             self._create_advanced_tab
         ]
@@ -98,7 +100,12 @@ class SettingsWindow(ttk.Toplevel):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text=" 汉化仓库上传 ")
         self.github_settings = GitHubSettings(tab, self.config, self._save_config)
-    
+
+    def _create_curseforge_tab(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text=" CurseForge ")
+        self.curseforge_settings = CurseForgeSettings(tab, self.config, self._save_config)
+
     def _create_advanced_tab(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text=" 高级 ")
@@ -138,7 +145,11 @@ class SettingsWindow(ttk.Toplevel):
         # 收集GitHub设置
         if hasattr(self, 'github_settings'):
             self.config.update(self.github_settings.get_config())
-        
+
+        # 收集CurseForge设置
+        if hasattr(self, 'curseforge_settings'):
+            self.config.update(self.curseforge_settings.get_config())
+
         # 收集高级设置
         if hasattr(self, 'advanced_settings'):
             self.config.update(self.advanced_settings.get_config())

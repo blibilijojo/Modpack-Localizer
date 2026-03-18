@@ -3030,17 +3030,68 @@ class TranslationWorkbench(ttk.Frame):
 
     def _on_finish(self):
         self._save_current_edit()
+        
         final_lookup = defaultdict(dict)
-        latest_data = self.translation_data
-        for ns, data in latest_data.items():
+        for ns, data in self.translation_data.items():
             for item in data.get('items', []):
                 if item.get('zh', '').strip():
                     final_lookup[ns][item['key']] = item['zh']
         
         final_translations = dict(final_lookup)
         if self.finish_callback:
-            self.finish_callback(final_translations, latest_data)
-    
+            self.finish_callback(final_translations, self.translation_data)
+
+    def _deduplicate_translations(self, translation_data: dict) -> dict:
+        """对翻译数据进行去重处理，移除重复的译文
+
+        Args:
+            translation_data: 原始翻译数据
+
+        Returns:
+            dict: 去重后的翻译数据
+        """
+        import copy
+
+        result = copy.deepcopy(translation_data)
+        total_removed = 0
+
+        for ns, data in result.items():
+            items = data.get('items', [])
+            if not items:
+                continue
+
+            seen_translations = {}  # {原文：译文}
+            unique_items = []
+            removed_count = 0
+
+            for item in items:
+                en_text = item.get('en', '').strip()
+                zh_text = item.get('zh', '').strip()
+
+                if not zh_text:
+                    unique_items.append(item)
+                    continue
+
+                if en_text in seen_translations:
+                    if seen_translations[en_text] == zh_text:
+                        removed_count += 1
+                        continue
+                    else:
+                        unique_items.append(item)
+                        seen_translations[en_text] = zh_text
+                else:
+                    seen_translations[en_text] = zh_text
+                    unique_items.append(item)
+
+            data['items'] = unique_items
+            total_removed += removed_count
+
+            if removed_count > 0:
+                logging.info(f"命名空间 '{ns}' 去重：移除 {removed_count} 条重复译文")
+
+        logging.info(f"去重处理完成，共移除 {total_removed} 条重复译文")
+        return result
+
     def _export_current_namespace_json(self):
         """导出当前模组的语言文件为 JSON 格式"""
         self._save_current_edit()

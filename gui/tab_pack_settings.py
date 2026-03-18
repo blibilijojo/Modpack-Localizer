@@ -41,6 +41,17 @@ class TabPackSettings:
         delete_btn = ttk.Button(preset_btn_frame, text="删除", command=self._delete_preset, bootstyle="danger-outline", width=6)
         delete_btn.pack(side="left", padx=2)
 
+        # 预案名称设置
+        name_frame = tk_ttk.LabelFrame(self.frame, text="预案名称", padding=10)
+        name_frame.pack(fill="x", pady=5)
+        name_frame.columnconfigure(1, weight=1)
+        self.preset_name_var = tk.StringVar()
+        ttk.Label(name_frame, text="当前预案名称:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        name_entry = ttk.Entry(name_frame, textvariable=self.preset_name_var)
+        name_entry.grid(row=0, column=1, sticky="ew", padx=5)
+        name_entry.bind('<FocusIn>', lambda e: e.widget.selection_clear())
+        name_entry.bind('<FocusOut>', lambda e: e.widget.selection_clear())
+
         metadata_frame = tk_ttk.LabelFrame(self.frame, text="预案内容 (pack.mcmeta & pack.png)", padding=10)
         metadata_frame.pack(fill="x", pady=10)
         metadata_frame.columnconfigure(1, weight=1)
@@ -96,24 +107,64 @@ class TabPackSettings:
 
     def _on_preset_selected(self, event=None):
         preset_name = self.preset_var.get()
+        self.preset_name_var.set(preset_name)
         presets = self.config.get("pack_settings_presets", {})
         self._apply_settings_to_ui(presets.get(preset_name, {}))
 
     def _save_preset(self):
-        preset_name = self.preset_var.get()
-        if not preset_name:
+        old_name = self.preset_var.get()
+        new_name = self.preset_name_var.get().strip()
+        
+        if not old_name:
             self._save_as_new_preset()
             return
         
+        if not new_name:
+            ui_utils.show_error("操作失败", "预案名称不能为空")
+            return
+        
+        # 处理默认预案的特殊情况
+        if old_name == "默认预案":
+            # 如果修改了默认预案的名称，执行另存为操作
+            if old_name != new_name:
+                # 调用另存为新预案的方法，直接传递新名称
+                self._save_as_new_preset(new_name)
+                return
+            else:
+                # 名称未变化，直接更新
+                presets = self.config.get("pack_settings_presets", {})
+                presets[old_name] = self._get_current_ui_settings()
+                self.config["pack_settings_presets"] = presets
+                config_manager.save_config(self.config)
+                ui_utils.show_info("成功", f"预案 '{old_name}' 已保存")
+                return
+        
         presets = self.config.get("pack_settings_presets", {})
-        presets[preset_name] = self._get_current_ui_settings()
+        
+        # 如果名称发生了变化
+        if old_name != new_name:
+            # 检查新名称是否已存在
+            if new_name in presets and not ui_utils.show_warning("覆盖预案", f"预案 '{new_name}' 已存在, 要覆盖吗？"):
+                return
+            
+            # 删除旧名称的预案
+            if old_name in presets:
+                preset_data = presets.pop(old_name)
+                # 用新名称保存
+                presets[new_name] = preset_data
+        else:
+            # 名称未变化，直接更新
+            presets[old_name] = self._get_current_ui_settings()
+        
         self.config["pack_settings_presets"] = presets
         config_manager.save_config(self.config)
-        ui_utils.show_info("成功", f"预案 '{preset_name}' 已保存")
+        ui_utils.show_info("成功", f"预案 '{new_name}' 已保存")
         self._load_presets()
+        self.preset_var.set(new_name)
 
-    def _save_as_new_preset(self):
-        new_name = simpledialog.askstring("另存为新预案", "请输入新预案的名称:")
+    def _save_as_new_preset(self, new_name=None):
+        if not new_name:
+            new_name = simpledialog.askstring("另存为新预案", "请输入新预案的名称:")
         if not new_name or not new_name.strip(): return
         
         new_name = new_name.strip()

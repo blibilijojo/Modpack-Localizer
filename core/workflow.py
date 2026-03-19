@@ -56,7 +56,8 @@ class Workflow:
                 mods_dir=mods_path,
                 zip_paths=[Path(p) for p in pack_paths if Path(p).exists()],
                 community_dict_dir=context.settings['community_dict_dir'],
-                progress_update_callback=context.progress_callback
+                progress_update_callback=context.progress_callback,
+                stop_event=getattr(context, 'stop_event', None)
             )
             
             context.extraction_result = extraction_result

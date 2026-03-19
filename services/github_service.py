@@ -573,3 +573,174 @@ class GitHubService:
         except Exception as e:
             logging.error(f'同步原仓库失败: {str(e)}')
             return False, f'同步失败: {str(e)}'
+    
+    def download_file(self, path, branch=None):
+        """从GitHub仓库下载文件
+        
+        Args:
+            path: 文件路径
+            branch: 分支名称，默认使用实例的branch属性
+            
+        Returns:
+            tuple: (success, content, message)
+        """
+        # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
+        path = path.replace('\\', '/')
+        
+        # 使用指定的分支或默认分支
+        target_branch = branch or self.branch
+        
+        endpoint = f'/repos/{self.repo}/contents/{path}'
+        
+        try:
+            result = self._make_request('GET', endpoint, params={'ref': target_branch})
+            if result:
+                # 解码文件内容
+                content = base64.b64decode(result.get('content', '')).decode('utf-8')
+                return True, content, f'文件下载成功: {Path(path).name}'
+            else:
+                return False, None, f'文件不存在: {path}'
+        except Exception as e:
+            return False, None, f'文件下载失败: {str(e)}'
+    
+    def list_files(self, path='', branch=None):
+        """列出GitHub仓库指定路径下的文件和目录
+        
+        Args:
+            path: 目录路径
+            branch: 分支名称，默认使用实例的branch属性
+            
+        Returns:
+            tuple: (success, files, message)
+        """
+        # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
+        path = path.replace('\\', '/')
+        
+        # 使用指定的分支或默认分支
+        target_branch = branch or self.branch
+        
+        endpoint = f'/repos/{self.repo}/contents/{path}'
+        
+        try:
+            result = self._make_request('GET', endpoint, params={'ref': target_branch})
+            if result:
+                return True, result, f'成功列出 {path} 下的文件'
+            else:
+                return False, None, f'路径不存在: {path}'
+        except Exception as e:
+            return False, None, f'列出文件失败: {str(e)}'
+    
+    def get_projects(self, version=None, branch=None):
+        """获取GitHub仓库中的项目列表
+        
+        Args:
+            version: Minecraft版本号，默认获取所有版本
+            branch: 分支名称，默认使用实例的branch属性
+            
+        Returns:
+            tuple: (success, projects, message)
+        """
+        try:
+            # 列出projects目录
+            success, files, message = self.list_files('projects', branch)
+            if not success:
+                return False, None, message
+            
+            projects = []
+            
+            # 遍历版本目录
+            for item in files:
+                if item['type'] == 'dir':
+                    version_name = item['name']
+                    
+                    # 如果指定了版本，只处理该版本
+                    if version and version_name != version:
+                        continue
+                    
+                    # 列出版本目录下的内容
+                    version_path = f'projects/{version_name}'
+                    success, version_files, message = self.list_files(version_path, branch)
+                    if not success:
+                        continue
+                    
+                    # 遍历assets目录
+                    for asset_item in version_files:
+                        if asset_item['type'] == 'dir' and asset_item['name'] == 'assets':
+                            assets_path = f'{version_path}/assets'
+                            success, assets_files, message = self.list_files(assets_path, branch)
+                            if not success:
+                                continue
+                            
+                            # 遍历项目目录
+                            for project_item in assets_files:
+                                if project_item['type'] == 'dir':
+                                    project_name = project_item['name']
+                                    project_path = f'{assets_path}/{project_name}'
+                                    
+                                    # 列出项目目录下的命名空间
+                                    success, namespace_files, message = self.list_files(project_path, branch)
+                                    if not success:
+                                        continue
+                                    
+                                    for namespace_item in namespace_files:
+                                        if namespace_item['type'] == 'dir':
+                                            namespace = namespace_item['name']
+                                            lang_path = f'{project_path}/{namespace}/lang'
+                                            
+                                            # 检查lang目录是否存在
+                                            success, lang_files, message = self.list_files(lang_path, branch)
+                                            if success:
+                                                # 检查是否有zh_cn.json文件
+                                                has_zh_cn = any(file['name'] == 'zh_cn.json' for file in lang_files)
+                                                if has_zh_cn:
+                                                    projects.append({
+                                                        'version': version_name,
+                                                        'project_name': project_name,
+                                                        'namespace': namespace,
+                                                        'path': lang_path
+                                                    })
+            
+            return True, projects, f'成功获取 {len(projects)} 个项目'
+        except Exception as e:
+            return False, None, f'获取项目列表失败: {str(e)}'
+    
+    def download_project_translations(self, project_info, branch=None):
+        """下载项目的翻译文件
+        
+        Args:
+            project_info: 项目信息，包含version、project_name、namespace、path
+            branch: 分支名称，默认使用实例的branch属性
+            
+        Returns:
+            tuple: (success, translations, message)
+        """
+        try:
+            # 下载zh_cn.json文件
+            zh_cn_path = f"{project_info['path']}/zh_cn.json"
+            success, zh_cn_content, message = self.download_file(zh_cn_path, branch)
+            if not success:
+                return False, None, f'下载中文翻译文件失败: {message}'
+            
+            # 下载en_us.json文件
+            en_us_path = f"{project_info['path']}/en_us.json"
+            success, en_us_content, message = self.download_file(en_us_path, branch)
+            if not success:
+                return False, None, f'下载英文原文文件失败: {message}'
+            
+            # 解析JSON文件
+            import json
+            zh_cn_data = json.loads(zh_cn_content)
+            en_us_data = json.loads(en_us_content)
+            
+            # 构建翻译数据结构
+            translations = {}
+            namespace = project_info['namespace']
+            translations[namespace] = zh_cn_data
+            
+            # 构建原始英文文件内容
+            raw_english_files = {}
+            raw_english_files[namespace] = en_us_content
+            
+            return True, {'translations': translations, 'raw_english_files': raw_english_files}, '成功下载项目翻译文件'
+        except Exception as e:
+            return False, None, f'下载项目翻译失败: {str(e)}'

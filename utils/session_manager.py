@@ -86,6 +86,7 @@ def save_session(project_tabs: list):
     for tab in project_tabs:
         state = tab.get_state()
         if not state:
+            # 跳过空标签页（没有加载内容的标签页）
             continue
         
         tab_uuid = state.get('tab_uuid')
@@ -143,8 +144,18 @@ def save_session(project_tabs: list):
         except Exception as e:
             logging.error(f"保存标签页缓存时出错：{e}")
     
+    # 处理已关闭的标签页
+    # 遍历索引文件中的所有标签页
     for tab_uuid in list(index_data["tabs"].keys()):
-        if tab_uuid not in existing_uuids:
+        # 检查该标签页是否在当前标签页列表中
+        is_tab_exists = False
+        for tab in project_tabs:
+            if hasattr(tab, 'tab_uuid') and tab.tab_uuid == tab_uuid:
+                is_tab_exists = True
+                break
+        
+        # 如果标签页不存在于当前列表中，删除它
+        if not is_tab_exists:
             tab_file = CACHE_ROOT / f"{tab_uuid}.json"
             if tab_file.exists():
                 try:
@@ -154,7 +165,7 @@ def save_session(project_tabs: list):
             del index_data["tabs"][tab_uuid]
             index_changed = True
     
-    if existing_uuids:
+    if index_data["tabs"]:
         if index_changed:
             _save_index(index_data)
             logging.info(f"会话缓存已更新：{saved_count} 个标签页已保存，{skipped_count} 个未变化")
@@ -162,6 +173,12 @@ def save_session(project_tabs: list):
             logging.debug(f"会话缓存检查完成：{skipped_count} 个标签页均未变化，索引也未变化")
     else:
         clear_session()
+
+def load_index_only() -> dict:
+    """只加载索引文件，不加载标签页内容。"""
+    _ensure_cache_dir_exists()
+    index_data = _load_index()
+    return index_data
 
 def load_session() -> list | None:
     """从缓存文件加载会话状态。"""
@@ -187,6 +204,17 @@ def load_session() -> list | None:
         return session_data
     else:
         return None
+
+def load_tab_state(tab_uuid: str) -> dict | None:
+    """加载指定标签页的状态。"""
+    tab_file = CACHE_ROOT / f"{tab_uuid}.json"
+    if tab_file.exists():
+        try:
+            with open(tab_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            logging.error(f"标签页缓存文件 {tab_file} 格式错误或已损坏。")
+    return None
 
 def clear_session():
     """删除缓存文件。"""

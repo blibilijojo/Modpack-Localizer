@@ -151,7 +151,7 @@ class Extractor:
         
         return user_dict_by_key, user_dict_by_origin, community_dict_by_key
     
-    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None) -> ExtractionResult:
+    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None, stop_event=None) -> ExtractionResult:
         """从Mods文件夹中提取语言数据"""
         logging.info(f"  - 正在扫描Mods文件夹: {mods_dir}")
         
@@ -324,37 +324,46 @@ class Extractor:
     def _compute_curseforge_hash(self, file_path: Path) -> int:
         """计算CurseForge哈希值 (MurmurHash2)"""
         try:
+            h = 1  # 1 是种子
+            length = 0
             data = []
+            
             with open(file_path, "rb") as f:
-                for byte in f.read():
-                    if byte not in (9, 10, 13, 32):  # 跳过制表符、换行符、回车符和空格
-                        data.append(byte)
-            
-            length = len(data)
-            h = 1 ^ length  # 1 是种子
-            i = 0
-            
-            while i + 3 < length:
-                k = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24)
-                k = (k * 0x5BD1E995) & 0xFFFFFFFF
-                k = k ^ (k >> 24)
-                k = (k * 0x5BD1E995) & 0xFFFFFFFF
-                h = (h * 0x5BD1E995) & 0xFFFFFFFF
-                h = h ^ k
-                i += 4
+                # 分块读取文件，避免一次性加载大文件到内存
+                while True:
+                    chunk = f.read(8192)  # 8KB块
+                    if not chunk:
+                        break
+                    
+                    # 处理块中的每个字节
+                    for byte in chunk:
+                        if byte not in (9, 10, 13, 32):  # 跳过制表符、换行符、回车符和空格
+                            data.append(byte)
+                            length += 1
+                            
+                            # 每4个字节计算一次
+                            if len(data) == 4:
+                                k = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24)
+                                k = (k * 0x5BD1E995) & 0xFFFFFFFF
+                                k = k ^ (k >> 24)
+                                k = (k * 0x5BD1E995) & 0xFFFFFFFF
+                                h = (h * 0x5BD1E995) & 0xFFFFFFFF
+                                h = h ^ k
+                                data = []
             
             # 处理剩余字节
-            if i < length:
-                if length - i == 3:
-                    h = h ^ (data[i] | (data[i+1] << 8) | (data[i+2] << 16))
+            if data:
+                if len(data) == 3:
+                    h = h ^ (data[0] | (data[1] << 8) | (data[2] << 16))
                     h = (h * 0x5BD1E995) & 0xFFFFFFFF
-                elif length - i == 2:
-                    h = h ^ (data[i] | (data[i+1] << 8))
+                elif len(data) == 2:
+                    h = h ^ (data[0] | (data[1] << 8))
                     h = (h * 0x5BD1E995) & 0xFFFFFFFF
-                elif length - i == 1:
-                    h = h ^ data[i]
+                elif len(data) == 1:
+                    h = h ^ data[0]
                     h = (h * 0x5BD1E995) & 0xFFFFFFFF
             
+            h = h ^ length  # 异或长度
             h = h ^ (h >> 13)
             h = (h * 0x5BD1E995) & 0xFFFFFFFF
             h = h ^ (h >> 15)
@@ -364,18 +373,19 @@ class Extractor:
             logging.error(f"计算CurseForge哈希失败: {e}")
             return 0
     
-    def _extract_mod_info(self, jar_file: Path) -> tuple[str, str, str]:
+    def _extract_mod_info(self, jar_file: Path) -> tuple[str, str, str, str]:
         """从JAR文件中提取Mod信息"""
         mod_name = ""
         curseforge_hash = ""
         modrinth_hash = ""
-        
+        game_version = ""
+
         try:
             # 计算哈希值
             modrinth_hash = self._compute_modrinth_hash(jar_file)
             curseforge_hash = str(self._compute_curseforge_hash(jar_file))
-            
-            # 提取Mod名称
+
+            # 提取Mod名称和游戏版本
             with zipfile.ZipFile(jar_file, 'r') as zf:
                 # 尝试从mcmod.info提取
                 if 'mcmod.info' in zf.namelist():
@@ -388,126 +398,241 @@ class Extractor:
                                     mod_info = data[0]
                                     if 'name' in mod_info:
                                         mod_name = mod_info['name']
+                                    if 'mcversion' in mod_info:
+                                        game_version = mod_info['mcversion']
                                 elif isinstance(data, dict) and 'modList' in data:
                                     mod_list = data['modList']
                                     if isinstance(mod_list, list) and mod_list:
                                         mod_info = mod_list[0]
                                         if 'name' in mod_info:
                                             mod_name = mod_info['name']
+                                        if 'mcversion' in mod_info:
+                                            game_version = mod_info['mcversion']
                     except Exception as e:
                         logging.debug(f"读取mcmod.info失败: {e}")
-                
+
                 # 尝试从fabric.mod.json提取
-                if not mod_name and 'fabric.mod.json' in zf.namelist():
+                if 'fabric.mod.json' in zf.namelist():
                     try:
                         with zf.open('fabric.mod.json') as f:
                             content = f.read().decode('utf-8-sig')
                             if is_json_content(content):
                                 data = json.loads(content)
-                                if 'name' in data:
+                                if not mod_name and 'name' in data:
                                     mod_name = data['name']
+                                if not game_version:
+                                    if 'dependencies' in data and 'minecraft' in data['dependencies']:
+                                        game_version = data['dependencies']['minecraft']
+                                    elif 'contact' in data and 'minecraft' in data.get('contact', {}):
+                                        game_version = data['contact']['minecraft']
                     except Exception as e:
                         logging.debug(f"读取fabric.mod.json失败: {e}")
-                
+
                 # 尝试从mods.toml提取
-                if not mod_name and 'META-INF/mods.toml' in zf.namelist():
+                if 'META-INF/mods.toml' in zf.namelist():
                     try:
                         with zf.open('META-INF/mods.toml') as f:
                             content = f.read().decode('utf-8-sig')
-                            # 简单解析toml文件
-                            for line in content.split('\n'):
-                                line = line.strip()
-                                if line.startswith('displayName') or line.startswith('name'):
-                                    if '=' in line:
-                                        value = line.split('=', 1)[1].strip()
-                                        # 去除引号
+                            lines = content.split('\n')
+                            in_dependencies = False
+                            for i, line in enumerate(lines):
+                                line_stripped = line.strip()
+                                if not mod_name and (line_stripped.startswith('displayName') or line_stripped.startswith('name')):
+                                    if '=' in line_stripped:
+                                        value = line_stripped.split('=', 1)[1].strip()
                                         value = value.strip('"'"'"'')
                                         mod_name = value
-                                        break
+                                if not game_version:
+                                    if '[[dependencies' in line:
+                                        in_dependencies = True
+                                    elif in_dependencies and 'minecraft' in line_stripped.lower() and '=' in line_stripped:
+                                        value = line_stripped.split('=', 1)[1].strip()
+                                        value = value.strip('"'"'"'')
+                                        if self._is_version_string(value):
+                                            game_version = value
+                                        elif value.startswith('>=') or value.startswith('>'):
+                                            match = re.search(r'(\d+\.\d+(?:\.\d+)?)', value)
+                                            if match:
+                                                game_version = match.group(1)
+                                    elif ']]' in line:
+                                        in_dependencies = False
                     except Exception as e:
                         logging.debug(f"读取mods.toml失败: {e}")
-                
+
                 # 如果没有找到名称，使用文件名
                 if not mod_name:
                     mod_name = jar_file.stem
-                    # 移除常见的后缀
                     for suffix in ['.jar', '.zip', '.litemod']:
                         if mod_name.endswith(suffix):
                             mod_name = mod_name[:-len(suffix)]
-                    # 移除.disabled和.old后缀
                     mod_name = mod_name.replace('.disabled', '').replace('.old', '')
-                    
+
         except Exception as e:
             logging.error(f"提取Mod信息失败: {e}")
-            # 如果失败，使用文件名作为mod名称
             mod_name = jar_file.stem
+
+        if game_version:
+            logging.info(f"从JAR文件提取到游戏版本: {game_version} (文件: {jar_file.name})")
+
+        return mod_name, curseforge_hash, modrinth_hash, game_version
+    
+    def _is_version_string(self, value: str) -> bool:
+        """检查字符串是否为版本号格式"""
+        import re
+        version_pattern = r'^\d+\.\d+(\.\d+)?$'
+        return bool(re.match(version_pattern, value.strip()))
+    
+    def _match_github_version(self, game_version: str, loaders: str, github_versions: List[str]) -> str:
+        """匹配最适合的GitHub版本号
         
-        return mod_name, curseforge_hash, modrinth_hash
+        Args:
+            game_version: 当前游戏版本，如 "1.20.1"
+            loaders: 当前加载器，如 "forge"
+            github_versions: GitHub版本列表，如 ["1.12.2", "1.16-fabric", "1.16"]
+            
+        Returns:
+            最匹配的GitHub版本号
+        """
+        if not github_versions:
+            return ""
+        
+        # 解析游戏版本，提取主版本号（如 1.20.1 -> 1.20）
+        def get_main_version(version: str) -> str:
+            parts = version.split('.')
+            if len(parts) >= 2:
+                return f"{parts[0]}.{parts[1]}"
+            return version
+        
+        # 解析GitHub版本，提取版本号和加载器
+        version_info = []
+        for gh_version in github_versions:
+            if '-' in gh_version:
+                v, l = gh_version.rsplit('-', 1)
+                version_info.append((v, l, gh_version))
+            else:
+                version_info.append((gh_version, '', gh_version))
+        
+        main_game_version = get_main_version(game_version)
+        
+        # 优先匹配加载器和主版本号
+        for v, l, full_version in version_info:
+            if v == main_game_version and l == loaders:
+                return full_version
+        
+        # 匹配主版本号（优先选择没有指定加载器的版本）
+        for v, l, full_version in version_info:
+            if v == main_game_version and l == "":
+                return full_version
+        # 如果没有无加载器版本，再选择有加载器的版本
+        for v, l, full_version in version_info:
+            if v == main_game_version:
+                return full_version
+        
+        # 解析版本号为数字元组，用于比较
+        def version_to_tuple(version: str) -> tuple:
+            try:
+                parts = version.split('.')
+                return tuple(int(p) for p in parts if p.isdigit())
+            except:
+                return ()
+        
+        # 计算版本号之间的差异
+        def version_diff(v1: str, v2: str) -> int:
+            t1 = version_to_tuple(v1)
+            t2 = version_to_tuple(v2)
+            # 取较短的长度进行比较
+            min_len = min(len(t1), len(t2))
+            for i in range(min_len):
+                if t1[i] != t2[i]:
+                    return abs(t1[i] - t2[i])
+            # 如果前面的部分相同，返回长度差异
+            return abs(len(t1) - len(t2))
+        
+        # 按版本号差异排序，优先选择没有指定加载器的版本
+        version_info.sort(key=lambda x: (version_diff(main_game_version, x[0]), 0 if x[1] == "" else 1))
+        
+        return version_info[0][2] if version_info else ""
     
     def _get_mod_info_from_modrinth(self, modrinth_hashes: List[str]) -> Dict[str, Dict]:
         """从Modrinth获取模组信息"""
         if not modrinth_hashes:
             return {}
-        
+
         try:
-            # 步骤1：获取Hash与对应的工程ID
+            # 步骤1：获取Hash与对应的版本信息
             url = "https://api.modrinth.com/v2/version_files"
             headers = {"Content-Type": "application/json"}
             data = {
                 "hashes": modrinth_hashes,
                 "algorithm": "sha1"
             }
-            
+
             logging.info(f"从Modrinth API获取 {len(modrinth_hashes)} 个模组的信息...")
             response = requests.post(url, json=data, headers=headers, timeout=30)
             response.raise_for_status()
             modrinth_version = response.json()
-            
+
             logging.info(f"从Modrinth获取到 {len(modrinth_version)} 个本地模组的对应信息")
-            
+
             if not modrinth_version:
                 return {}
-            
-            # 提取project_id
+
+            # 提取project_id、game_versions和loaders
             project_ids = []
             hash_to_project = {}
+            hash_to_game_version = {}
+            hash_to_loaders = {}
             for hash_value, info in modrinth_version.items():
                 project_id = info.get("project_id")
                 if project_id:
                     project_ids.append(project_id)
                     hash_to_project[hash_value] = project_id
-            
+                game_versions = info.get("game_versions", [])
+                if game_versions:
+                    hash_to_game_version[hash_value] = game_versions[0]
+                # 存储第一个加载器，或者空字符串
+                loaders = info.get("loaders", [])
+                hash_to_loaders[hash_value] = loaders[0] if loaders else ""
+
             if not project_ids:
                 return {}
-            
+
             # 步骤2：获取工程信息
             url = f"https://api.modrinth.com/v2/projects?ids=[{','.join([f'\"{pid}\"' for pid in project_ids])}]"
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             project_info = response.json()
-            
+
             # 构建项目信息映射
             project_map = {}
             for project in project_info:
                 project_id = project.get("id")
                 if project_id:
                     project_map[project_id] = {
-                        "name": project.get("name"),
+                        "name": project.get("title"),
                         "slug": project.get("slug"),
-                        "url": f"https://modrinth.com/mod/{project.get('slug')}"
+                        "url": f"https://modrinth.com/mod/{project.get('slug')}",
+                        "game_versions": project.get("game_versions", [])
                     }
-            
+
             # 构建哈希到项目信息的映射
             result = {}
             for hash_value, project_id in hash_to_project.items():
                 if project_id in project_map:
-                    result[hash_value] = project_map[project_id]
-            
+                    result[hash_value] = project_map[project_id].copy()
+                    # 优先使用从version_id获取的游戏版本
+                    if hash_value in hash_to_game_version:
+                        result[hash_value]["game_version"] = hash_to_game_version[hash_value]
+                    elif result[hash_value].get("game_versions"):
+                        result[hash_value]["game_version"] = result[hash_value]["game_versions"][0]
+                    # 添加loaders字段，存储为字符串
+                    result[hash_value]["loaders"] = hash_to_loaders.get(hash_value, "")
+
             return result
         except Exception as e:
             logging.error(f"从Modrinth获取模组信息失败: {e}")
             return {}
-    
+
     def _get_mod_info_from_curseforge(self, curseforge_hashes: List[str]) -> Dict[str, Dict]:
         """从CurseForge获取模组信息"""
         if not curseforge_hashes:
@@ -521,46 +646,91 @@ class Extractor:
                 logging.warning("CurseForge API密钥未配置，请在设置中配置")
                 return {}
 
-            # 步骤1：获取Hash与对应的工程ID
-            url = "https://api.curseforge.com/v1/fingerprints/432"
+            # 尝试多个API源
+            base_urls = [
+                "https://api.curseforge.com",
+                "https://cfapi.mod.gg"
+            ]
+
             headers = {
                 "Content-Type": "application/json",
                 "x-api-key": api_key
             }
+
+            # 步骤1：获取Hash与对应的工程ID
+            fingerprint_url = f"{base_urls[0]}/v1/fingerprints/432"
             data = {
                 "fingerprints": [int(h) for h in curseforge_hashes]
             }
-            
+
             logging.info(f"从CurseForge API获取 {len(curseforge_hashes)} 个模组的信息...")
-            response = requests.post(url, json=data, headers=headers, timeout=30)
+            response = requests.post(fingerprint_url, json=data, headers=headers, timeout=30)
             response.raise_for_status()
             response_data = response.json()
             exact_matches = response_data.get("data", {}).get("exactMatches", [])
-            
+
             logging.info(f"从CurseForge获取到 {len(exact_matches)} 个本地模组的对应信息")
-            
+
             if not exact_matches:
                 return {}
-            
-            # 提取project_id
+
+            # 提取project_id和构建fingerprint到project_id的映射
             project_ids = []
-            hash_to_project = {}
+            hash_to_project_id = {}
             for match in exact_matches:
                 project_id = match.get("id")
-                fingerprint = str(match.get("file", {}).get("fileFingerprint"))
+                file_info = match.get("file", {})
+                fingerprint = str(file_info.get("fileFingerprint", ""))
                 if project_id and fingerprint:
                     project_ids.append(project_id)
-                    hash_to_project[fingerprint] = project_id
-            
+                    hash_to_project_id[fingerprint] = project_id
+
             if not project_ids:
                 return {}
-            
-            # 步骤2：获取工程信息
-            url = "https://api.curseforge.com/v1/mods"
-            headers = {
-                "Content-Type": "application/json",
-                "x-api-key": api_key
-            }
+
+            # 步骤2：从fingerprint响应中直接提取游戏版本和加载器信息
+            hash_to_game_version = {}
+            hash_to_loaders = {}
+            for match in exact_matches:
+                file_info = match.get("file", {})
+                fingerprint = str(file_info.get("fileFingerprint", ""))
+                game_versions = file_info.get("gameVersions", [])
+                
+                # 提取游戏版本
+                if game_versions:
+                    mc_version = None
+                    for v in game_versions:
+                        if isinstance(v, dict):
+                            if v.get("gameVersionName", "").lower() == "minecraft":
+                                mc_version = v.get("version")
+                                break
+                        elif isinstance(v, str):
+                            if re.match(r'^\d+\.\d+', v):
+                                mc_version = v
+                                break
+                    if mc_version:
+                        hash_to_game_version[fingerprint] = mc_version
+                        logging.info(f"从CurseForge获取游戏版本: fingerprint={fingerprint[:20]}... -> {mc_version}")
+                
+                # 提取加载器信息
+                loaders = []
+                for v in game_versions:
+                    if isinstance(v, dict):
+                        game_version_name = v.get("gameVersionName", "").lower()
+                        if game_version_name in ["forge", "fabric", "quilt", "neoforge"]:
+                            loaders.append(game_version_name)
+                    elif isinstance(v, str):
+                        if v.lower() in ["forge", "fabric", "quilt", "neoforge"]:
+                            loaders.append(v.lower())
+                
+                # 存储第一个加载器，或者空字符串
+                if loaders:
+                    hash_to_loaders[fingerprint] = loaders[0]
+                else:
+                    hash_to_loaders[fingerprint] = ""
+
+            # 步骤3：获取工程基本信息
+            url = f"{base_urls[0]}/v1/mods"
             data = {
                 "modIds": project_ids
             }
@@ -568,7 +738,7 @@ class Extractor:
             response.raise_for_status()
             response_data = response.json()
             project_info = response_data.get("data", [])
-            
+
             # 构建项目信息映射
             project_map = {}
             for project in project_info:
@@ -579,24 +749,28 @@ class Extractor:
                         "slug": project.get("slug"),
                         "url": f"https://www.curseforge.com/minecraft/mc-mods/{project.get('slug')}"
                     }
-            
+
             # 构建哈希到项目信息的映射
             result = {}
-            for hash_value, project_id in hash_to_project.items():
+            for hash_value, project_id in hash_to_project_id.items():
                 if project_id in project_map:
-                    result[hash_value] = project_map[project_id]
-            
+                    result[hash_value] = project_map[project_id].copy()
+                    if hash_value in hash_to_game_version:
+                        result[hash_value]["game_version"] = hash_to_game_version[hash_value]
+                    # 添加加载器信息
+                    result[hash_value]["loaders"] = hash_to_loaders.get(hash_value, "")
+
             return result
         except Exception as e:
             logging.error(f"从CurseForge获取模组信息失败: {e}")
             return {}
     
-    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None) -> ExtractionResult:
+    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None, stop_event=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("--- 阶段 1: 开始聚合所有语言数据 ---")
         
         # 从Mods中提取数据
-        result = self.extract_from_mods(mods_dir, progress_update_callback)
+        result = self.extract_from_mods(mods_dir, progress_update_callback, stop_event)
         
         # 从第三方汉化包中提取数据
         result.pack_chinese = self.extract_from_packs(zip_paths, result.master_english)
@@ -643,7 +817,7 @@ class Extractor:
                 jar_name = jar_file.name
                 
                 # 提取模组信息
-                mod_name, curseforge_hash, modrinth_hash = self._extract_mod_info(jar_file)
+                mod_name, curseforge_hash, modrinth_hash, game_version = self._extract_mod_info(jar_file)
                 
                 # 线程安全地更新共享数据
                 with mod_info_lock:
@@ -651,7 +825,8 @@ class Extractor:
                     mod_info_by_jar[jar_name] = {
                         'name': mod_name,
                         'curseforge_hash': curseforge_hash,
-                        'modrinth_hash': modrinth_hash
+                        'modrinth_hash': modrinth_hash,
+                        'game_version': game_version
                     }
                     
                     # 收集哈希值用于API查询
@@ -673,8 +848,12 @@ class Extractor:
                     if processed_count % 10 == 0 or processed_count == total_jars:
                         logging.info(f"已处理 {processed_count}/{total_jars} 个含语言文件的模组")
             
-            # 使用线程池处理JAR文件，设置32个线程
-            max_workers = 32
+            # 使用线程池处理JAR文件，根据CPU核心数设置线程数
+            import os
+            import concurrent.futures
+            
+            # 根据CPU核心数设置线程数，最多32个线程
+            max_workers = min(os.cpu_count() * 2, 32)
             logging.info(f"使用线程池处理，最大线程数: {max_workers}")
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -683,59 +862,116 @@ class Extractor:
                 
                 # 等待所有任务完成
                 for future in concurrent.futures.as_completed(futures):
+                    # 检查是否需要停止
+                    if stop_event and stop_event.is_set():
+                        logging.info("收到停止信号，正在取消线程池任务...")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise KeyboardInterrupt("用户取消了操作")
+                        
                     try:
                         future.result()
                     except Exception as e:
                         logging.error(f"处理JAR文件时发生错误: {e}")
             
-            # 从CurseForge获取信息
-            curseforge_info = self._get_mod_info_from_curseforge(curseforge_hashes)
+            logging.info(f"所有JAR文件处理完成，共处理 {len(jars_to_process)} 个文件")
             
-            # 收集未被CurseForge处理的模组的Modrinth哈希
-            unprocessed_modrinth_hashes = []
-            for jar_name, info in mod_info_by_jar.items():
-                if info['curseforge_hash'] not in curseforge_info and info['modrinth_hash']:
-                    unprocessed_modrinth_hashes.append(info['modrinth_hash'])
+            # 并行从CurseForge和Modrinth获取信息
+            curseforge_info = {}
+            modrinth_info = {}
             
-            # 从Modrinth获取未被CurseForge处理的模组信息
-            modrinth_info = self._get_mod_info_from_modrinth(unprocessed_modrinth_hashes)
+            # 定义获取CurseForge信息的函数
+            def get_curseforge_info():
+                return self._get_mod_info_from_curseforge(curseforge_hashes)
+            
+            # 定义获取Modrinth信息的函数
+            def get_modrinth_info():
+                # 收集所有Modrinth哈希
+                all_modrinth_hashes = []
+                for jar_name, info in mod_info_by_jar.items():
+                    if info['modrinth_hash']:
+                        all_modrinth_hashes.append(info['modrinth_hash'])
+                return self._get_mod_info_from_modrinth(all_modrinth_hashes)
+            
+            # 使用线程池并行执行API请求
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                # 提交任务
+                cf_future = executor.submit(get_curseforge_info)
+                mr_future = executor.submit(get_modrinth_info)
+                
+                # 等待任务完成
+                try:
+                    curseforge_info = cf_future.result()
+                except Exception as e:
+                    logging.error(f"获取CurseForge信息失败: {e}")
+                
+                try:
+                    modrinth_info = mr_future.result()
+                except Exception as e:
+                    logging.error(f"获取Modrinth信息失败: {e}")
             
             # 整合信息
             for jar_name, info in mod_info_by_jar.items():
-                # 模组名称优先使用API获取的名称
                 mod_name = info['name']
+                game_version = info.get('game_version', '')
+                source = 'JAR'
+
                 if info['curseforge_hash'] in curseforge_info:
-                    mod_name = curseforge_info[info['curseforge_hash']].get('name', mod_name)
+                    cf_info = curseforge_info[info['curseforge_hash']]
+                    mod_name = cf_info.get('name', mod_name)
+                    if cf_info.get('game_version'):
+                        game_version = cf_info.get('game_version', '')
+                        source = 'CurseForge'
+
+                if not game_version and info['modrinth_hash'] in modrinth_info:
+                    mr_info = modrinth_info[info['modrinth_hash']]
+                    mod_name = mr_info.get('name', mod_name)
+                    if mr_info.get('game_version'):
+                        game_version = mr_info.get('game_version', '')
+                        source = 'Modrinth'
+
+                # 获取加载器信息
+                loaders_info = ""
+                if source == 'CurseForge' and info['curseforge_hash'] in curseforge_info:
+                    loaders_info = curseforge_info[info['curseforge_hash']].get('loaders', "")
                 elif info['modrinth_hash'] in modrinth_info:
-                    mod_name = modrinth_info[info['modrinth_hash']].get('name', mod_name)
+                    loaders_info = modrinth_info[info['modrinth_hash']].get('loaders', "")
                 
+                logging.info(f"模组: {mod_name}, 版本: {game_version}, 加载器: {loaders_info}, 来源: {source}")
+
                 module_names.append({
                     'name': mod_name,
-                    'source': jar_name
+                    'source': jar_name,
+                    'game_version': game_version
                 })
-                
+
                 # CurseForge信息
                 if info['curseforge_hash']:
                     curseforge_entry = {
                         'curseforge_name': info['curseforge_hash'],
-                        'source': jar_name
+                        'source': jar_name,
+                        'game_version': game_version,
+                        'loaders': ""
                     }
                     if info['curseforge_hash'] in curseforge_info:
                         curseforge_entry['name'] = curseforge_info[info['curseforge_hash']].get('name')
                         curseforge_entry['slug'] = curseforge_info[info['curseforge_hash']].get('slug')
                         curseforge_entry['url'] = curseforge_info[info['curseforge_hash']].get('url')
+                        curseforge_entry['loaders'] = curseforge_info[info['curseforge_hash']].get('loaders', "")
                     curseforge_names.append(curseforge_entry)
-                
+
                 # Modrinth信息
                 if info['modrinth_hash']:
                     modrinth_entry = {
                         'modrinth_name': info['modrinth_hash'],
-                        'source': jar_name
+                        'source': jar_name,
+                        'game_version': game_version,
+                        'loaders': ""
                     }
                     if info['modrinth_hash'] in modrinth_info:
                         modrinth_entry['name'] = modrinth_info[info['modrinth_hash']].get('name')
                         modrinth_entry['slug'] = modrinth_info[info['modrinth_hash']].get('slug')
                         modrinth_entry['url'] = modrinth_info[info['modrinth_hash']].get('url')
+                        modrinth_entry['loaders'] = modrinth_info[info['modrinth_hash']].get('loaders', "")
                     modrinth_names.append(modrinth_entry)
         
         result.module_names = module_names

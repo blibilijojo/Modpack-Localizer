@@ -47,6 +47,9 @@ class Orchestrator:
                 settings=self.settings,
                 progress_callback=lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
             )
+            # 传递停止事件（如果存在）
+            if hasattr(self, 'stop_event'):
+                context.stop_event = self.stop_event
             
             try:
                 # 执行数据提取
@@ -58,6 +61,11 @@ class Orchestrator:
                 self.curseforge_names = getattr(extraction_result, 'curseforge_names', [])
                 # 保存Modrinth名称
                 self.modrinth_names = getattr(extraction_result, 'modrinth_names', [])
+            except KeyboardInterrupt:
+                # 捕获用户取消操作的异常，不显示错误信息
+                logging.info("用户取消了操作")
+                self.update_progress("操作已取消", -2)
+                return
             except Exception as agg_error:
                 logging.error(f"数据提取失败: {agg_error}", exc_info=True)
                 raise Exception(f"数据提取失败: {agg_error}")
@@ -125,6 +133,11 @@ class Orchestrator:
             try:
                 # 执行翻译决策
                 translation_result = self.workflow.run_translation(context)
+            except KeyboardInterrupt:
+                # 捕获用户取消操作的异常，不显示错误信息
+                logging.info("用户取消了操作")
+                self.update_progress("操作已取消", -2)
+                return
             except Exception as dec_error:
                 logging.error(f"翻译决策失败: {dec_error}", exc_info=True)
                 raise Exception(f"翻译决策失败: {dec_error}")
@@ -158,18 +171,15 @@ class Orchestrator:
                 curseforge_name = ""  # 默认设置为空字符串
                 modrinth_name = ""  # 默认设置为空字符串
                 git_name = ""  # 默认设置为空字符串
-                
+                game_version = ""  # 默认设置为空字符串
+
                 # 处理jar_name，移除(both formats)后缀和.jar后缀
                 jar_name_without_ext = jar_name
                 if " (both formats)" in jar_name_without_ext:
                     jar_name_without_ext = jar_name_without_ext.replace(" (both formats)", "")
                 if jar_name_without_ext.endswith('.jar'):
                     jar_name_without_ext = jar_name_without_ext[:-4]
-                
-                # 查找模组名称和git_name
-                curseforge_slug = ""
-                modrinth_slug = ""
-                
+
                 # 查找CurseForge信息
                 if jar_name_without_ext.lower() in curseforge_names_dict:
                     curseforge_entry = None
@@ -185,7 +195,10 @@ class Orchestrator:
                         # 从CurseForge获取git_name，使用slug
                         if 'slug' in curseforge_entry:
                             git_name = curseforge_entry['slug']
-                
+                        # 获取game_version
+                        if 'game_version' in curseforge_entry:
+                            game_version = curseforge_entry['game_version']
+
                 # 查找Modrinth信息
                 if jar_name_without_ext.lower() in modrinth_names_dict:
                     modrinth_entry = None
@@ -201,10 +214,23 @@ class Orchestrator:
                         # 从Modrinth获取git_name，使用slug并添加modrinth-前缀
                         if 'slug' in modrinth_entry:
                             git_name = f"modrinth-{modrinth_entry['slug']}"
+                        # 如果CurseForge没有game_version，尝试从Modrinth获取
+                        if not game_version and 'game_version' in modrinth_entry:
+                            game_version = modrinth_entry['game_version']
                 
                 # 查找模组名称（如果还没有设置）
                 if not mod_name and jar_name_without_ext.lower() in module_names_dict:
                     mod_name = module_names_dict[jar_name_without_ext.lower()]  # 使用提取到的模组名称
+                
+                # 初始化loaders字符串
+                loaders = ""
+                
+                # 优先从CurseForge获取loaders信息
+                if curseforge_entry and 'loaders' in curseforge_entry:
+                    loaders = curseforge_entry.get('loaders', "")
+                # 然后从Modrinth获取loaders信息
+                elif modrinth_entry and 'loaders' in modrinth_entry:
+                    loaders = modrinth_entry.get('loaders', "")
                 
                 workbench_data[ns] = {
                     'mod_name': mod_name,
@@ -213,6 +239,8 @@ class Orchestrator:
                     'curseforge_name': curseforge_name,
                     'modrinth_name': modrinth_name,
                     'git_name': git_name,
+                    'game_version': game_version,
+                    'loaders': loaders,
                     'items': items
                 }
             
@@ -225,6 +253,10 @@ class Orchestrator:
             logging.error(f"配置错误：{ve}")
             self.root.after(0, lambda: messagebox.showerror("配置错误", f"请检查配置后重试:\n{ve}"))
             self.update_progress(f"错误：{ve}", -1)
+        except KeyboardInterrupt:
+            # 捕获用户取消操作的异常，不显示错误信息
+            logging.info("用户取消了操作")
+            self.update_progress("操作已取消", -2)
         except Exception as e:
             logging.error(f"翻译处理阶段失败：{e}", exc_info=True)
             self.root.after(0, lambda: messagebox.showerror("处理失败", f"在处理文件时发生错误:\n{e}\n请查看日志获取更多详细信息。"))
@@ -299,6 +331,9 @@ class Orchestrator:
             
             # 创建工作流上下文
             context = self.workflow.create_context(settings=self.settings)
+            # 传递停止事件（如果存在）
+            if hasattr(self, 'stop_event'):
+                context.stop_event = self.stop_event
             
             # 手动构建提取结果对象（简化版）
             from core.models import ExtractionResult, NamespaceInfo
@@ -340,29 +375,38 @@ class Orchestrator:
                 self.update_progress("资源包生成成功！", 99)
             else:
                 raise RuntimeError(message)
+        except KeyboardInterrupt:
+            # 捕获用户取消操作的异常，不显示错误信息
+            logging.info("用户取消了操作")
+            self.update_progress("操作已取消", -2)
         except Exception as e:
             logging.error(f"构建资源包阶段失败: {e}", exc_info=True)
             self.root.after(0, lambda: messagebox.showerror("构建失败", f"构建资源包时发生错误:\n{e}"))
             self.update_progress(f"错误: {e}", -1)
     def run_workflow(self):
-        if not self.save_data:
-            self.log("项目数据未加载，无法直接运行完整工作流。", "ERROR")
-            self.update_progress("错误：项目数据未加载", -1)
-            return
-        self.log("从存档文件加载数据并启动工作台...", "INFO")
-        self.update_progress("正在加载项目...", 10)
-        self.raw_english_files = self.save_data.get('raw_english_files', {})
-        self.namespace_formats = self.save_data.get('namespace_formats', {})
-        self.module_names = self.save_data.get('module_names', [])
-        self.curseforge_names = self.save_data.get('curseforge_names', [])
-        self.modrinth_names = self.save_data.get('modrinth_names', [])
-        self.project_name = self.save_data.get('project_name', 'Unnamed_Project')
-        workbench_data = self.save_data.get('workbench_data', {})
-        
-        if not all([self.raw_english_files, self.namespace_formats, workbench_data]):
-            self.log("存档文件不完整，缺少核心数据。", "ERROR")
-            self.update_progress("错误：存档文件不完整", -1)
-            return
-        
-        # 使用 ProjectTab 的 _launch_workbench 回调来显示工作台
-        self.root.after(0, self._launch_workbench, workbench_data)
+        try:
+            if not self.save_data:
+                self.log("项目数据未加载，无法直接运行完整工作流。", "ERROR")
+                self.update_progress("错误：项目数据未加载", -1)
+                return
+            self.log("从存档文件加载数据并启动工作台...", "INFO")
+            self.update_progress("正在加载项目...", 10)
+            self.raw_english_files = self.save_data.get('raw_english_files', {})
+            self.namespace_formats = self.save_data.get('namespace_formats', {})
+            self.module_names = self.save_data.get('module_names', [])
+            self.curseforge_names = self.save_data.get('curseforge_names', [])
+            self.modrinth_names = self.save_data.get('modrinth_names', [])
+            self.project_name = self.save_data.get('project_name', 'Unnamed_Project')
+            workbench_data = self.save_data.get('workbench_data', {})
+            
+            if not all([self.raw_english_files, self.namespace_formats, workbench_data]):
+                self.log("存档文件不完整，缺少核心数据。", "ERROR")
+                self.update_progress("错误：存档文件不完整", -1)
+                return
+            
+            # 使用 ProjectTab 的 _launch_workbench 回调来显示工作台
+            self.root.after(0, self._launch_workbench, workbench_data)
+        except KeyboardInterrupt:
+            # 捕获用户取消操作的异常，不显示错误信息
+            logging.info("用户取消了操作")
+            self.update_progress("操作已取消", -2)

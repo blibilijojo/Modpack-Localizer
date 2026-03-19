@@ -38,6 +38,9 @@ class ProjectTab:
         self.tab_uuid = None
         self._is_fully_loaded = False
         self._restored_state_data = None
+        # 线程管理属性
+        self.background_threads = []
+        self.stop_event = threading.Event()
 
         self.project_type_var = tk.StringVar(value="mod")
         self.mods_dir_var = tk.StringVar()
@@ -49,6 +52,25 @@ class ProjectTab:
         self._create_widgets()
         self._show_welcome_view()
         self._toggle_log_pane()
+    
+    def add_background_thread(self, thread):
+        """添加后台线程到管理列表"""
+        self.background_threads.append(thread)
+    
+    def stop_all_threads(self):
+        """停止所有后台线程"""
+        # 设置停止事件
+        self.stop_event.set()
+        
+        # 遍历所有线程并尝试停止
+        for thread in self.background_threads:
+            if thread.is_alive():
+                # 对于守护线程，它们会在主线程退出时自动停止
+                # 这里主要是为了清理线程引用
+                pass
+        
+        # 清空线程列表
+        self.background_threads = []
 
     def get_state(self):
         if not self.workbench_instance:
@@ -127,6 +149,8 @@ class ProjectTab:
                 root_window=self.root,
                 log_callback=self.log_message
             )
+            # 传递停止事件
+            self.orchestrator.stop_event = self.stop_event
             self.orchestrator.raw_english_files = workbench_state['raw_english_files']
             self.orchestrator.namespace_formats = workbench_state['namespace_formats']
             finish_text = "完成并生成资源包"
@@ -312,6 +336,10 @@ class ProjectTab:
         quest_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
+        github_rb = ttk.Radiobutton(new_project_frame, text="从GitHub下载", variable=self.project_type_var, value="github", style="TRadiobutton")
+        github_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="从GitHub汉化仓库下载项目并创建标签页。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+
         ttk.Button(new_project_frame, text="下一步", command=self._show_setup_view, bootstyle="primary").pack(side="bottom", anchor="se")
 
         load_project_frame = tk_ttk.LabelFrame(container, text="继续已有项目", padding=20)
@@ -383,6 +411,10 @@ class ProjectTab:
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
             
             start_command = self._setup_new_quest_project
+        elif self.project_type == "github":
+            # 直接打开GitHub下载UI
+            self.main_window._open_github_download_ui()
+            return
         
         else:
             self._show_welcome_view()
@@ -501,8 +533,12 @@ class ProjectTab:
             root_window=self.root,
             log_callback=self.log_message
         )
+        # 传递停止事件
+        self.orchestrator.stop_event = self.stop_event
         self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config, None, "完成并生成资源包", save_session_after=True)
-        threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True).start()
+        thread = threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
 
     def _setup_new_quest_project(self):
         instance_dir = self.instance_dir_var.get()
@@ -529,10 +565,14 @@ class ProjectTab:
         self.quest_manager._launch_workbench = launch_quest_workbench
 
         def run_quest_build(trans_dict):
-            threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True).start()
+            thread = threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
         self._run_quest_build_phase = run_quest_build
 
-        threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True).start()
+        thread = threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
     
     def _setup_new_mod_search_project(self):
         output_dir = self.output_dir_var.get()
@@ -695,9 +735,13 @@ class ProjectTab:
         
         # 在后台线程中执行搜索
         if platform == "Modrinth":
-            threading.Thread(target=self.search_modrinth, args=(query, game_version, mod_loader), daemon=True).start()
+            thread = threading.Thread(target=self.search_modrinth, args=(query, game_version, mod_loader), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
         else:
-            threading.Thread(target=self.search_curseforge, args=(query, game_version, mod_loader), daemon=True).start()
+            thread = threading.Thread(target=self.search_curseforge, args=(query, game_version, mod_loader), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
     
     def search_modrinth(self, query, game_version=None, mod_loader=None):
         """执行Modrinth搜索请求"""
@@ -900,9 +944,13 @@ class ProjectTab:
         
         # 在后台线程中获取文件
         if mod.get("platform") == "Modrinth":
-            threading.Thread(target=self.get_mod_files, args=(project_id,), daemon=True).start()
+            thread = threading.Thread(target=self.get_mod_files, args=(project_id,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
         else:
-            threading.Thread(target=self.get_curseforge_files, args=(project_id,), daemon=True).start()
+            thread = threading.Thread(target=self.get_curseforge_files, args=(project_id,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
     
     def get_mod_files(self, project_id):
         """获取Modrinth模组文件"""
@@ -1125,7 +1173,9 @@ class ProjectTab:
         self.log_message(f"开始下载: {file_name}", "INFO")
         
         # 在后台线程中下载文件
-        threading.Thread(target=self.download_file, args=(download_url, file_name, file_info), daemon=True).start()
+        thread = threading.Thread(target=self.download_file, args=(download_url, file_name, file_info), daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
     
     def download_file(self, url, file_name, file_info):
         """下载文件"""
@@ -1260,6 +1310,8 @@ class ProjectTab:
             root_window=self.root,
             log_callback=self.log_message
         )
+        # 传递停止事件
+        self.orchestrator.stop_event = self.stop_event
         
         # 保存_launch_workbench方法的引用
         self.orchestrator._launch_workbench = lambda data: self._show_workbench_view(
@@ -1273,7 +1325,9 @@ class ProjectTab:
         )
         
         # 启动翻译流程
-        threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True).start()
+        thread = threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
 
     def _load_project(self):
         path = filedialog.askopenfilename(
@@ -1302,12 +1356,16 @@ class ProjectTab:
                 log_callback=self.log_message,
                 save_data=save_data, project_path=path
             )
+            # 传递停止事件
+            self.orchestrator.stop_event = self.stop_event
 
             def launch_loaded_workbench(data):
                 self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, settings, path, "完成并生成资源包", save_session_after=True)
             self.orchestrator._launch_workbench = launch_loaded_workbench
             
-            threading.Thread(target=self.orchestrator.run_workflow, daemon=True).start()
+            thread = threading.Thread(target=self.orchestrator.run_workflow, daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
 
         except Exception as e:
             ui_utils.show_error("加载失败", f"无法加载或解析项目文件：\n{e}", parent=self.root)
@@ -1382,7 +1440,9 @@ class ProjectTab:
         final_pack_settings['pack_as_zip'] = config.get("pack_as_zip", False)
 
         self._prepare_ui_for_workflow(stage=2)
-        threading.Thread(target=self.orchestrator.run_build_phase, args=(final_pack_settings,), daemon=True).start()
+        thread = threading.Thread(target=self.orchestrator.run_build_phase, args=(final_pack_settings,), daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
 
 class MainWindow:
     def __init__(self, root: ttk.Window):
@@ -1436,12 +1496,14 @@ class MainWindow:
             session_manager.clear_session()
 
     def _load_session_on_startup(self):
-        session_data = session_manager.load_session()
-        if session_data:
-            self._dispatch_log_to_active_tab(f"检测到 {len(session_data)} 个未关闭的标签页，正在恢复...", "INFO")
+        # 先加载索引文件，获取所有标签页的信息
+        index_data = session_manager.load_index_only()
+        if index_data and index_data.get("tabs"):
+            tab_count = len(index_data["tabs"])
+            self._dispatch_log_to_active_tab(f"检测到 {tab_count} 个未关闭的标签页，正在恢复...", "INFO")
+            
+            # 移除初始标签页
             initial_tab_id = list(self.project_tabs.keys())[0]
-            # 保存初始标签页的关闭，不保存会话（避免清除已加载的缓存）
-            # 先获取关闭标签页的索引
             project_tab_ids = [tid for tid in self.notebook.tabs() if tid in self.project_tabs]
             try:
                 closed_project_index = project_tab_ids.index(initial_tab_id)
@@ -1458,12 +1520,17 @@ class MainWindow:
                 self.notebook.forget(close_tab_id)
                 del self.close_tab_map[close_tab_id]
             
-            # 恢复会话标签页
-            for tab_state in session_data:
-                new_tab = self._add_new_tab()
-                new_tab.restore_from_state(tab_state)
+            # 只根据索引文件创建所有标签页，不加载任何内容
+            for tab_uuid, tab_name in index_data["tabs"].items():
+                new_tab = self._add_new_tab(select_tab=False)
+                # 设置标签页名称
+                self.update_tab_title(new_tab.tab_id, tab_name)
+                # 保存标签页UUID，以便后续切换时加载
+                new_tab.tab_uuid = tab_uuid
+            
+            self._dispatch_log_to_active_tab(f"已创建 {tab_count} 个标签页，未加载任何标签页内容", "INFO")
         else:
-             self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
+            self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
 
     def _create_menu(self):
         """创建Windows原生菜单栏"""
@@ -1557,8 +1624,16 @@ class MainWindow:
         current_tab = self._get_current_tab()
         
         if current_tab:
-            if not current_tab.workbench_instance and current_tab._restored_state_data and not current_tab._is_fully_loaded:
-                current_tab._lazy_load_workbench()
+            # 检查是否需要加载标签页状态
+            if not current_tab.workbench_instance and not current_tab._is_fully_loaded:
+                # 如果有 _restored_state_data，直接加载
+                if current_tab._restored_state_data:
+                    current_tab._lazy_load_workbench()
+                # 如果没有 _restored_state_data 但有 tab_uuid，加载状态
+                elif current_tab.tab_uuid:
+                    tab_state = session_manager.load_tab_state(current_tab.tab_uuid)
+                    if tab_state:
+                        current_tab.restore_from_state(tab_state)
         
         state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
         
@@ -1793,7 +1868,7 @@ class MainWindow:
         if clicked_tab_id in self.project_tabs:
             return
 
-    def _add_new_tab(self):
+    def _add_new_tab(self, select_tab=True):
         self.tab_counter += 1
         
         project_tab = ProjectTab(self.notebook, self.root, self)
@@ -1811,13 +1886,14 @@ class MainWindow:
         self.notebook.tab(close_tab_id, padding=[4, 1, 4, 1])
         self.close_tab_map[close_tab_id] = tab_id
 
-        self.notebook.select(tab_id)
-        # 确保标签页内容正确显示
-        self.notebook.update_idletasks()
-        project_tab.frame.update_idletasks()
-        if project_tab.content_frame:
-            project_tab.content_frame.update_idletasks()
-        self.update_menu_state()
+        if select_tab:
+            self.notebook.select(tab_id)
+            # 确保标签页内容正确显示
+            self.notebook.update_idletasks()
+            project_tab.frame.update_idletasks()
+            if project_tab.content_frame:
+                project_tab.content_frame.update_idletasks()
+            self.update_menu_state()
         return project_tab
     
     def _reset_active_tab(self):
@@ -1875,6 +1951,9 @@ class MainWindow:
         else:
             tab_id_to_select = None
 
+        # 停止标签页的所有后台线程
+        tab_to_close.stop_all_threads()
+        
         if tab_to_close.workbench_instance:
             tab_to_close.workbench_instance._on_close_request(force_close=True)
         
@@ -1903,6 +1982,31 @@ class MainWindow:
 
         self.update_menu_state()
         self._save_current_session()
+        
+    def _open_github_download_ui(self):
+        """打开GitHub下载UI"""
+        # 获取当前选中的标签页
+        current_tab_id = self.notebook.select()
+        if current_tab_id in self.project_tabs:
+            project_tab = self.project_tabs[current_tab_id]
+            
+            # 清空内容框架
+            project_tab._clear_content_frame()
+            
+            # 加载GitHub配置
+            from utils import config_manager
+            config = config_manager.load_config()
+            github_config = config.get('github', {})
+            
+            # 导入GitHubDownloadUI
+            from gui.github_download_ui import GitHubDownloadUI
+            
+            # 创建GitHubDownloadUI实例，使用标签页的内容框架作为父容器
+            download_ui = GitHubDownloadUI(project_tab.content_frame, self, github_config)
+            download_ui.pack(fill="both", expand=True)
+            
+            # 更新标签页标题
+            self.update_tab_title(current_tab_id, "从GitHub下载")
         
     def _on_drag_start(self, event):
         """开始拖拽标签"""

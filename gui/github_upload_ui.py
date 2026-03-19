@@ -442,8 +442,38 @@ class GitHubUploadUI(tk.Frame):
         self.branch_var.set(namespace)
         # 自动填充模组名称（会同时更新 project_name_var）
         self._auto_fill_mod_name()
+        # 自动匹配版本号
+        self._auto_match_version()
         # 更新路径显示
         self._update_path_display()
+    
+    def _auto_match_version(self):
+        """自动匹配最适合的GitHub版本号"""
+        if hasattr(self.workbench, 'ns_tree'):
+            selection = self.workbench.ns_tree.selection()
+            if selection:
+                current_mod = selection[0]
+                if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
+                    mod_data = self.workbench.translation_data[current_mod]
+                    # 获取游戏版本和加载器信息
+                    game_version = mod_data.get('game_version', '')
+                    loaders = mod_data.get('loaders', '')
+                    
+                    # 获取GitHub版本列表
+                    versions = list(self.version_combo['values'])
+                    if not versions:
+                        # 如果下拉框中没有版本，尝试从配置中获取
+                        from utils import config_manager
+                        config = config_manager.load_config()
+                        versions = config.get('github_versions', [])
+                    
+                    if versions and game_version:
+                        # 使用提取器的版本匹配方法
+                        from core.extractor import Extractor
+                        extractor = Extractor()
+                        matched_version = extractor._match_github_version(game_version, loaders, versions)
+                        if matched_version:
+                            self.version_var.set(matched_version)
     
     def _auto_fill_mod_name(self):
         """自动填充模组名称"""

@@ -255,10 +255,6 @@ class GitHubDownloadUI(tk.Frame):
                         if current_tab_id in self.main_window.project_tabs:
                             project_tab = self.main_window.project_tabs[current_tab_id]
                             
-                            # 初始化工作区
-                            project_tab._initialize_workbench()
-                            workbench = project_tab.workbench_instance
-                            
                             # 设置项目信息
                             project_tab.project_name = project_info['project_name']
                             project_tab.project_type = "mod"
@@ -269,11 +265,11 @@ class GitHubDownloadUI(tk.Frame):
                             }
                             
                             # 更新标签页标题
-                            self.main_window._update_tab_title(current_tab_id, project_info['project_name'])
+                            self.main_window.update_tab_title(current_tab_id, project_info['project_name'])
                             
-                            # 加载翻译数据
-                            workbench.translation_data = {}
-                            workbench.raw_english_files = data['raw_english_files']
+                            # 构建翻译数据
+                            workbench_data = {}
+                            namespace_formats = {}
                             
                             for namespace, translations in data['translations'].items():
                                 items = []
@@ -284,8 +280,8 @@ class GitHubDownloadUI(tk.Frame):
                                         'zh': value,
                                         'status': 'completed' if value else 'pending'
                                     })
-                                
-                                workbench.translation_data[namespace] = {
+                                # 构建TranslationWorkbench期望的格式
+                                workbench_data[namespace] = {
                                     'items': items,
                                     'jar_name': project_info['project_name'],
                                     'mod_name': project_info['project_name'],
@@ -293,12 +289,19 @@ class GitHubDownloadUI(tk.Frame):
                                     'game_version': project_info['version']
                                 }
                             
-                            # 更新命名空间树
-                            workbench._populate_namespace_tree()
+                            # 显示工作区
+                            project_tab._show_workbench_view(
+                                workbench_data=workbench_data,
+                                namespace_formats=namespace_formats,
+                                raw_english_files=data['raw_english_files'],
+                                current_settings={},
+                                project_path=None,
+                                finish_button_text="完成",
+                                save_session_after=False
+                            )
                             
                             # 显示成功消息
-                            if hasattr(workbench, 'status_label'):
-                                workbench.status_label.config(text=f"成功下载项目: {project_info['project_name']}")
+                            self.status_var.set(f"成功下载项目: {project_info['project_name']}")
                     
                     self.after(0, show_workbench)
                 else:

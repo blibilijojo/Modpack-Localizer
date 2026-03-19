@@ -256,62 +256,62 @@ class GitHubDownloadUI(tk.Frame):
                 success, data, message = github_service.download_project_translations(project_info)
                 
                 if success:
-                    # 创建新标签页
-                    def create_tab():
+                    # 在当前标签页中显示翻译工作台
+                    def show_workbench():
                         if not self.winfo_exists():
                             return
                         
-                        # 添加新标签页
-                        project_tab = self.main_window._add_new_tab()
-                        tab_id = project_tab.tab_id
-                        
-                        # 初始化工作区
-                        project_tab._initialize_workbench()
-                        workbench = project_tab.workbench_instance
-                        
-                        # 设置项目信息
-                        project_tab.project_name = project_info['project_name']
-                        project_tab.project_type = "mod"
-                        project_tab.project_info = {
-                            'mod_name': project_info['project_name'],
-                            'namespace': project_info['namespace'],
-                            'game_version': project_info['version']
-                        }
-                        
-                        # 更新标签页标题
-                        self.main_window._update_tab_title(tab_id, project_info['project_name'])
-                        
-                        # 加载翻译数据
-                        workbench.translation_data = {}
-                        workbench.raw_english_files = data['raw_english_files']
-                        
-                        for namespace, translations in data['translations'].items():
-                            items = []
-                            for key, value in translations.items():
-                                items.append({
-                                    'key': key,
-                                    'en': key,  # 使用key作为英文原文
-                                    'zh': value,
-                                    'status': 'completed' if value else 'pending'
-                                })
+                        # 获取当前标签页
+                        current_tab_id = self.main_window.notebook.select()
+                        if current_tab_id in self.main_window.project_tabs:
+                            project_tab = self.main_window.project_tabs[current_tab_id]
                             
-                            workbench.translation_data[namespace] = {
-                                'items': items,
-                                'jar_name': project_info['project_name'],
+                            # 初始化工作区
+                            project_tab._initialize_workbench()
+                            workbench = project_tab.workbench_instance
+                            
+                            # 设置项目信息
+                            project_tab.project_name = project_info['project_name']
+                            project_tab.project_type = "mod"
+                            project_tab.project_info = {
                                 'mod_name': project_info['project_name'],
-                                'namespace': namespace,
+                                'namespace': project_info['namespace'],
                                 'game_version': project_info['version']
                             }
-                        
-                        # 更新命名空间树
-                        workbench._populate_namespace_tree()
-                        
-                        # 显示成功消息
-                        self.status_var.set(f"成功下载项目: {project_info['project_name']}")
-                        if hasattr(workbench, 'status_label'):
-                            workbench.status_label.config(text=f"成功下载项目: {project_info['project_name']}")
+                            
+                            # 更新标签页标题
+                            self.main_window._update_tab_title(current_tab_id, project_info['project_name'])
+                            
+                            # 加载翻译数据
+                            workbench.translation_data = {}
+                            workbench.raw_english_files = data['raw_english_files']
+                            
+                            for namespace, translations in data['translations'].items():
+                                items = []
+                                for key, value in translations.items():
+                                    items.append({
+                                        'key': key,
+                                        'en': key,  # 使用key作为英文原文
+                                        'zh': value,
+                                        'status': 'completed' if value else 'pending'
+                                    })
+                                
+                                workbench.translation_data[namespace] = {
+                                    'items': items,
+                                    'jar_name': project_info['project_name'],
+                                    'mod_name': project_info['project_name'],
+                                    'namespace': namespace,
+                                    'game_version': project_info['version']
+                                }
+                            
+                            # 更新命名空间树
+                            workbench._populate_namespace_tree()
+                            
+                            # 显示成功消息
+                            if hasattr(workbench, 'status_label'):
+                                workbench.status_label.config(text=f"成功下载项目: {project_info['project_name']}")
                     
-                    self.after(0, create_tab)
+                    self.after(0, show_workbench)
                 else:
                     self.status_var.set(f"下载项目失败: {message}")
                     

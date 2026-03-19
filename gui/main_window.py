@@ -1996,7 +1996,11 @@ class MainWindow:
             # 加载GitHub配置
             from utils import config_manager
             config = config_manager.load_config()
-            github_config = config.get('github', {})
+            # 正确获取GitHub配置，使用github_repo和github_token键
+            github_config = {
+                'repo': config.get('github_repo', ''),
+                'token': config.get('github_token', '')
+            }
             
             # 导入GitHubDownloadUI
             from gui.github_download_ui import GitHubDownloadUI

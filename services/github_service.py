@@ -641,6 +641,9 @@ class GitHubService:
             tuple: (success, projects, message)
         """
         try:
+            # 从仓库地址中提取用户名
+            repo_owner = self.repo.split('/')[0] if '/' in self.repo else self.repo
+            
             # 列出projects目录
             success, files, message = self.list_files('projects', branch)
             if not success:
@@ -671,9 +674,9 @@ class GitHubService:
                             if not success:
                                 continue
                             
-                            # 遍历项目目录
+                            # 遍历项目目录，只获取与仓库所有者同名的项目
                             for project_item in assets_files:
-                                if project_item['type'] == 'dir':
+                                if project_item['type'] == 'dir' and project_item['name'] == repo_owner:
                                     project_name = project_item['name']
                                     project_path = f'{assets_path}/{project_name}'
                                     

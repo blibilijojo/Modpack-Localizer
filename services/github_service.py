@@ -702,7 +702,8 @@ class GitHubService:
                             version_name = parts[1]
                             project_name = parts[3]
                             namespace = parts[4]
-                            lang_path = '/'.join(parts[:5]) + '/lang'
+                            # 保持完整的文件路径，包括zh_cn.json
+                            lang_path = file_path
                             
                             # 如果指定了版本，只处理该版本
                             if version and version_name != version:
@@ -747,29 +748,21 @@ class GitHubService:
                     # 如果解析失败，返回错误
                     return False, None, '项目信息格式错误'
             
-            # 保存当前仓库
-            original_repo = self.repo
-            try:
-                # 临时切换到上游仓库
-                self.repo = self.upstream_repo
-                
-                # 使用pull请求的分支（如果有）
-                download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
-                
-                # 下载zh_cn.json文件
-                zh_cn_path = f"{project_info['path']}/zh_cn.json"
-                success, zh_cn_content, message = self.download_file(zh_cn_path, download_branch)
-                if not success:
-                    return False, None, f'下载中文翻译文件失败: {message}'
-                
-                # 下载en_us.json文件
-                en_us_path = f"{project_info['path']}/en_us.json"
-                success, en_us_content, message = self.download_file(en_us_path, download_branch)
-                if not success:
-                    return False, None, f'下载英文原文文件失败: {message}'
-            finally:
-                # 恢复原来的仓库
-                self.repo = original_repo
+            # 使用用户的复刻仓库，而不是上游仓库
+            # 使用pull请求的分支（如果有）
+            download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
+            
+            # 下载zh_cn.json文件
+            zh_cn_path = f"{project_info['path']}"
+            success, zh_cn_content, message = self.download_file(zh_cn_path, download_branch)
+            if not success:
+                return False, None, f'下载中文翻译文件失败: {message}'
+            
+            # 下载en_us.json文件
+            en_us_path = f"{project_info['path'].replace('zh_cn.json', 'en_us.json')}"
+            success, en_us_content, message = self.download_file(en_us_path, download_branch)
+            if not success:
+                return False, None, f'下载英文原文文件失败: {message}'
             
             # 解析JSON文件
             import json

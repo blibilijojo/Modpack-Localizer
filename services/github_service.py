@@ -31,7 +31,7 @@ class GitHubService:
         # 正则表达式模式，与 Builder 类相同
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
         # 记录初始化参数
-        logging.info(f'初始化 GitHubService: repo={self.repo}, branch={self.branch}, push_to_upstream={self.push_to_upstream}, upstream_branch={self.upstream_branch}, upstream_repo={self.upstream_repo}, delete_branch_before_push={self.delete_branch_before_push}')
+        logging.info(f'初始化GitHub服务: 仓库={self.repo}, 分支={self.branch}, 推送到源仓库={self.push_to_upstream}, 上游分支={self.upstream_branch}, 上游仓库={self.upstream_repo}, 推送前删除分支={self.delete_branch_before_push}')
     
     def _build_json_file(self, template_content: str, translations: dict) -> str:
         """
@@ -641,69 +641,88 @@ class GitHubService:
             tuple: (success, projects, message)
         """
         try:
-            # 从仓库地址中提取用户名
-            repo_owner = self.repo.split('/')[0] if '/' in self.repo else self.repo
+            # 从上游仓库的pull请求中获取项目
+            # 保存当前仓库
+            original_repo = self.repo
             
-            # 列出projects目录
-            success, files, message = self.list_files('projects', branch)
-            if not success:
-                return False, None, message
+            # 从仓库地址中提取用户名
+            user_login = self.repo.split('/')[0] if '/' in self.repo else self.repo
+            
+            try:
+                # 临时切换到上游仓库
+                self.repo = self.upstream_repo
+                
+                # 获取所有open的pull请求
+                endpoint = f'/repos/{self.repo}/pulls'
+                params = {'state': 'open'}
+                pull_requests = self._make_request('GET', endpoint, params=params)
+                if not pull_requests:
+                    return False, None, '未找到pull请求'
+            finally:
+                # 恢复原来的仓库
+                self.repo = original_repo
             
             projects = []
+            processed_paths = set()  # 用于去重
             
-            # 遍历版本目录
-            for item in files:
-                if item['type'] == 'dir':
-                    version_name = item['name']
-                    
-                    # 如果指定了版本，只处理该版本
-                    if version and version_name != version:
+            # 遍历每个pull请求，只处理用户自己的PR
+            for pr in pull_requests:
+                pr_user = pr.get('user', {})
+                pr_user_login = pr_user.get('login')
+                
+                # 只处理用户自己的PR
+                if pr_user_login != user_login:
+                    continue
+                
+                pr_number = pr.get('number')
+                pr_title = pr.get('title')
+                pr_head = pr.get('head', {})
+                pr_branch = pr_head.get('ref')
+                
+                # 获取pull请求中的文件
+                try:
+                    # 临时切换到上游仓库
+                    self.repo = self.upstream_repo
+                    endpoint = f'/repos/{self.repo}/pulls/{pr_number}/files'
+                    pr_files = self._make_request('GET', endpoint)
+                    if not pr_files:
                         continue
-                    
-                    # 列出版本目录下的内容
-                    version_path = f'projects/{version_name}'
-                    success, version_files, message = self.list_files(version_path, branch)
-                    if not success:
-                        continue
-                    
-                    # 遍历assets目录
-                    for asset_item in version_files:
-                        if asset_item['type'] == 'dir' and asset_item['name'] == 'assets':
-                            assets_path = f'{version_path}/assets'
-                            success, assets_files, message = self.list_files(assets_path, branch)
-                            if not success:
+                finally:
+                    # 恢复原来的仓库
+                    self.repo = original_repo
+                
+                # 遍历pull请求中的文件
+                for file in pr_files:
+                    file_path = file.get('filename')
+                    # 检查文件路径是否符合项目结构
+                    if file_path and 'projects/' in file_path and '/lang/zh_cn.json' in file_path:
+                        # 提取项目信息
+                        parts = file_path.split('/')
+                        if len(parts) >= 6:
+                            version_name = parts[1]
+                            project_name = parts[3]
+                            namespace = parts[4]
+                            lang_path = '/'.join(parts[:5]) + '/lang'
+                            
+                            # 如果指定了版本，只处理该版本
+                            if version and version_name != version:
                                 continue
                             
-                            # 遍历项目目录，只获取与仓库所有者同名的项目
-                            for project_item in assets_files:
-                                if project_item['type'] == 'dir' and project_item['name'] == repo_owner:
-                                    project_name = project_item['name']
-                                    project_path = f'{assets_path}/{project_name}'
-                                    
-                                    # 列出项目目录下的命名空间
-                                    success, namespace_files, message = self.list_files(project_path, branch)
-                                    if not success:
-                                        continue
-                                    
-                                    for namespace_item in namespace_files:
-                                        if namespace_item['type'] == 'dir':
-                                            namespace = namespace_item['name']
-                                            lang_path = f'{project_path}/{namespace}/lang'
-                                            
-                                            # 检查lang目录是否存在
-                                            success, lang_files, message = self.list_files(lang_path, branch)
-                                            if success:
-                                                # 检查是否有zh_cn.json文件
-                                                has_zh_cn = any(file['name'] == 'zh_cn.json' for file in lang_files)
-                                                if has_zh_cn:
-                                                    projects.append({
-                                                        'version': version_name,
-                                                        'project_name': project_name,
-                                                        'namespace': namespace,
-                                                        'path': lang_path
-                                                    })
+                            # 去重
+                            project_key = f'{version_name}_{project_name}_{namespace}'
+                            if project_key not in processed_paths:
+                                processed_paths.add(project_key)
+                                projects.append({
+                                    'version': version_name,
+                                    'project_name': project_name,
+                                    'namespace': namespace,
+                                    'path': lang_path,
+                                    'pr_number': pr_number,
+                                    'pr_title': pr_title,
+                                    'pr_branch': pr_branch
+                                })
             
-            return True, projects, f'成功获取 {len(projects)} 个项目'
+            return True, projects, f'成功从上游仓库的pull请求中获取 {len(projects)} 个项目'
         except Exception as e:
             return False, None, f'获取项目列表失败: {str(e)}'
     
@@ -711,24 +730,46 @@ class GitHubService:
         """下载项目的翻译文件
         
         Args:
-            project_info: 项目信息，包含version、project_name、namespace、path
+            project_info: 项目信息，包含version、project_name、namespace、path、pr_branch
             branch: 分支名称，默认使用实例的branch属性
             
         Returns:
             tuple: (success, translations, message)
         """
         try:
-            # 下载zh_cn.json文件
-            zh_cn_path = f"{project_info['path']}/zh_cn.json"
-            success, zh_cn_content, message = self.download_file(zh_cn_path, branch)
-            if not success:
-                return False, None, f'下载中文翻译文件失败: {message}'
+            # 检查project_info是否为字符串，如果是，尝试解析
+            if isinstance(project_info, str):
+                import json
+                try:
+                    # 尝试将字符串解析为JSON
+                    project_info = json.loads(project_info)
+                except:
+                    # 如果解析失败，返回错误
+                    return False, None, '项目信息格式错误'
             
-            # 下载en_us.json文件
-            en_us_path = f"{project_info['path']}/en_us.json"
-            success, en_us_content, message = self.download_file(en_us_path, branch)
-            if not success:
-                return False, None, f'下载英文原文文件失败: {message}'
+            # 保存当前仓库
+            original_repo = self.repo
+            try:
+                # 临时切换到上游仓库
+                self.repo = self.upstream_repo
+                
+                # 使用pull请求的分支（如果有）
+                download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
+                
+                # 下载zh_cn.json文件
+                zh_cn_path = f"{project_info['path']}/zh_cn.json"
+                success, zh_cn_content, message = self.download_file(zh_cn_path, download_branch)
+                if not success:
+                    return False, None, f'下载中文翻译文件失败: {message}'
+                
+                # 下载en_us.json文件
+                en_us_path = f"{project_info['path']}/en_us.json"
+                success, en_us_content, message = self.download_file(en_us_path, download_branch)
+                if not success:
+                    return False, None, f'下载英文原文文件失败: {message}'
+            finally:
+                # 恢复原来的仓库
+                self.repo = original_repo
             
             # 解析JSON文件
             import json
@@ -744,6 +785,6 @@ class GitHubService:
             raw_english_files = {}
             raw_english_files[namespace] = en_us_content
             
-            return True, {'translations': translations, 'raw_english_files': raw_english_files}, '成功下载项目翻译文件'
+            return True, {'translations': translations, 'raw_english_files': raw_english_files}, '成功从上游仓库的pull请求中下载项目翻译文件'
         except Exception as e:
             return False, None, f'下载项目翻译失败: {str(e)}'

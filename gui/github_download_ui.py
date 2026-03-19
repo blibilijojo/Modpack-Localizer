@@ -11,11 +11,8 @@ class GitHubDownloadUI(tk.Frame):
         self.main_window = main_window_instance
         self.github_config = github_config or {}
         
-        # 从配置中加载最后使用的版本号和版本列表
-        from utils import config_manager
-        config = config_manager.load_config()
-        self.last_used_version = config.get('last_used_version', '1.21')
-        self.saved_versions = config.get('github_versions', [])
+        # 用于存储项目信息的字典，键是item ID，值是项目信息
+        self.project_info_map = {}
         
         # 初始化 UI
         self._create_widgets()
@@ -34,28 +31,19 @@ class GitHubDownloadUI(tk.Frame):
         form_frame.columnconfigure(1, weight=1, minsize=450)
         form_frame.columnconfigure(2, weight=0, minsize=100)
         
-        # 版本号输入（改为下拉选择形式）
-        ttk.Label(form_frame, text="版本号:").grid(row=0, column=0, sticky="w", padx=5, pady=8)
-        self.version_var = tk.StringVar(value=self.last_used_version)
-        self.version_combo = ttk.Combobox(form_frame, textvariable=self.version_var, width=60, state="readonly")
-        if self.saved_versions:
-            self.version_combo['values'] = self.saved_versions
-        # 绑定ComboboxSelected事件，取消自动选中
-        self.version_combo.bind("<<ComboboxSelected>>", lambda e: self.version_combo.selection_clear())
-        self.version_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=8)
-        # 获取版本按钮
-        self.get_versions_btn = ttk.Button(form_frame, text="获取版本", command=self._get_versions, bootstyle="primary-outline")
-        self.get_versions_btn.grid(row=0, column=2, sticky="e", padx=5, pady=8)
+
         
         # 项目列表
         ttk.Label(form_frame, text="项目列表:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
-        self.project_list = ttk.Treeview(form_frame, columns=("project", "namespace", "version"), show="headings", height=10)
+        self.project_list = ttk.Treeview(form_frame, columns=("project", "namespace", "version", "pr"), show="headings", height=10)
         self.project_list.heading("project", text="项目名称")
         self.project_list.heading("namespace", text="命名空间")
         self.project_list.heading("version", text="版本")
-        self.project_list.column("project", width=200, anchor="w")
-        self.project_list.column("namespace", width=150, anchor="w")
+        self.project_list.heading("pr", text="PR")
+        self.project_list.column("project", width=150, anchor="w")
+        self.project_list.column("namespace", width=120, anchor="w")
         self.project_list.column("version", width=80, anchor="center")
+        self.project_list.column("pr", width=200, anchor="w")
         self.project_list.grid(row=1, column=1, sticky="ew", padx=5, pady=8, columnspan=2)
         
         # 滚动条
@@ -164,11 +152,6 @@ class GitHubDownloadUI(tk.Frame):
             self.status_var.set("请先在设置中配置GitHub仓库地址和访问令牌")
             return
         
-        version = self.version_var.get().strip()
-        if not version:
-            self.status_var.set("请选择版本号")
-            return
-        
         self.status_var.set("正在获取项目列表...")
         self.get_projects_btn.config(state="disabled")
         
@@ -182,8 +165,8 @@ class GitHubDownloadUI(tk.Frame):
                     self.github_config['token']
                 )
                 
-                # 获取项目列表
-                success, projects, message = github_service.get_projects(version)
+                # 获取项目列表（不指定版本，获取所有版本）
+                success, projects, message = github_service.get_projects()
                 
                 def update_project_list():
                     if not self.winfo_exists():
@@ -196,11 +179,17 @@ class GitHubDownloadUI(tk.Frame):
                     if success:
                         # 添加项目到列表
                         for project in projects:
-                            self.project_list.insert("", "end", values=(
+                            # 构建PR信息
+                            pr_info = f"#{project.get('pr_number', '')} - {project.get('pr_title', '')[:30]}..." if project.get('pr_number') else ""
+                            # 插入项目到列表，不使用tags属性
+                            item_id = self.project_list.insert("", "end", values=(
                                 project['project_name'],
                                 project['namespace'],
-                                project['version']
-                            ), tags=(project,))
+                                project['version'],
+                                pr_info
+                            ))
+                            # 将项目信息存储到字典中
+                            self.project_info_map[item_id] = project
                         self.status_var.set(f"成功获取 {len(projects)} 个项目")
                     else:
                         self.status_var.set(f"获取项目列表失败: {message}")
@@ -233,7 +222,7 @@ class GitHubDownloadUI(tk.Frame):
         
         # 获取选中的项目信息
         selected_item = selection[0]
-        project_info = self.project_list.item(selected_item, "tags")[0]
+        project_info = self.project_info_map.get(selected_item)
         
         # 更新按钮状态为正在下载
         original_btn_text = self.download_btn.cget("text")

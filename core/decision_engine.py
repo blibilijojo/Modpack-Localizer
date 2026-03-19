@@ -122,10 +122,9 @@ class DecisionEngine:
         ordered_keys.extend(list(missing_keys))
         
         for key in ordered_keys:
-            entry = english_dict.get(key)
-            if entry is None:
+            english_value = english_dict.get(key)
+            if english_value is None:
                 continue
-            english_value = entry.en
 
             translation = None
             source = None
@@ -196,7 +195,7 @@ class DecisionEngine:
             master_english_dicts: dict, internal_chinese_dicts: dict, pack_chinese_dict: dict, 
             use_origin_name_lookup: bool, namespace_to_jar: dict,
             raw_english_files: dict, namespace_formats: dict):
-        logging.info("--- 阶段 2: 执行翻译决策逻辑 ---")
+        logging.info("翻译决策开始")
         workbench_data = {}
         user_dict_by_key = user_dictionary.get('by_key', {})
         user_dict_by_origin = user_dictionary.get('by_origin_name', {})
@@ -205,7 +204,7 @@ class DecisionEngine:
         
         # 对于CPU密集型任务，串行处理可能比并行更高效（避免GIL开销）
         # 直接使用串行处理，提高稳定性和性能
-        logging.info(f"使用串行方式处理 {len(master_english_dicts)} 个命名空间")
+        logging.info(f"处理 {len(master_english_dicts)} 个命名空间")
         
         for namespace, english_dict in master_english_dicts.items():
             jar_name = namespace_to_jar.get(namespace, 'Unknown')
@@ -226,12 +225,12 @@ class DecisionEngine:
             total_entries += len(ns_data['items'])
             logging.debug(f"命名空间 '{namespace}' 处理完成，共 {len(ns_data['items'])} 条")
         
-        logging.info("--- 翻译决策贡献分析 ---")
-        logging.info(f"总条目数: {total_entries}")
+        # 统计各来源占比
+        source_summary = []
         for source, count in sorted(source_counts.items()):
             percentage = (count / total_entries) * 100 if total_entries > 0 else 0
-            logging.info(f"  ▷ {source}: {count} 条 ({percentage:.2f}%)")
-        logging.info("--------------------------")
+            source_summary.append(f"{source}: {count}条({percentage:.1f}%)")
         
-        logging.info("翻译决策引擎运行完毕。")
+        logging.info(f"翻译决策完成: {total_entries}条, {', '.join(source_summary)}")
+        
         return workbench_data

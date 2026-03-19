@@ -31,7 +31,7 @@ class Workflow:
         """
         执行数据提取阶段
         """
-        logging.info("=== 开始数据提取阶段 ===")
+        logging.info("数据提取开始")
         
         try:
             # 验证配置
@@ -46,7 +46,7 @@ class Workflow:
                 raise ValueError(f"配置的Mods路径不是目录: {mods_path}")
             
             # 执行提取
-            logging.info(f"开始从Mods目录提取语言数据: {mods_path}")
+            logging.debug(f"开始从Mods目录提取语言数据: {mods_path}")
             # 从配置中获取汉化包路径，优先使用community_pack_paths，兼容旧版本的zip_paths
             pack_paths = context.settings.get('community_pack_paths', [])
             if not pack_paths:
@@ -61,7 +61,7 @@ class Workflow:
             )
             
             context.extraction_result = extraction_result
-            logging.info("=== 数据提取阶段完成 ===")
+            logging.info("数据提取完成")
             return extraction_result
             
         except ValueError as ve:
@@ -78,7 +78,7 @@ class Workflow:
         """
         执行翻译决策阶段
         """
-        logging.info("=== 开始翻译决策阶段 ===")
+        logging.info("翻译决策开始")
         
         try:
             # 验证提取结果是否存在
@@ -87,7 +87,7 @@ class Workflow:
             logging.debug(f"提取结果验证通过，包含 {len(context.extraction_result.master_english)} 个命名空间")
             
             # 加载词典
-            logging.info("开始加载翻译词典...")
+            logging.debug("开始加载翻译词典...")
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
                 context.settings['community_dict_dir'],
                 lambda msg, progress: context.progress_callback(50 + progress // 2, 100) if context.progress_callback else None
@@ -95,7 +95,7 @@ class Workflow:
             logging.debug(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
             
             # 执行翻译决策
-            logging.info(f"开始执行翻译决策，处理 {len(context.extraction_result.master_english)} 个命名空间")
+            logging.debug(f"开始执行翻译决策，处理 {len(context.extraction_result.master_english)} 个命名空间")
             translation_result = self.translator.run(
                 extraction_result=context.extraction_result,
                 user_dictionary=user_dict,
@@ -106,7 +106,7 @@ class Workflow:
             )
             
             context.translation_result = translation_result
-            logging.info("=== 翻译决策阶段完成 ===")
+            logging.info("翻译决策完成")
             return translation_result
             
         except ValueError as ve:
@@ -123,7 +123,7 @@ class Workflow:
         """
         执行资源包构建阶段
         """
-        logging.info("=== 开始资源包构建阶段 ===")
+        logging.info("资源包构建开始")
         
         try:
             # 验证必要结果是否存在
@@ -148,7 +148,7 @@ class Workflow:
                 pack_settings=context.pack_settings
             )
             
-            logging.info("=== 资源包构建阶段完成 ===")
+            logging.info("资源包构建完成")
             return success, message
             
         except ValueError as ve:
@@ -165,7 +165,7 @@ class Workflow:
         """
         执行完整工作流
         """
-        logging.info("========== 开始完整工作流 ==========")
+        logging.info("完整工作流开始")
         
         try:
             # 执行数据提取
@@ -181,7 +181,7 @@ class Workflow:
             logging.error(f"完整工作流失败: {e}", exc_info=True)
             return False, f"工作流失败: {e}"
         finally:
-            logging.info("========== 完整工作流结束 ==========")
+            logging.info("完整工作流结束")
     
     def create_context(
         self, 

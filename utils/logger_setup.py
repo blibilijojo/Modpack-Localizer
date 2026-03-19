@@ -146,6 +146,4 @@ def setup_logging(gui_callback=None):
         gui_handler.setFormatter(gui_formatter)
         root_logger.addHandler(gui_handler)
     
-    logging.info(f"日志系统初始化完成。文件日志路径: {log_filename}")
-    logging.info(f"文件日志级别设置为: {log_level_str}")
-    logging.info(f"系统将自动清理10天前的日志文件")
+    logging.info(f"日志系统已初始化 (级别: {log_level_str}, 保留: {log_retention_days}天)")

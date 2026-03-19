@@ -806,8 +806,7 @@ class ProjectTab:
 
             # 构建API请求URL
             base_urls = [
-                "https://api.curseforge.com",
-                "https://cfapi.mod.gg"  # 镜像源
+                "https://api.curseforge.com"
             ]
             
             # 构建查询参数
@@ -986,8 +985,7 @@ class ProjectTab:
 
             # 构建API请求URL，尝试多个源
             base_urls = [
-                "https://api.curseforge.com",
-                "https://cfapi.mod.gg"  # 镜像源
+                "https://api.curseforge.com"
             ]
             
             headers = {

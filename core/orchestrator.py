@@ -72,7 +72,6 @@ class Orchestrator:
             
             # 检查提取结果
             master_english_count = len(extraction_result.master_english)
-            logging.info(f"数据提取完成，共发现 {master_english_count} 个命名空间")
             self.log(f"数据提取完成，共发现 {master_english_count} 个命名空间", "INFO")
             
             # 存储模组名称供后续使用
@@ -180,9 +179,12 @@ class Orchestrator:
                 if jar_name_without_ext.endswith('.jar'):
                     jar_name_without_ext = jar_name_without_ext[:-4]
 
+                # 初始化entry变量
+                curseforge_entry = None
+                modrinth_entry = None
+
                 # 查找CurseForge信息
                 if jar_name_without_ext.lower() in curseforge_names_dict:
-                    curseforge_entry = None
                     for entry in self.curseforge_names:
                         source = entry['source']
                         if source.endswith('.jar'):

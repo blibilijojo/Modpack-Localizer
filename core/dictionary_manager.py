@@ -18,7 +18,7 @@ class DictionaryManager:
         """加载用户词典"""
         try:
             self.user_dict = config_manager.load_user_dict()
-            logging.info("用户词典加载成功")
+            logging.debug("用户词典加载成功")
             return self.user_dict
         except Exception as e:
             logging.error(f"加载用户词典失败: {e}")
@@ -69,7 +69,7 @@ class DictionaryManager:
                                 progress = min(int((processed_rows / total_rows) * 100), 100)
                                 progress_callback(f"加载社区词典... {progress}%", progress)
                     
-                    logging.info(f"社区词典加载成功，包含 {len(community_dict_by_key)} 个按键条目和 {len(community_dict_by_origin)} 个按原文条目")
+                    logging.debug(f"社区词典加载成功: {len(community_dict_by_key)}条按键, {len(community_dict_by_origin)}条按原文")
                 else:
                     logging.info(f"社区词典文件不存在: {dict_file_path}")
             except Exception as e:
@@ -96,6 +96,8 @@ class DictionaryManager:
         # 缓存结果
         result = (user_dict, community_dict_by_key, community_dict_by_origin)
         self._cache[cache_key] = result
+        
+        logging.info(f"词典加载完成: 用户词典{len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}条, 社区词典{len(community_dict_by_key)+len(community_dict_by_origin)}条")
         
         return result
     

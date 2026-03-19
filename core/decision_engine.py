@@ -122,9 +122,10 @@ class DecisionEngine:
         ordered_keys.extend(list(missing_keys))
         
         for key in ordered_keys:
-            english_value = english_dict.get(key)
-            if english_value is None:
+            entry = english_dict.get(key)
+            if entry is None:
                 continue
+            english_value = entry.en
 
             translation = None
             source = None

@@ -259,14 +259,24 @@ class GitHubService:
                 lang_dir = Path(temp_dir) / 'projects' / version / 'assets' / current_project_name / current_namespace / 'lang'
                 lang_dir.mkdir(parents=True, exist_ok=True)
                 
+                # 获取原始英文文件内容
+                raw_en_content = ''
+                raw_en_data = {}
+                if raw_english_files and current_namespace in raw_english_files:
+                    raw_en_content = raw_english_files[current_namespace]
+                    try:
+                        import json
+                        raw_en_data = json.loads(raw_en_content)
+                        logging.info(f'[GitHub] 解析原始英文文件成功，包含 {len(raw_en_data)} 个键')
+                    except Exception as e:
+                        logging.error(f'[GitHub] 解析原始英文文件失败: {str(e)}')
+                
                 # 构建zh_cn.json文件
                 if file_format in ['json', 'both']:
                     json_path = lang_dir / 'zh_cn.json'
                     
                     # 获取原始英文文件内容作为模板
-                    template_content = '{}'
-                    if raw_english_files and current_namespace in raw_english_files:
-                        template_content = raw_english_files[current_namespace]
+                    template_content = raw_en_content if raw_en_content else '{}'
                     
                     # 使用与Builder相同的方法构建JSON文件
                     json_content = self._build_json_file(template_content, items)
@@ -276,16 +286,16 @@ class GitHubService:
                     en_json_path = lang_dir / 'en_us.json'
                     # 构建原文数据
                     en_items = {}
-                    for key, value in items.items():
-                        # 尝试从raw_english_files获取原文
-                        if raw_english_files and current_namespace in raw_english_files:
-                            # 如果有原始英文文件，使用它来构建en_us.json
-                            # 这里我们假设items的结构是 {key: translation}
-                            # 实际实现中可能需要调整
+                    
+                    # 优先使用原始英文文件中的所有键
+                    if raw_en_data:
+                        for key, value in raw_en_data.items():
+                            en_items[key] = value
+                    else:
+                        # 如果没有原始英文文件，使用翻译数据中的键
+                        for key, value in items.items():
                             en_items[key] = key
-                        else:
-                            # 否则使用key作为原文
-                            en_items[key] = key
+                    
                     # 使用相同的方法构建en_us.json
                     en_json_content = self._build_json_file(template_content, en_items)
                     en_json_path.write_text(en_json_content, encoding='utf-8')
@@ -304,7 +314,19 @@ class GitHubService:
                     
                     # 构建en_us.lang文件 - 使用原文
                     en_lang_path = lang_dir / 'en_us.lang'
-                    en_lang_content = ''.join([f'{key} = {key}\n' for key, value in items.items()])
+                    en_items = {}
+                    
+                    # 优先使用原始英文文件中的所有键
+                    if raw_en_data:
+                        for key, value in raw_en_data.items():
+                            en_items[key] = value
+                    else:
+                        # 如果没有原始英文文件，使用翻译数据中的键
+                        for key, value in items.items():
+                            en_items[key] = key
+                    
+                    # 构建en_us.lang内容
+                    en_lang_content = ''.join([f'{key} = {value}\n' for key, value in en_items.items()])
                     en_lang_path.write_text(en_lang_content, encoding='utf-8')
             
             return temp_dir
@@ -590,6 +612,8 @@ class GitHubService:
         # 使用指定的分支或默认分支
         target_branch = branch or self.branch
         
+        logging.info(f'[GitHub] 开始下载文件: {path} (分支: {target_branch})')
+        
         endpoint = f'/repos/{self.repo}/contents/{path}'
         
         try:
@@ -597,10 +621,13 @@ class GitHubService:
             if result:
                 # 解码文件内容
                 content = base64.b64decode(result.get('content', '')).decode('utf-8')
+                logging.info(f'[GitHub] 文件下载成功: {Path(path).name}, 大小: {len(content)} 字符')
                 return True, content, f'文件下载成功: {Path(path).name}'
             else:
+                logging.warning(f'[GitHub] 文件不存在: {path}')
                 return False, None, f'文件不存在: {path}'
         except Exception as e:
+            logging.error(f'[GitHub] 文件下载失败: {str(e)}')
             return False, None, f'文件下载失败: {str(e)}'
     
     def list_files(self, path='', branch=None):
@@ -744,40 +771,80 @@ class GitHubService:
                 try:
                     # 尝试将字符串解析为JSON
                     project_info = json.loads(project_info)
-                except:
+                    logging.info('[GitHub] 成功解析项目信息字符串')
+                except Exception as e:
                     # 如果解析失败，返回错误
+                    logging.error(f'[GitHub] 解析项目信息失败: {str(e)}')
                     return False, None, '项目信息格式错误'
+            
+            # 验证项目信息
+            if not hasattr(project_info, 'get') or 'path' not in project_info:
+                logging.error('[GitHub] 项目信息缺少必要字段')
+                return False, None, '项目信息缺少必要字段'
             
             # 使用用户的复刻仓库，而不是上游仓库
             # 使用pull请求的分支（如果有）
-            download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
+            download_branch = project_info.get('pr_branch', branch)
+            logging.info(f'[GitHub] 准备下载项目翻译文件，使用分支: {download_branch}')
             
             # 下载zh_cn.json文件
             zh_cn_path = f"{project_info['path']}"
+            logging.info(f'[GitHub] 开始下载中文翻译文件: {zh_cn_path}')
             success, zh_cn_content, message = self.download_file(zh_cn_path, download_branch)
             if not success:
+                logging.error(f'[GitHub] 下载中文翻译文件失败: {message}')
                 return False, None, f'下载中文翻译文件失败: {message}'
             
             # 下载en_us.json文件
             en_us_path = f"{project_info['path'].replace('zh_cn.json', 'en_us.json')}"
+            logging.info(f'[GitHub] 开始下载英文原文文件: {en_us_path}')
             success, en_us_content, message = self.download_file(en_us_path, download_branch)
             if not success:
+                logging.error(f'[GitHub] 下载英文原文文件失败: {message}')
                 return False, None, f'下载英文原文文件失败: {message}'
             
             # 解析JSON文件
             import json
-            zh_cn_data = json.loads(zh_cn_content)
-            en_us_data = json.loads(en_us_content)
+            try:
+                zh_cn_data = json.loads(zh_cn_content)
+                logging.info(f'[GitHub] 解析中文翻译文件成功，包含 {len(zh_cn_data)} 个键')
+            except Exception as e:
+                logging.error(f'[GitHub] 解析中文翻译文件失败: {str(e)}')
+                return False, None, f'解析中文翻译文件失败: {str(e)}'
+            
+            try:
+                en_us_data = json.loads(en_us_content)
+                logging.info(f'[GitHub] 解析英文原文文件成功，包含 {len(en_us_data)} 个键')
+            except Exception as e:
+                logging.error(f'[GitHub] 解析英文原文文件失败: {str(e)}')
+                return False, None, f'解析英文原文文件失败: {str(e)}'
             
             # 构建翻译数据结构
             translations = {}
-            namespace = project_info['namespace']
+            namespace = project_info.get('namespace', 'unknown')
             translations[namespace] = zh_cn_data
+            
+            # 构建以命名空间为键的en_us_data结构
+            en_us_data_by_namespace = {}
+            en_us_data_by_namespace[namespace] = en_us_data
             
             # 构建原始英文文件内容
             raw_english_files = {}
             raw_english_files[namespace] = en_us_content
             
-            return True, {'translations': translations, 'raw_english_files': raw_english_files}, '成功从上游仓库的pull请求中下载项目翻译文件'
+            # 统计两个文件的键匹配情况
+            zh_keys = set(zh_cn_data.keys())
+            en_keys = set(en_us_data.keys())
+            common_keys = zh_keys.intersection(en_keys)
+            zh_only_keys = zh_keys - en_keys
+            en_only_keys = en_keys - zh_keys
+            
+            logging.info(f'[GitHub] 键匹配统计:')
+            logging.info(f'[GitHub] - 共同键: {len(common_keys)}')
+            logging.info(f'[GitHub] - 仅中文文件有: {len(zh_only_keys)}')
+            logging.info(f'[GitHub] - 仅英文文件有: {len(en_only_keys)}')
+            
+            logging.info(f'[GitHub] 成功从GitHub下载项目翻译文件，命名空间: {namespace}')
+            return True, {'translations': translations, 'raw_english_files': raw_english_files, 'en_us_data': en_us_data_by_namespace}, '成功从GitHub下载项目翻译文件'
         except Exception as e:
             return False, None, f'下载项目翻译失败: {str(e)}'

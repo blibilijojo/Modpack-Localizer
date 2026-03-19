@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 import threading
+import re
 from pathlib import Path
 
 class GitHubDownloadUI(tk.Frame):
@@ -223,6 +224,9 @@ class GitHubDownloadUI(tk.Frame):
         # 获取选中的项目信息
         selected_item = selection[0]
         project_info = self.project_info_map.get(selected_item)
+        if not project_info:
+            self.status_var.set("未找到项目信息")
+            return
         
         # 更新按钮状态为正在下载
         original_btn_text = self.download_btn.cget("text")
@@ -233,7 +237,10 @@ class GitHubDownloadUI(tk.Frame):
         def download_task():
             try:
                 from services.github_service import GitHubService
-                from gui.translation_workbench import TranslationWorkbench
+                import json
+                import logging
+                
+                logging.info('[GitHub UI] 开始下载项目: %s', project_info.get('project_name', '未知项目'))
                 
                 # 初始化GitHub服务
                 github_service = GitHubService(
@@ -241,82 +248,181 @@ class GitHubDownloadUI(tk.Frame):
                     self.github_config['token']
                 )
                 
-                # 下载项目翻译文件
-                success, data, message = github_service.download_project_translations(project_info)
+                # 下载zh_cn.json文件
+                zh_cn_path = project_info['path']
+                logging.info('[GitHub UI] 开始下载中文翻译文件: %s', zh_cn_path)
+                success, zh_cn_content, message = github_service.download_file(zh_cn_path, project_info.get('pr_branch'))
+                if not success:
+                    logging.error('[GitHub UI] 下载中文翻译文件失败: %s', message)
+                    self.status_var.set(f"下载中文翻译文件失败: {message}")
+                    return
                 
-                if success:
-                    # 在当前标签页中显示翻译工作台
-                    def show_workbench():
-                        if not self.winfo_exists():
-                            return
+                logging.info('[GitHub UI] 成功下载中文翻译文件: %s, 大小: %d 字符', zh_cn_path, len(zh_cn_content))
+                
+                # 下载en_us.json文件
+                en_us_path = zh_cn_path.replace('zh_cn.json', 'en_us.json')
+                logging.info('[GitHub UI] 开始下载英文原文文件: %s', en_us_path)
+                success, en_us_content, message = github_service.download_file(en_us_path, project_info.get('pr_branch'))
+                if not success:
+                    logging.error('[GitHub UI] 下载英文原文文件失败: %s', message)
+                    self.status_var.set(f"下载英文原文文件失败: {message}")
+                    return
+                
+                logging.info('[GitHub UI] 成功下载英文原文文件: %s, 大小: %d 字符', en_us_path, len(en_us_content))
+                
+                # 解析JSON文件
+                try:
+                    zh_cn_data = json.loads(zh_cn_content)
+                    logging.info('[GitHub UI] 解析中文翻译文件成功，包含 %d 个键', len(zh_cn_data))
+                except Exception as e:
+                    logging.error('[GitHub UI] 解析中文翻译文件失败: %s', str(e))
+                    self.status_var.set(f"解析中文翻译文件失败: {str(e)}")
+                    return
+                
+                try:
+                    en_us_data = json.loads(en_us_content)
+                    logging.info('[GitHub UI] 解析英文原文文件成功，包含 %d 个键', len(en_us_data))
+                except Exception as e:
+                    logging.error('[GitHub UI] 解析英文原文文件失败: %s', str(e))
+                    self.status_var.set(f"解析英文原文文件失败: {str(e)}")
+                    return
+                
+                # 构建翻译数据结构
+                namespace = project_info.get('namespace', 'unknown')
+                logging.info('[GitHub UI] 项目命名空间: %s', namespace)
+                
+                # 执行翻译决策（参照模组汉化的实现）
+                workbench_data = {}
+                items = []
+                
+                # 从原始英文文件中提取有序键
+                def get_ordered_keys(content):
+                    keys = []
+                    # 使用更通用的正则表达式解析JSON文件，保持原始顺序
+                    # 匹配所有类型的键值对，包括字符串、数字、布尔值、对象等
+                    JSON_KEY_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:')
+                    for match in JSON_KEY_PATTERN.finditer(content):
+                        key = match.group(1)
+                        keys.append(key)
+                    return keys
+                
+                ordered_keys = get_ordered_keys(en_us_content)
+                
+                # 确保所有英文词典中的键都被包含
+                all_keys = set(en_us_data.keys())
+                ordered_keys_set = set(ordered_keys)
+                missing_keys = all_keys - ordered_keys_set
+                
+                # 将缺失的键添加到有序键列表末尾
+                ordered_keys.extend(list(missing_keys))
+                
+                # 统计键的来源
+                total_entries = 0
+                source_counts = {}
+                
+                for key in ordered_keys:
+                    # 获取英文原文并确保为字符串类型
+                    en_text = en_us_data.get(key, key)
+                    en_text = str(en_text) if en_text is not None else key
+                    # 获取中文翻译
+                    zh_text = zh_cn_data.get(key, '')
+                    
+                    # 确定翻译来源
+                    source = None
+                    if zh_text:
+                        source = "GitHub下载"
+                    else:
+                        source = "待翻译"
+                    
+                    # 构建条目
+                    item_entry = {
+                        'key': key,
+                        'en': en_text,
+                        'zh': zh_text,
+                        'source': source
+                    }
+                    
+                    # 统计来源
+                    if source not in source_counts:
+                        source_counts[source] = 0
+                    source_counts[source] += 1
+                    total_entries += 1
+                    
+                    items.append(item_entry)
+                
+                # 记录翻译决策贡献分析
+                logging.info('[GitHub UI] --- 翻译决策贡献分析 ---')
+                logging.info('[GitHub UI] 总条目数: %d', total_entries)
+                for source, count in sorted(source_counts.items()):
+                    percentage = (count / total_entries) * 100 if total_entries > 0 else 0
+                    logging.info('[GitHub UI]   ▷ %s: %d 条 (%.2f%%)', source, count, percentage)
+                logging.info('[GitHub UI] --------------------------')
+                
+                # 构建TranslationWorkbench期望的格式
+                workbench_data[namespace] = {
+                    'items': items,
+                    'jar_name': project_info.get('project_name', 'unknown'),
+                    'mod_name': project_info.get('project_name', 'unknown'),
+                    'namespace': namespace,
+                    'game_version': project_info.get('version', 'unknown'),
+                    'display_name': project_info.get('project_name', 'unknown')
+                }
+                
+                # 构建原始英文文件内容
+                raw_english_files = {}
+                raw_english_files[namespace] = en_us_content
+                
+                # 在当前标签页中显示翻译工作台
+                def show_workbench():
+                    if not self.winfo_exists():
+                        return
+                    
+                    # 获取当前标签页
+                    current_tab_id = self.main_window.notebook.select()
+                    if current_tab_id in self.main_window.project_tabs:
+                        project_tab = self.main_window.project_tabs[current_tab_id]
                         
-                        # 获取当前标签页
-                        current_tab_id = self.main_window.notebook.select()
-                        if current_tab_id in self.main_window.project_tabs:
-                            project_tab = self.main_window.project_tabs[current_tab_id]
-                            
-                            # 设置项目信息
-                            project_tab.project_name = project_info['project_name']
-                            project_tab.project_type = "mod"
-                            project_tab.project_info = {
-                                'mod_name': project_info['project_name'],
-                                'namespace': project_info['namespace'],
-                                'game_version': project_info['version']
-                            }
-                            
-                            # 更新标签页标题
-                            self.main_window.update_tab_title(current_tab_id, project_info['project_name'])
-                            
-                            # 构建翻译数据
-                            workbench_data = {}
-                            namespace_formats = {}
-                            
-                            for namespace, translations in data['translations'].items():
-                                items = []
-                                for key, value in translations.items():
-                                    items.append({
-                                        'key': key,
-                                        'en': key,  # 使用key作为英文原文
-                                        'zh': value,
-                                        'status': 'completed' if value else 'pending'
-                                    })
-                                # 构建TranslationWorkbench期望的格式
-                                workbench_data[namespace] = {
-                                    'items': items,
-                                    'jar_name': project_info['project_name'],
-                                    'mod_name': project_info['project_name'],
-                                    'namespace': namespace,
-                                    'game_version': project_info['version']
-                                }
-                            
-                            # 显示工作区
-                            project_tab._show_workbench_view(
-                                workbench_data=workbench_data,
-                                namespace_formats=namespace_formats,
-                                raw_english_files=data['raw_english_files'],
-                                current_settings={},
-                                project_path=None,
-                                finish_button_text="完成",
-                                save_session_after=False
-                            )
-                            
-                            # 显示成功消息
-                            self.status_var.set(f"成功下载项目: {project_info['project_name']}")
-                    
-                    self.after(0, show_workbench)
-                else:
-                    self.status_var.set(f"下载项目失败: {message}")
-                    
+                        # 设置项目信息
+                        project_tab.project_name = project_info.get('project_name', 'unknown')
+                        project_tab.project_type = "mod"
+                        project_tab.project_info = {
+                            'mod_name': project_info.get('project_name', 'unknown'),
+                            'namespace': namespace,
+                            'game_version': project_info.get('version', 'unknown')
+                        }
+                        
+                        # 更新标签页标题
+                        self.main_window.update_tab_title(current_tab_id, project_info.get('project_name', 'unknown'))
+                        
+                        # 显示工作区
+                        project_tab._show_workbench_view(
+                            workbench_data=workbench_data,
+                            namespace_formats={},
+                            raw_english_files=raw_english_files,
+                            current_settings={},
+                            project_path=None,
+                            finish_button_text="完成",
+                            save_session_after=False
+                        )
+                        
+                        # 显示成功消息
+                        success_msg = f"成功下载项目: {project_info.get('project_name', 'unknown')}"
+                        self.status_var.set(success_msg)
+                        logging.info('[GitHub UI] %s', success_msg)
+                
+                self.after(0, show_workbench)
+                
             except Exception as e:
                 import traceback
                 import logging
                 error_msg = f"执行下载时发生错误：{str(e)}"
-                logging.error(error_msg)
+                logging.error('[GitHub UI] %s', error_msg)
                 traceback.print_exc()
                 self.status_var.set(f"下载错误: {error_msg}")
             finally:
                 # 恢复按钮状态
                 if self.winfo_exists():
                     self.download_btn.config(text=original_btn_text, state="normal")
+                    logging.info('[GitHub UI] 下载任务完成，恢复按钮状态')
         
         threading.Thread(target=download_task, daemon=True).start()

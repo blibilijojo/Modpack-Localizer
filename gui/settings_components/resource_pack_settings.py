@@ -50,14 +50,14 @@ class ResourcePackSettings:
         self._create_community_packs_list(main_frame)
     
     def _create_resource_pack_settings(self, parent):
-        frame = tk_ttk.LabelFrame(parent, text="资源包设置", padding="10")
+        frame = tk_ttk.LabelFrame(parent, text="术语词典", padding="10")
         frame.pack(fill="x", pady=(0, 5), padx=5)
         
         dict_path_frame = ttk.Frame(frame)
         dict_path_frame.pack(fill="x", pady=5)
-        dict_label = ttk.Label(dict_path_frame, text="社区词典文件:", width=15)
+        dict_label = ttk.Label(dict_path_frame, text="词典目录:", width=15)
         dict_label.pack(side="left")
-        custom_widgets.ToolTip(dict_label, "可选。一个包含补充翻译的 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
+        custom_widgets.ToolTip(dict_label, "可选。存放社区词典文件的目录，程序会在该目录中使用 Dict-Sqlite.db 文件\n可以从GitHub下载最新的社区维护版本。")
         dict_entry = ttk.Entry(dict_path_frame, textvariable=self.community_dict_var, takefocus=False)
         dict_entry.pack(side="left", fill="x", expand=True, padx=5)
         # 防止自动选中文本
@@ -68,7 +68,7 @@ class ResourcePackSettings:
         self.download_dict_button.pack(side="left", padx=(5, 5))
     
     def _create_community_packs_list(self, parent):
-        packs_frame = tk_ttk.LabelFrame(parent, text="第三方汉化包列表 (优先级由上至下)", padding="10")
+        packs_frame = tk_ttk.LabelFrame(parent, text="附加汉化包 (优先级由上至下)", padding="10")
         packs_frame.pack(fill="both", expand=True, pady=(10, 0))
         list_container = ttk.Frame(packs_frame)
         list_container.pack(fill="both", expand=True)

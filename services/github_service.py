@@ -234,6 +234,44 @@ class GitHubService:
         except Exception as e:
             return False, f'文件上传失败: {str(e)}'
     
+    def _parse_json_with_unicode_only(self, content):
+        """解析JSON文件，只进行unicode编码转义，不进行其他JSON转义
+        
+        Args:
+            content: JSON文件内容
+            
+        Returns:
+            dict: 解析后的键值对
+        """
+        result = {}
+        JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+        
+        for match in JSON_KEY_VALUE_PATTERN.finditer(content):
+            key = match.group(1)
+            value = match.group(2)
+            
+            # 处理 Unicode 转义序列（如\u963f），但保留\n等转义字符
+            # 先将\n、\t等常见转义字符暂时替换为占位符
+            temp_value = value.replace('\\n', '__NEWLINE__')
+            temp_value = temp_value.replace('\\t', '__TAB__')
+            temp_value = temp_value.replace('\\r', '__CARRIAGE__')
+            # 处理 Unicode 转义序列
+            temp_value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), temp_value)
+            # 恢复占位符为原始转义字符
+            temp_value = temp_value.replace('__NEWLINE__', '\\n')
+            temp_value = temp_value.replace('__TAB__', '\\t')
+            temp_value = temp_value.replace('__CARRIAGE__', '\\r')
+            # 处理引号，将 \" 替换为 "
+            temp_value = temp_value.replace('\\"', '"')
+            
+            # 跳过 _comment 键
+            if key == '_comment':
+                continue
+                
+            result[key] = temp_value
+        
+        return result
+
     def build_resource_pack_structure(self, translations, version='1.21', project_name=None, namespace=None, file_format='both', raw_english_files=None):
         """构建符合i18仓库结构的资源包
         
@@ -259,17 +297,27 @@ class GitHubService:
                 lang_dir = Path(temp_dir) / 'projects' / version / 'assets' / current_project_name / current_namespace / 'lang'
                 lang_dir.mkdir(parents=True, exist_ok=True)
                 
+                # 解析原始英文文件获取英文原文
+                parsed_english = {}
+                if raw_english_files and current_namespace in raw_english_files:
+                    raw_content = raw_english_files[current_namespace]
+                    parsed_english = self._parse_json_with_unicode_only(raw_content)
+                
                 # 构建zh_cn.json文件
                 if file_format in ['json', 'both']:
                     json_path = lang_dir / 'zh_cn.json'
                     
                     # 获取原始英文文件内容作为模板
-                    template_content = '{}'
+                    template_content = None
                     if raw_english_files and current_namespace in raw_english_files:
                         template_content = raw_english_files[current_namespace]
                     
                     # 使用与Builder相同的方法构建JSON文件
-                    json_content = self._build_json_file(template_content, items)
+                    if template_content:
+                        json_content = self._build_json_file(template_content, items)
+                    else:
+                        # 没有模板时，生成格式化的JSON
+                        json_content = json.dumps(items, ensure_ascii=False, indent=4)
                     json_path.write_text(json_content, encoding='utf-8')
                     
                     # 构建en_us.json文件 - 使用原文
@@ -277,17 +325,14 @@ class GitHubService:
                     # 构建原文数据
                     en_items = {}
                     for key, value in items.items():
-                        # 尝试从raw_english_files获取原文
-                        if raw_english_files and current_namespace in raw_english_files:
-                            # 如果有原始英文文件，使用它来构建en_us.json
-                            # 这里我们假设items的结构是 {key: translation}
-                            # 实际实现中可能需要调整
-                            en_items[key] = key
-                        else:
-                            # 否则使用key作为原文
-                            en_items[key] = key
+                        # 从解析后的英文原文中获取，如果没有则使用key
+                        en_items[key] = parsed_english.get(key, key)
                     # 使用相同的方法构建en_us.json
-                    en_json_content = self._build_json_file(template_content, en_items)
+                    if template_content:
+                        en_json_content = self._build_json_file(template_content, en_items)
+                    else:
+                        # 没有模板时，生成格式化的JSON
+                        en_json_content = json.dumps(en_items, ensure_ascii=False, indent=4)
                     en_json_path.write_text(en_json_content, encoding='utf-8')
                 
                 # 构建zh_cn.lang文件
@@ -304,7 +349,7 @@ class GitHubService:
                     
                     # 构建en_us.lang文件 - 使用原文
                     en_lang_path = lang_dir / 'en_us.lang'
-                    en_lang_content = ''.join([f'{key} = {key}\n' for key, value in items.items()])
+                    en_lang_content = ''.join([f'{key} = {parsed_english.get(key, key)}\n' for key, value in items.items()])
                     en_lang_path.write_text(en_lang_content, encoding='utf-8')
             
             return temp_dir
@@ -764,44 +809,8 @@ class GitHubService:
             if not success:
                 return False, None, f'下载英文原文文件失败: {message}'
             
-            # 解析JSON文件，使用自定义解析函数只进行unicode编码转义
-            import json
-            import re
-            
-            def parse_json_with_unicode_only(content):
-                """解析JSON文件，只进行unicode编码转义，不进行其他JSON转义"""
-                result = {}
-                # 正则表达式匹配JSON键值对
-                JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
-                
-                for match in JSON_KEY_VALUE_PATTERN.finditer(content):
-                    key = match.group(1)
-                    value = match.group(2)
-                    
-                    # 处理 Unicode 转义序列（如\u963f），但保留\n等转义字符
-                    # 先将\n、\t等常见转义字符暂时替换为占位符
-                    temp_value = value.replace('\\n', '__NEWLINE__')
-                    temp_value = temp_value.replace('\\t', '__TAB__')
-                    temp_value = temp_value.replace('\\r', '__CARRIAGE__')
-                    # 处理 Unicode 转义序列
-                    temp_value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), temp_value)
-                    # 恢复占位符为原始转义字符
-                    temp_value = temp_value.replace('__NEWLINE__', '\\n')
-                    temp_value = temp_value.replace('__TAB__', '\\t')
-                    temp_value = temp_value.replace('__CARRIAGE__', '\\r')
-                    # 处理引号，将 \" 替换为 "
-                    temp_value = temp_value.replace('\\"', '"')
-                    
-                    # 跳过 _comment 键
-                    if key == '_comment':
-                        continue
-                        
-                    result[key] = temp_value
-                
-                return result
-            
-            zh_cn_data = parse_json_with_unicode_only(zh_cn_content)
-            en_us_data = parse_json_with_unicode_only(en_us_content)
+            zh_cn_data = self._parse_json_with_unicode_only(zh_cn_content)
+            en_us_data = self._parse_json_with_unicode_only(en_us_content)
             
             # 构建翻译数据结构
             translations = {}

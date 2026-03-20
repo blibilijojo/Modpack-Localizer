@@ -1276,7 +1276,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             translations_nested = [None] * total_batches
             
             # 记录翻译设置
-            logging.info(f"AI翻译设置 - 模式: {translation_mode}, 批处理大小: {batch_size}")
+            mode_display = self.modes_reverse_values.get(translation_mode, translation_mode)
+            logging.info(f"AI翻译设置 - 模式: {mode_display}, 批处理大小: {batch_size}")
             
             # 创建专用的AI翻译线程池
             from concurrent.futures import ThreadPoolExecutor

@@ -23,7 +23,7 @@ class TabPackSettings:
         self.frame = parent_frame
         self.config = config_manager.load_config()
 
-        preset_frame = tk_ttk.LabelFrame(self.frame, text="预案管理", padding=10)
+        preset_frame = tk_ttk.LabelFrame(self.frame, text="配置预设", padding=10)
         preset_frame.pack(fill="x", pady=5)
         self.preset_var = tk.StringVar()
         self.preset_combo = ttk.Combobox(preset_frame, textvariable=self.preset_var, state="readonly")
@@ -41,31 +41,31 @@ class TabPackSettings:
         delete_btn = ttk.Button(preset_btn_frame, text="删除", command=self._delete_preset, bootstyle="danger-outline", width=6)
         delete_btn.pack(side="left", padx=2)
 
-        # 预案名称设置
-        name_frame = tk_ttk.LabelFrame(self.frame, text="预案名称", padding=10)
+        # 预设名称设置
+        name_frame = tk_ttk.LabelFrame(self.frame, text="预设名称", padding=10)
         name_frame.pack(fill="x", pady=5)
         name_frame.columnconfigure(1, weight=1)
         self.preset_name_var = tk.StringVar()
-        ttk.Label(name_frame, text="当前预案名称:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ttk.Label(name_frame, text="当前预设名称:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         name_entry = ttk.Entry(name_frame, textvariable=self.preset_name_var)
         name_entry.grid(row=0, column=1, sticky="ew", padx=5)
         name_entry.bind('<FocusIn>', lambda e: e.widget.selection_clear())
         name_entry.bind('<FocusOut>', lambda e: e.widget.selection_clear())
 
-        metadata_frame = tk_ttk.LabelFrame(self.frame, text="预案内容 (pack.mcmeta & pack.png)", padding=10)
+        metadata_frame = tk_ttk.LabelFrame(self.frame, text="资源包元数据", padding=10)
         metadata_frame.pack(fill="x", pady=10)
         metadata_frame.columnconfigure(1, weight=1)
         self.pack_format_var = tk.StringVar()
         self.pack_desc_var = tk.StringVar()
         self.pack_icon_var = tk.StringVar()
 
-        ttk.Label(metadata_frame, text="游戏版本:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ttk.Label(metadata_frame, text="目标游戏版本:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         format_combo = ttk.Combobox(metadata_frame, textvariable=self.pack_format_var, values=list(PACK_FORMATS.keys()), state="readonly")
         format_combo.grid(row=0, column=1, sticky="ew", padx=5)
         format_combo.bind('<FocusIn>', lambda e: e.widget.selection_clear())
         format_combo.bind('<FocusOut>', lambda e: e.widget.selection_clear())
 
-        ttk.Label(metadata_frame, text="资源包简介:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ttk.Label(metadata_frame, text="资源包描述:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
         desc_entry = ttk.Entry(metadata_frame, textvariable=self.pack_desc_var)
         desc_entry.grid(row=1, column=1, sticky="ew", padx=5)
         ToolTip(desc_entry, PLACEHOLDER_TOOLTIP_TEXT)

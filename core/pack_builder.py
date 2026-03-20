@@ -43,7 +43,7 @@ class PackBuilder:
             
             # 替换值
             if info['key'] in translations:
-                translated_value = translations[info['key']]
+                translated_value = translations[info['key']].replace('"', '\\"')
                 # 保持原始键的格式，只替换值
                 output.append(f'"{info["key"]}":"{translated_value}"')
             else:
@@ -145,7 +145,7 @@ class PackBuilder:
             
             # 替换为翻译后的值
             if key in translations:
-                translated_value = translations[key]
+                translated_value = translations[key].replace('"', '\\"')
                 # 保持原始键的格式，只替换值
                 output_content += f'"{key}":"{translated_value}"'
             else:
@@ -166,7 +166,8 @@ class PackBuilder:
             unprocessed_pairs = []
             for key, value in translations.items():
                 if key not in processed_keys:
-                    unprocessed_pairs.append(f'    "{key}":"{value}"')
+                    escaped_value = value.replace('"', '\\"')
+                    unprocessed_pairs.append(f'    "{key}":"{escaped_value}"')
             
             if unprocessed_pairs:
                 # 在结束括号前添加未处理的键值对

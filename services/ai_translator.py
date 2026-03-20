@@ -96,7 +96,7 @@ class AITranslator:
         # 记录初始化信息
         service_count = len(self.api_services)
         total_keys = len(all_keys)
-        logging.info(f"翻译器已初始化 (并发模式)。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒")
+        logging.info(f"翻译器已初始化。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒")
     
     def cancel(self):
         """
@@ -624,7 +624,11 @@ class AITranslator:
             return cached_results
         
         # 对未命中缓存的文本进行翻译
-        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本")
+        # 获取实际使用的模型名称
+        effective_model_name = model_name
+        # 这里需要从可用的service中获取模型信息
+        # 由于模型信息在重试循环中获取，这里先使用传入的model_name
+        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本，使用模型: {model_name}")
 
         attempt = 0
         max_attempts = 5  # 最大重试次数

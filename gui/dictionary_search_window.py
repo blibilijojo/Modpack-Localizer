@@ -66,7 +66,7 @@ class DictionarySearchWindow(ttk.Toplevel):
                                        state="readonly", width=12)
         self.mode_combo.grid(row=0, column=1, padx=(0,5))
         self.mode_combo.bind('<MouseWheel>', lambda e: "break")
-        self.mode_combo.bind('<<ComboboxSelected>>', lambda e: self.mode_combo.after_idle(self.mode_combo.selection_clear))
+        self.mode_combo.bind('<<ComboboxSelected>>', lambda e: self.mode_combo.selection_clear())
         self.search_button = ttk.Button(search_frame, text="搜索", command=self._perform_search, bootstyle="primary")
         self.search_button.grid(row=0, column=2)
         table_frame = ttk.Frame(main_frame)

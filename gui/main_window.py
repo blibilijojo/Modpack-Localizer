@@ -336,7 +336,7 @@ class ProjectTab:
         quest_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
-        github_rb = ttk.Radiobutton(new_project_frame, text="从GitHub下载", variable=self.project_type_var, value="github", style="TRadiobutton")
+        github_rb = ttk.Radiobutton(new_project_frame, text="获取我的GitHub汉化PR", variable=self.project_type_var, value="github", style="TRadiobutton")
         github_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="从GitHub汉化仓库下载项目并创建标签页。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
@@ -2008,7 +2008,7 @@ class MainWindow:
             download_ui.pack(fill="both", expand=True)
             
             # 更新标签页标题
-            self.update_tab_title(current_tab_id, "从GitHub下载")
+            self.update_tab_title(current_tab_id, "获取我的GitHub汉化PR")
         
     def _on_drag_start(self, event):
         """开始拖拽标签"""

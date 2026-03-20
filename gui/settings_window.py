@@ -17,12 +17,10 @@ else:  # 非打包环境
 
 from utils import config_manager
 from gui import ui_utils
-from gui.settings_components.basic_settings import BasicSettings
+from gui.settings_components.general_settings import GeneralSettings
 from gui.settings_components.ai_settings import AISettings
 from gui.settings_components.resource_pack_settings import ResourcePackSettings
-from gui.settings_components.github_settings import GitHubSettings
-from gui.settings_components.curseforge_settings import CurseForgeSettings
-
+from gui.settings_components.external_services_settings import ExternalServicesSettings
 from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
 
@@ -56,12 +54,11 @@ class SettingsWindow(ttk.Toplevel):
         
         # 创建各个选项卡，添加异常处理
         tab_creation_methods = [
-            self._create_basic_tab,
+            self._create_general_tab,
             self._create_ai_tab,
-            self._create_resource_pack_tab,
-            self._create_github_tab,
-            self._create_curseforge_tab,
-            self._create_pack_settings_tab,
+            self._create_translation_resources_tab,
+            self._create_external_services_tab,
+            self._create_pack_config_tab,
             self._create_advanced_tab
         ]
         
@@ -74,37 +71,30 @@ class SettingsWindow(ttk.Toplevel):
                 traceback.print_exc()
                 # 记录错误但继续执行，确保其他选项卡能正常显示
         
-    def _create_basic_tab(self):
+    def _create_general_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" 基础设置 ")
-        self.basic_settings = BasicSettings(tab, self.config, self._save_config)
+        self.notebook.add(tab, text=" 通用 ")
+        self.general_settings = GeneralSettings(tab, self.config, self._save_config)
     
     def _create_ai_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" AI 翻译 ")
+        self.notebook.add(tab, text=" AI翻译 ")
         self.ai_settings = AISettings(tab, self.config, self._save_config)
     
-    def _create_resource_pack_tab(self):
+    def _create_translation_resources_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" 资源包 ")
+        self.notebook.add(tab, text=" 翻译资源 ")
         self.resource_pack_settings = ResourcePackSettings(tab, self.config, self._save_config)
     
-    def _create_pack_settings_tab(self):
+    def _create_pack_config_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" 生成预案 ")
+        self.notebook.add(tab, text=" 资源包配置 ")
         self.pack_settings_manager = TabPackSettings(tab)
     
-
-    
-    def _create_github_tab(self):
+    def _create_external_services_tab(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" 汉化仓库上传 ")
-        self.github_settings = GitHubSettings(tab, self.config, self._save_config)
-
-    def _create_curseforge_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" CurseForge ")
-        self.curseforge_settings = CurseForgeSettings(tab, self.config, self._save_config)
+        self.notebook.add(tab, text=" 外部服务 ")
+        self.external_services_settings = ExternalServicesSettings(tab, self.config, self._save_config)
 
     def _create_advanced_tab(self):
         tab = ttk.Frame(self.notebook)
@@ -130,25 +120,21 @@ class SettingsWindow(ttk.Toplevel):
     
     def _collect_all_configs(self):
         """从所有设置组件收集配置"""
-        # 收集基础设置
-        if hasattr(self, 'basic_settings'):
-            self.config.update(self.basic_settings.get_config())
+        # 收集通用设置
+        if hasattr(self, 'general_settings'):
+            self.config.update(self.general_settings.get_config())
         
         # 收集AI设置
         if hasattr(self, 'ai_settings'):
             self.config.update(self.ai_settings.get_config())
         
-        # 收集资源包设置
+        # 收集翻译资源设置
         if hasattr(self, 'resource_pack_settings'):
             self.config.update(self.resource_pack_settings.get_config())
         
-        # 收集GitHub设置
-        if hasattr(self, 'github_settings'):
-            self.config.update(self.github_settings.get_config())
-
-        # 收集CurseForge设置
-        if hasattr(self, 'curseforge_settings'):
-            self.config.update(self.curseforge_settings.get_config())
+        # 收集外部服务设置
+        if hasattr(self, 'external_services_settings'):
+            self.config.update(self.external_services_settings.get_config())
 
         # 收集高级设置
         if hasattr(self, 'advanced_settings'):

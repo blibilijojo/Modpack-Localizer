@@ -4,7 +4,7 @@ import ttkbootstrap as ttk
 from gui import ui_utils
 from gui import custom_widgets
 
-class BasicSettings:
+class GeneralSettings:
     def __init__(self, parent, config, save_callback):
         self.parent = parent
         self.config = config.copy()
@@ -24,7 +24,7 @@ class BasicSettings:
         # 翻译匹配设置
         self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
         
-        # 模组任务列表名称显示模式
+        # 列表名称显示模式
         self.mod_list_name_mode_var = tk.StringVar(value=self.config.get("mod_list_name_mode", "namespace"))
         
         # 绑定变量变化事件
@@ -42,41 +42,41 @@ class BasicSettings:
         main_frame = ttk.Frame(self.parent)
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # 创建基础设置
-        self._create_basic_settings(main_frame)
+        # 创建输出设置
+        self._create_output_settings(main_frame)
+        
+        # 创建翻译匹配设置
+        self._create_matching_settings(main_frame)
+        
+        # 创建列表显示设置
+        self._create_list_display_settings(main_frame)
     
-    def _create_basic_settings(self, parent):
-        # 基础设置框架
-        frame = tk_ttk.LabelFrame(parent, text="基础设置", padding="10")
+    def _create_output_settings(self, parent):
+        frame = tk_ttk.LabelFrame(parent, text="输出设置", padding="10")
+        frame.pack(fill="x", pady=(0, 10), padx=5)
+        frame.columnconfigure(1, weight=1)
+        
+        self._create_path_entry(frame, "资源包输出目录:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
+        
+        zip_check = ttk.Checkbutton(frame, text="输出为ZIP压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
+        zip_check.pack(anchor="w", pady=5, padx=5)
+        custom_widgets.ToolTip(zip_check, "开启后，将直接生成一个ZIP格式的资源包文件，而不是文件夹。")
+    
+    def _create_matching_settings(self, parent):
+        frame = tk_ttk.LabelFrame(parent, text="翻译匹配", padding="10")
         frame.pack(fill="x", pady=(0, 10), padx=5)
         frame.columnconfigure(0, weight=1)
         
-        # 输出设置分组
-        output_frame = tk_ttk.LabelFrame(frame, text="输出设置", padding="10")
-        output_frame.pack(fill="x", pady=(0, 10))
-        output_frame.columnconfigure(1, weight=1)
-        
-        self._create_path_entry(output_frame, "默认输出文件夹:", self.output_dir_var, "directory", "用于存放最终生成的汉化资源包的文件夹")
-        
-        zip_check = ttk.Checkbutton(output_frame, text="打包为.zip压缩包", variable=self.pack_as_zip_var, bootstyle="primary")
-        zip_check.pack(anchor="w", pady=5, padx=5)
-        custom_widgets.ToolTip(zip_check, "开启后, 将直接生成一个.zip格式的资源包文件, 而不是文件夹。")
-        
-        # 翻译匹配设置分组
-        matching_frame = tk_ttk.LabelFrame(frame, text="翻译匹配设置", padding="10")
-        matching_frame.pack(fill="x", pady=(0, 10))
-        matching_frame.columnconfigure(0, weight=1)
-        
-        origin_check = ttk.Checkbutton(matching_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
+        origin_check = ttk.Checkbutton(frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
         origin_check.pack(anchor="w", pady=5, padx=5)
-        custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
-        
-        # 模组任务列表名称显示模式
-        name_mode_frame = tk_ttk.LabelFrame(frame, text="模组任务列表名称显示模式", padding="10")
-        name_mode_frame.pack(fill="x", pady=(0, 10))
+        custom_widgets.ToolTip(origin_check, "推荐开启。\n当Key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+    
+    def _create_list_display_settings(self, parent):
+        frame = tk_ttk.LabelFrame(parent, text="列表显示", padding="10")
+        frame.pack(fill="x", pady=(0, 10), padx=5)
         
         # 创建下拉框
-        mode_label = ttk.Label(name_mode_frame, text="显示模式:")
+        mode_label = ttk.Label(frame, text="名称显示模式:")
         mode_label.pack(side="left", padx=5, pady=5)
         
         # 定义选项
@@ -88,7 +88,7 @@ class BasicSettings:
         ]
         
         # 创建下拉框
-        mode_combobox = ttk.Combobox(name_mode_frame, state="readonly")
+        mode_combobox = ttk.Combobox(frame, state="readonly")
         mode_combobox['values'] = [option[0] for option in mode_options]
         
         # 设置默认值
@@ -111,8 +111,6 @@ class BasicSettings:
                 mode_combobox.selection_clear()
         
         mode_combobox.bind("<<ComboboxSelected>>", on_mode_change)
-        
-
     
     def _create_path_entry(self, parent, label_text, var, browse_type, tooltip):
         row_frame = ttk.Frame(parent)

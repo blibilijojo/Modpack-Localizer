@@ -12,7 +12,7 @@ from .models import (
 )
 from .orchestrator import Orchestrator
 from .pack_builder import PackBuilder
-from .quest_converter import QuestConverter
+from .quest_converter import FTBQuestConverter, BQMQuestConverter, ConversionManager
 from .term_database import TermDatabase
 from .translator import Translator
 from .workflow import Workflow
@@ -25,7 +25,9 @@ __all__ = [
     'Extractor',
     'Orchestrator',
     'PackBuilder',
-    'QuestConverter',
+    'FTBQuestConverter',
+    'BQMQuestConverter',
+    'ConversionManager',
     'TermDatabase',
     'Translator',
     'Workflow',

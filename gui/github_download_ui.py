@@ -442,7 +442,7 @@ class GitHubDownloadUI(tk.Frame):
                                         'key': key,
                                         'en': en_text,  # 使用en_us.json中的英文原文
                                         'zh': value,
-                                        'status': 'completed' if value else 'pending'
+                                        'source': '手动校对' if value else '待翻译'
                                     })
                                 
                                 # 提取模组名称：优先使用project_name，失败则从PR标题提取

@@ -4,6 +4,9 @@ import ttkbootstrap as ttk
 import threading
 from pathlib import Path
 
+# Ensure PyInstaller detects core.extractor by importing at module import time
+from core.extractor import Extractor
+
 class GitHubUploadUI(tk.Frame):
     def __init__(self, parent, workbench_instance, default_namespace="", default_file_format="json", github_config=None):
         super().__init__(parent)
@@ -469,7 +472,6 @@ class GitHubUploadUI(tk.Frame):
                     
                     if versions and game_version:
                         # 使用提取器的版本匹配方法
-                        from core.extractor import Extractor
                         extractor = Extractor()
                         matched_version = extractor._match_github_version(game_version, loaders, versions)
                         if matched_version:

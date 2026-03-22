@@ -17,6 +17,90 @@ class GitHubDownloadUI(tk.Frame):
         
         # 初始化 UI
         self._create_widgets()
+        
+        # 加载保存的项目列表
+        self._load_saved_projects()
+    
+    def _adjust_column_widths(self):
+        """调整Treeview的列宽，使其根据内容自适应"""
+        # 强制更新界面，确保所有元素都已渲染
+        self.update_idletasks()
+        
+        # 为每列设置最小宽度
+        min_widths = {
+            'project': 100,
+            'namespace': 70,
+            'version': 40,
+            'pr': 150
+        }
+        
+        # 调整每列的宽度
+        for column in self.project_list['columns']:
+            # 获取列的标题宽度
+            header_width = len(self.project_list.heading(column, 'text')) * 8
+            # 计算列内容的最大宽度
+            max_width = header_width
+            
+            # 遍历所有项，找到最长的内容
+            for item in self.project_list.get_children():
+                value = self.project_list.item(item, 'values')[self.project_list['columns'].index(column)]
+                if value:
+                    value_width = len(str(value)) * 8
+                    max_width = max(max_width, value_width)
+            
+            # 设置列宽，确保不小于最小宽度
+            final_width = max(max_width + 10, min_widths.get(column, 50))
+            self.project_list.column(column, width=final_width)
+    
+    def _load_saved_projects(self):
+        """加载保存的项目列表"""
+        try:
+            from utils import config_manager
+            
+            # 从配置文件中加载项目列表
+            config = config_manager.load_config()
+            saved_projects = config.get('github_projects', [])
+            
+            if saved_projects:
+                # 清空项目列表
+                for item in self.project_list.get_children():
+                    self.project_list.delete(item)
+                
+                # 添加保存的项目到列表
+                for project in saved_projects:
+                    # 提取模组名称：优先使用project_name，失败则从PR标题提取
+                    display_name = project['project_name']
+                    if 'pr_title' in project and project['pr_title']:
+                        pr_title = project['pr_title']
+                        # 使用正则表达式从PR标题中提取模组名称（倒数第一个空格之前的内容）
+                        import re
+                        # 找到倒数第一个空格的位置
+                        space_positions = [m.start() for m in re.finditer(r'\s', pr_title)]
+                        if space_positions:
+                            last_space_pos = space_positions[-1]
+                            extracted_mod_name = pr_title[:last_space_pos].strip()
+                            if extracted_mod_name:
+                                display_name = extracted_mod_name
+                    
+                    # 构建PR信息
+                    pr_info = f"#{project.get('pr_number', '')} - {project.get('pr_title', '')}" if project.get('pr_number') else ""
+                    # 插入项目到列表
+                    item_id = self.project_list.insert("", "end", values=(
+                        display_name,
+                        project['namespace'],
+                        project['version'],
+                        pr_info
+                    ))
+                    # 将项目信息存储到字典中
+                    self.project_info_map[item_id] = project
+                
+                # 调整列宽
+                self._adjust_column_widths()
+                
+                self.status_var.set(f"已加载 {len(saved_projects)} 个保存的项目")
+        except Exception as e:
+            import logging
+            logging.error(f"加载保存的项目列表失败: {str(e)}")
     
     def _parse_json_with_unicode_only(self, content):
         """
@@ -81,10 +165,11 @@ class GitHubDownloadUI(tk.Frame):
         self.project_list.heading("namespace", text="命名空间")
         self.project_list.heading("version", text="版本")
         self.project_list.heading("pr", text="PR")
-        self.project_list.column("project", width=150, anchor="w")
-        self.project_list.column("namespace", width=120, anchor="w")
-        self.project_list.column("version", width=80, anchor="center")
-        self.project_list.column("pr", width=200, anchor="w")
+        # 不设置固定宽度，让列宽自适应
+        self.project_list.column("project", anchor="w")
+        self.project_list.column("namespace", anchor="w")
+        self.project_list.column("version", anchor="center")
+        self.project_list.column("pr", anchor="w")
         self.project_list.grid(row=1, column=1, sticky="ew", padx=5, pady=8, columnspan=2)
         
         # 滚动条
@@ -199,6 +284,7 @@ class GitHubDownloadUI(tk.Frame):
         def get_projects_task():
             try:
                 from services.github_service import GitHubService
+                from utils import config_manager
                 
                 # 初始化GitHub服务
                 github_service = GitHubService(
@@ -218,19 +304,42 @@ class GitHubDownloadUI(tk.Frame):
                         self.project_list.delete(item)
                     
                     if success:
+                        # 保存项目列表到配置文件
+                        config = config_manager.load_config()
+                        config['github_projects'] = projects
+                        config_manager.save_config(config)
+                        
                         # 添加项目到列表
                         for project in projects:
+                            # 提取模组名称：优先使用project_name，失败则从PR标题提取
+                            display_name = project['project_name']
+                            if 'pr_title' in project and project['pr_title']:
+                                pr_title = project['pr_title']
+                                # 使用正则表达式从PR标题中提取模组名称（倒数第一个空格之前的内容）
+                                import re
+                                # 找到倒数第一个空格的位置
+                                space_positions = [m.start() for m in re.finditer(r'\s', pr_title)]
+                                if space_positions:
+                                    last_space_pos = space_positions[-1]
+                                    extracted_mod_name = pr_title[:last_space_pos].strip()
+                                    if extracted_mod_name:
+                                        display_name = extracted_mod_name
+                            
                             # 构建PR信息
-                            pr_info = f"#{project.get('pr_number', '')} - {project.get('pr_title', '')[:30]}..." if project.get('pr_number') else ""
+                            pr_info = f"#{project.get('pr_number', '')} - {project.get('pr_title', '')}" if project.get('pr_number') else ""
                             # 插入项目到列表，不使用tags属性
                             item_id = self.project_list.insert("", "end", values=(
-                                project['project_name'],
+                                display_name,
                                 project['namespace'],
                                 project['version'],
                                 pr_info
                             ))
                             # 将项目信息存储到字典中
                             self.project_info_map[item_id] = project
+                        
+                        # 调整列宽
+                        self._adjust_column_widths()
+                        
                         self.status_var.set(f"成功获取 {len(projects)} 个项目")
                     else:
                         self.status_var.set(f"获取项目列表失败: {message}")
@@ -265,6 +374,9 @@ class GitHubDownloadUI(tk.Frame):
         selected_item = selection[0]
         project_info = self.project_info_map.get(selected_item)
         
+        # 保存当前标签页ID，确保在原始标签页中创建工作台
+        original_tab_id = self.main_window.notebook.select()
+        
         # 更新按钮状态为正在下载
         original_btn_text = self.download_btn.cget("text")
         self.download_btn.config(text="正在下载", state="disabled")
@@ -286,13 +398,13 @@ class GitHubDownloadUI(tk.Frame):
                 success, data, message = github_service.download_project_translations(project_info)
                 
                 if success:
-                    # 在当前标签页中显示翻译工作台
+                    # 在原始标签页中显示翻译工作台
                     def show_workbench():
                         if not self.winfo_exists():
                             return
                         
-                        # 获取当前标签页
-                        current_tab_id = self.main_window.notebook.select()
+                        # 使用保存的原始标签页ID
+                        current_tab_id = original_tab_id
                         if current_tab_id in self.main_window.project_tabs:
                             project_tab = self.main_window.project_tabs[current_tab_id]
                             
@@ -313,41 +425,50 @@ class GitHubDownloadUI(tk.Frame):
                             namespace_formats = {}
                             
                             # 解析raw_english_files中的英文原文
-                            import logging
                             en_us_data = {}
-                            logging.info(f"raw_english_files: {data['raw_english_files'].keys()}")
                             for ns, content in data['raw_english_files'].items():
                                 try:
                                     # 使用自定义解析函数，只进行unicode编码转义
                                     en_us_data[ns] = self._parse_json_with_unicode_only(content)
-                                    logging.info(f"成功解析 {ns} 的en_us.json文件，包含 {len(en_us_data[ns])} 个条目")
                                 except Exception as e:
                                     en_us_data[ns] = {}
-                                    logging.error(f"解析 {ns} 的en_us.json文件失败: {e}")
                             
                             for namespace, translations in data['translations'].items():
                                 items = []
-                                logging.info(f"处理命名空间 {namespace}，包含 {len(translations)} 个翻译条目")
                                 for key, value in translations.items():
                                     # 使用从en_us.json文件中获取的英文原文，如果没有则使用key
                                     en_text = en_us_data.get(namespace, {}).get(key, key)
-                                    if en_text != key:
-                                        logging.info(f"为键 {key} 找到英文原文: {en_text}")
                                     items.append({
                                         'key': key,
                                         'en': en_text,  # 使用en_us.json中的英文原文
                                         'zh': value,
                                         'status': 'completed' if value else 'pending'
                                     })
+                                
+                                # 提取模组名称：优先使用project_name，失败则从PR标题提取
+                                mod_name = project_info['project_name']
+                                if 'pr_title' in project_info and project_info['pr_title']:
+                                    pr_title = project_info['pr_title']
+                                    # 使用正则表达式从PR标题中提取模组名称（倒数第一个空格之前的内容）
+                                    import re
+                                    # 找到倒数第一个空格的位置
+                                    space_positions = [m.start() for m in re.finditer(r'\s', pr_title)]
+                                    if space_positions:
+                                        last_space_pos = space_positions[-1]
+                                        extracted_mod_name = pr_title[:last_space_pos].strip()
+                                        if extracted_mod_name:
+                                            mod_name = extracted_mod_name
+                                
                                 # 构建TranslationWorkbench期望的格式
                                 workbench_data[namespace] = {
                                     'items': items,
                                     'jar_name': project_info['project_name'],
-                                    'mod_name': project_info['project_name'],
+                                    'mod_name': mod_name,
+                                    'git_name': project_info['project_name'],
                                     'namespace': namespace,
-                                    'game_version': project_info['version']
+                                    'game_version': project_info['version'],
+                                    'display_name': mod_name
                                 }
-                                logging.info(f"为命名空间 {namespace} 构建了 {len(items)} 个翻译项")
                             
                             # 显示工作区
                             project_tab._show_workbench_view(

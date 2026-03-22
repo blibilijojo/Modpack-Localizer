@@ -667,14 +667,28 @@ class AISettings:
     
     def get_config(self):
         """获取配置"""
+        # 安全获取浮点数参数
+        def safe_get_float(var, default):
+            try:
+                return var.get()
+            except (tk.TclError, ValueError):
+                return default
+        
+        # 安全获取整数参数
+        def safe_get_int(var, default):
+            try:
+                return var.get()
+            except (tk.TclError, ValueError):
+                return default
+        
         config = {
             "api_services": self.api_services,
-            "ai_max_threads": self.ai_max_threads_var.get(),
-            "ai_max_retries": self.ai_max_retries_var.get(),
-            "ai_retry_rate_limit_cooldown": self.ai_retry_rate_limit_cooldown_var.get(),
-            "ai_retry_initial_delay": self.ai_retry_initial_delay_var.get(),
-            "ai_retry_max_delay": self.ai_retry_max_delay_var.get(),
-            "ai_retry_backoff_factor": self.ai_retry_backoff_factor_var.get()
+            "ai_max_threads": safe_get_int(self.ai_max_threads_var, 4),
+            "ai_max_retries": safe_get_int(self.ai_max_retries_var, 3),
+            "ai_retry_rate_limit_cooldown": safe_get_float(self.ai_retry_rate_limit_cooldown_var, 60.0),
+            "ai_retry_initial_delay": safe_get_float(self.ai_retry_initial_delay_var, 2.0),
+            "ai_retry_max_delay": safe_get_float(self.ai_retry_max_delay_var, 120.0),
+            "ai_retry_backoff_factor": safe_get_float(self.ai_retry_backoff_factor_var, 2.0)
         }
         
         # 保留其他AI相关参数

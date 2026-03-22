@@ -8,6 +8,7 @@ import shutil
 import re
 from pathlib import Path
 import logging
+import concurrent.futures
 
 class GitHubService:
     def __init__(self, repo, token, branch='main', pull_before_push=True, push_to_upstream=False, upstream_branch='main', upstream_repo='CFPAOrg/Minecraft-Mod-Language-Package', delete_branch_before_push=False):
@@ -30,6 +31,18 @@ class GitHubService:
         self.retry_delay = 2
         # 正则表达式模式，与 Builder 类相同
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
+        
+        # 创建会话对象，启用连接池
+        self.session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,  # 连接池大小
+            pool_maxsize=10,      # 最大连接数
+            max_retries=3,        # 最大重试次数
+            pool_block=False      # 不阻塞
+        )
+        self.session.mount('https://', adapter)
+        self.session.headers.update(self.headers)
+        
         # 记录初始化参数
         logging.info(f'初始化GitHub服务: 仓库={self.repo}, 分支={self.branch}, 推送到源仓库={self.push_to_upstream}, 上游分支={self.upstream_branch}, 上游仓库={self.upstream_repo}, 推送前删除分支={self.delete_branch_before_push}')
     
@@ -63,15 +76,15 @@ class GitHubService:
         
         try:
             if method == 'GET':
-                response = requests.get(url, headers=self.headers, **kwargs)
+                response = self.session.get(url, **kwargs)
             elif method == 'PUT':
-                response = requests.put(url, headers=self.headers, **kwargs)
+                response = self.session.put(url, **kwargs)
             elif method == 'POST':
-                response = requests.post(url, headers=self.headers, **kwargs)
+                response = self.session.post(url, **kwargs)
             elif method == 'PATCH':
-                response = requests.patch(url, headers=self.headers, **kwargs)
+                response = self.session.patch(url, **kwargs)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=self.headers, **kwargs)
+                response = self.session.delete(url, **kwargs)
             else:
                 raise ValueError(f'不支持的请求方法: {method}')
             
@@ -797,17 +810,37 @@ class GitHubService:
             # 使用pull请求的分支（如果有）
             download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
             
-            # 下载zh_cn.json文件
+            # 构建文件路径
             zh_cn_path = f"{project_info['path']}"
-            success, zh_cn_content, message = self.download_file(zh_cn_path, download_branch)
-            if not success:
-                return False, None, f'下载中文翻译文件失败: {message}'
-            
-            # 下载en_us.json文件
             en_us_path = f"{project_info['path'].replace('zh_cn.json', 'en_us.json')}"
-            success, en_us_content, message = self.download_file(en_us_path, download_branch)
-            if not success:
-                return False, None, f'下载英文原文文件失败: {message}'
+            
+            # 并行下载文件
+            file_paths = [zh_cn_path, en_us_path]
+            results = {}
+            
+            def download_file_task(path):
+                return path, self.download_file(path, download_branch)
+            
+            # 使用线程池并行下载
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_to_path = {executor.submit(download_file_task, path): path for path in file_paths}
+                for future in concurrent.futures.as_completed(future_to_path):
+                    path = future_to_path[future]
+                    try:
+                        path, (success, content, message) = future.result()
+                        if success:
+                            results[path] = content
+                        else:
+                            return False, None, f'下载文件失败: {message}'
+                    except Exception as e:
+                        return False, None, f'下载文件时发生错误: {str(e)}'
+            
+            # 解析下载的内容
+            zh_cn_content = results.get(zh_cn_path)
+            en_us_content = results.get(en_us_path)
+            
+            if not zh_cn_content or not en_us_content:
+                return False, None, '部分文件下载失败'
             
             zh_cn_data = self._parse_json_with_unicode_only(zh_cn_content)
             en_us_data = self._parse_json_with_unicode_only(en_us_content)

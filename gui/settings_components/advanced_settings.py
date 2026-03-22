@@ -23,12 +23,16 @@ class AdvancedSettings:
         # 日志设置
         self.log_level_var = tk.StringVar(value=self.config.get("log_level", "INFO"))
         
+        # 下载设置
+        self.download_threads_var = tk.IntVar(value=self.config.get("download_threads", 5))
+        
         # 绑定变量变化事件
         self._bind_events()
     
     def _bind_events(self):
         # 绑定变量变化事件
         self.log_level_var.trace_add("write", lambda *args: self.save_callback())
+        self.download_threads_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
         # 创建主容器
@@ -117,8 +121,18 @@ class AdvancedSettings:
         max_log_count_label.pack(side="left")
         custom_widgets.ToolTip(max_log_count_label, "设置保留的最大日志文件数量，超过该数量的最旧日志将被自动删除")
         self.max_log_count_var = tk.IntVar(value=self.config.get("max_log_count", 30))
-        max_log_count_spinbox = ttk.Spinbox(log_retention_frame, from_=5, to=100, textvariable=self.max_log_count_var, width=10)
+        max_log_count_spinbox = ttk.Spinbox(log_retention_frame, from_=1, to=100, textvariable=self.max_log_count_var, width=10)
         max_log_count_spinbox.pack(side="left", padx=5)
+        
+        # 下载线程数设置
+        download_threads_frame = ttk.Frame(frame)
+        download_threads_frame.pack(fill="x", pady=5)
+        
+        download_threads_label = ttk.Label(download_threads_frame, text="下载线程数:", width=15)
+        download_threads_label.pack(side="left")
+        custom_widgets.ToolTip(download_threads_label, "设置下载词典和模组时使用的线程数，线程数越多下载速度越快，但会占用更多系统资源")
+        download_threads_spinbox = ttk.Spinbox(download_threads_frame, from_=1, to=20, textvariable=self.download_threads_var, width=10)
+        download_threads_spinbox.pack(side="left", padx=5)
         
         # 绑定变量变化事件
         self.log_retention_days_var.trace_add("write", lambda *args: self.save_callback())
@@ -267,12 +281,23 @@ class AdvancedSettings:
         self.log_retention_days_var.set(self.config.get("log_retention_days", 10))
         self.max_log_count_var.set(self.config.get("max_log_count", 30))
         
+        # 更新下载线程数设置
+        self.download_threads_var.set(self.config.get("download_threads", 5))
+        
         # 触发保存回调，确保所有组件都更新
         self.save_callback()
     
     def get_config(self):
+        # 安全获取整数参数
+        def safe_get_int(var, default):
+            try:
+                return var.get()
+            except (tk.TclError, ValueError):
+                return default
+        
         return {
             "log_level": self.log_level_var.get(),
-            "log_retention_days": self.log_retention_days_var.get(),
-            "max_log_count": self.max_log_count_var.get()
+            "log_retention_days": safe_get_int(self.log_retention_days_var, 10),
+            "max_log_count": safe_get_int(self.max_log_count_var, 30),
+            "download_threads": safe_get_int(self.download_threads_var, 5)
         }

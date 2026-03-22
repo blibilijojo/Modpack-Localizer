@@ -119,7 +119,8 @@ class ResourcePackSettings:
     
     def _check_and_update_dict_async(self):
         self.download_dict_button.config(state="disabled", text="检查中...")
-        threading.Thread(target=self._dict_update_worker, daemon=True).start()
+        from utils.download_manager import download_manager
+        download_manager.submit(self._dict_update_worker)
     
     def _dict_update_worker(self):
         import requests
@@ -191,15 +192,19 @@ class ResourcePackSettings:
         """
         下载词典文件（异步）
         """
-        import threading
+        from utils.download_manager import download_manager
         
-        # 启动新线程进行下载，避免阻塞主UI线程
+        # 定义下载线程函数
         def download_thread():
             import requests
             import logging
             from gui.dialogs import DownloadProgressDialog
             from utils import config_manager
             import time
+            
+            logging.info(f"开始下载社区词典，版本: {remote_info.get('version')}")
+            logging.info(f"下载地址: {remote_info.get('url')}")
+            logging.info(f"保存路径: {local_path}")
             
             # 创建进度对话框
             progress_dialog = None
@@ -218,21 +223,28 @@ class ResourcePackSettings:
             # 下载词典
             url = remote_info.get("url")
             if not url:
+                logging.error("无法获取远程词典下载链接")
                 if self.parent.winfo_exists():
                     self.parent.after(0, lambda: ui_utils.show_error("更新失败", "无法获取远程词典下载链接。"))
                 return
             
             # 应用GitHub加速
-            url = self._apply_github_acceleration(url)
+            accelerated_url = self._apply_github_acceleration(url)
+            if accelerated_url != url:
+                logging.info(f"应用GitHub加速，使用链接: {accelerated_url}")
             
             try:
                 # 增加超时时间，使用更稳定的连接
-                response = requests.get(url, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
+                logging.info("开始下载词典文件...")
+                response = requests.get(accelerated_url, stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"})
                 response.raise_for_status()
                 total_size = int(response.headers.get("content-length", 0))
+                logging.info(f"词典文件大小: {total_size // 1024} KB")
+                
                 bytes_downloaded = 0
                 last_update_time = 0
                 update_interval = 0.1  # 控制进度更新频率，每100ms更新一次
+                start_time = time.time()
                 
                 with open(local_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=16384):  # 增大chunk大小，提高下载速度
@@ -253,8 +265,13 @@ class ResourcePackSettings:
                                 self.parent.after(0, update_ui)
                                 last_update_time = current_time
                 
+                elapsed_time = time.time() - start_time
+                download_speed = (bytes_downloaded / 1024) / elapsed_time if elapsed_time > 0 else 0
+                logging.info(f"词典下载完成，用时: {elapsed_time:.2f}秒，速度: {download_speed:.2f} KB/s")
+                
                 # 更新本地版本记录
                 config_manager.update_config("last_dict_version", remote_info.get("version"))
+                logging.info(f"更新本地版本记录为: {remote_info.get('version')}")
                 
                 # 显示成功信息
                 if self.parent.winfo_exists():
@@ -266,9 +283,9 @@ class ResourcePackSettings:
             except Exception as e:
                 logging.error(f"下载词典失败: {e}")
                 if self.parent.winfo_exists():
-                    def show_error():
+                    def show_error(error_msg=e):
                         if self.parent.winfo_exists():
-                            ui_utils.show_error("更新失败", f"下载词典时发生错误: {e}")
+                            ui_utils.show_error("更新失败", f"下载词典时发生错误: {error_msg}")
                     self.parent.after(0, show_error)
             finally:
                 # 关闭进度对话框
@@ -282,9 +299,10 @@ class ResourcePackSettings:
                                 pass  # 忽略关闭错误
                         self.parent.after(0, close_dialog)
                     delattr(self, "_progress_dialog")
+                logging.info("词典下载任务完成")
         
-        # 启动下载线程
-        threading.Thread(target=download_thread, daemon=True).start()
+        # 使用下载管理器的线程池执行下载任务
+        download_manager.submit(download_thread)
     
     def _apply_github_acceleration(self, url):
         """
@@ -308,7 +326,7 @@ class ResourcePackSettings:
                     return accelerated_url
         return url
     
-    def _get_remote_dict_info(self) -> dict | None:
+    def _get_remote_dict_info(self):
         import requests
         import logging
         api_url = "https://api.github.com/repos/VM-Chinese-translate-group/i18n-Dict-Extender/releases/latest"
@@ -318,7 +336,10 @@ class ResourcePackSettings:
             data = response.json()
             version = data.get("tag_name")
             url = next((asset.get("browser_download_url") for asset in data.get("assets", []) if asset.get("name") == "Dict-Sqlite.db"), None)
-            if version and url: return {"version": version, "url": url}
+            if version and url:
+                # 使用lucky-moth-20.deno.dev作为加速链接
+                accelerated_url = f"https://lucky-moth-20.deno.dev/{url}"
+                return {"version": version, "url": accelerated_url}
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
     

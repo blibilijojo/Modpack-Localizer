@@ -46,7 +46,6 @@ jobs:
           --hidden-import "collections" `
           --hidden-import "tkinter" `
           --hidden-import "ttkbootstrap" `
-          --hidden-import "cryptography" `
           --hidden-import "requests" `
           --hidden-import "charset_normalizer" `
           --hidden-import "certifi" `

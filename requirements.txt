@@ -7,4 +7,3 @@ psutil
 openai
 concurrent-log-handler
 ftb-snbt-lib
-cryptography

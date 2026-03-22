@@ -2,9 +2,6 @@ import json
 import sqlite3
 from pathlib import Path
 import logging
-import base64
-from cryptography.fernet import Fernet, InvalidToken
-import os
 import sys
 
 # 处理PyInstaller单文件打包时的路径问题
@@ -19,59 +16,6 @@ def get_app_data_path():
 APP_DATA_PATH = get_app_data_path()
 CONFIG_FILE_PATH = APP_DATA_PATH / "config.json"
 USER_DICT_PATH = APP_DATA_PATH / "Dict-User.db"
-KEY_FILE_PATH = APP_DATA_PATH / ".encryption_key"
-
-# 加密密钥管理函数
-def _get_encryption_key():
-    """获取或生成加密密钥"""
-    if KEY_FILE_PATH.exists():
-        try:
-            with open(KEY_FILE_PATH, 'rb') as f:
-                key = f.read()
-            return key
-        except Exception as e:
-            logging.warning(f"读取加密密钥失败: {e}，生成新密钥")
-    
-    # 生成新密钥
-    key = Fernet.generate_key()
-    try:
-        with open(KEY_FILE_PATH, 'wb') as f:
-            f.write(key)
-        # 设置文件权限（仅当前用户可访问）
-        if os.name == 'nt':
-            import ctypes
-            ctypes.windll.kernel32.SetFileAttributesW(str(KEY_FILE_PATH), 0x02)  # 隐藏文件
-    except Exception as e:
-        logging.error(f"保存加密密钥失败: {e}")
-    
-    return key
-
-def _encrypt_token(token):
-    """加密token"""
-    if not token:
-        return ""
-    try:
-        key = _get_encryption_key()
-        fernet = Fernet(key)
-        encrypted = fernet.encrypt(token.encode('utf-8'))
-        return base64.b64encode(encrypted).decode('utf-8')
-    except Exception as e:
-        logging.error(f"加密token失败: {e}")
-        return token
-
-def _decrypt_token(encrypted_token):
-    """解密token"""
-    if not encrypted_token:
-        return ""
-    try:
-        key = _get_encryption_key()
-        fernet = Fernet(key)
-        encrypted = base64.b64decode(encrypted_token.encode('utf-8'))
-        decrypted = fernet.decrypt(encrypted)
-        return decrypted.decode('utf-8')
-    except (InvalidToken, Exception) as e:
-        logging.error(f"解密token失败: {e}")
-        return encrypted_token
 
 # 数据库初始化函数
 def _init_user_dict_db():
@@ -254,9 +198,7 @@ def load_config() -> dict:
             config["prompt"] = DEFAULT_PROMPT.strip()
             config_updated = True
         
-        # 解密GitHub token
-        if "github_token" in config:
-            config["github_token"] = _decrypt_token(config["github_token"])
+
         
         if config_updated:
             logging.info("配置文件已自动更新和补充，正在保存...")
@@ -272,9 +214,7 @@ def save_config(config_data: dict):
         # 创建配置副本以避免修改原始数据
         config_copy = config_data.copy()
         
-        # 加密GitHub token
-        if "github_token" in config_copy:
-            config_copy["github_token"] = _encrypt_token(config_copy["github_token"])
+
         
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
             json.dump(config_copy, f, indent=4, ensure_ascii=False)

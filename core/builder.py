@@ -57,22 +57,14 @@ class Builder:
                 comment_counter += 1
                 translated_key = f'_comment_{comment_counter}'
                 if translated_key in translations:
-                    translated_value = translations[translated_key]
-                    # 处理引号，将 " 替换为 \"
-                    translated_value = translated_value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    translated_value = translated_value.replace('\n', '\\n')
+                    translated_value = translations[translated_key].replace('"', '\\"')
                     # 保持原始键的格式，只替换值
                     output.append(f'"{info["key"]}":"{translated_value}"')
                 else:
                     # 保留原始值
                     output.append(info['full_match'])
             elif info['key'] in translations:
-                translated_value = translations[info['key']]
-                # 处理引号，将 " 替换为 \"
-                translated_value = translated_value.replace('"', '\\"')
-                # 处理换行符，确保 \n 被正确保留
-                translated_value = translated_value.replace('\n', '\\n')
+                translated_value = translations[info['key']].replace('"', '\\"')
                 # 保持原始键的格式，只替换值
                 output.append(f'"{info["key"]}":"{translated_value}"')
             else:
@@ -192,11 +184,7 @@ class Builder:
                 comment_counter += 1
                 translated_key = f'_comment_{comment_counter}'
                 if translated_key in translations:
-                    translated_value = translations[translated_key]
-                    # 处理引号，将 " 替换为 \"
-                    translated_value = translated_value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    translated_value = translated_value.replace('\n', '\\n')
+                    translated_value = translations[translated_key].replace('"', '\\"')
                     # 保持原始键的格式，只替换值
                     output_content += f'"{key}":"{translated_value}"'
                     processed_keys.add(translated_key)
@@ -204,11 +192,7 @@ class Builder:
                     # 如果没有翻译，保持原始值
                     output_content += template_content[start:end]
             elif key in translations:
-                translated_value = translations[key]
-                # 处理引号，将 " 替换为 \"
-                translated_value = translated_value.replace('"', '\\"')
-                # 处理换行符，确保 \n 被正确保留
-                translated_value = translated_value.replace('\n', '\\n')
+                translated_value = translations[key].replace('"', '\\"')
                 # 保持原始键的格式，只替换值
                 output_content += f'"{key}":"{translated_value}"'
                 processed_keys.add(key)
@@ -229,11 +213,8 @@ class Builder:
             unprocessed_pairs = []
             for key, value in translations.items():
                 if key not in processed_keys:
-                    # 处理引号，将 " 替换为 \"
-                    processed_value = value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    processed_value = processed_value.replace('\n', '\\n')
-                    unprocessed_pairs.append(f'    "{key}":"{processed_value}"')
+                    escaped_value = value.replace('"', '\\"')
+                    unprocessed_pairs.append(f'    "{key}":"{escaped_value}"')
             
             if unprocessed_pairs:
                 # 在结束括号前添加未处理的键值对

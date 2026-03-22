@@ -17,7 +17,7 @@ class Translator:
     PLACEHOLDER_PERCENT = re.compile(r'%\d*\$?[a-zA-Z]+')
     PLACEHOLDER_BRACE = re.compile(r'\$\{[^}]+\}')
     PLACEHOLDER_DOLLAR = re.compile(r'\$\d+')
-    CHINESE_CHAR = re.compile('[一 - 鿿]')
+    CHINESE_CHAR = re.compile('[一-鿿]')
     ENGLISH_LETTER = re.compile(r'[a-zA-Z]')
     JSON_KEY_VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
     LANG_KEY_VALUE = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
@@ -64,6 +64,10 @@ class Translator:
         cleaned = self.PLACEHOLDER_DOLLAR.sub('', cleaned)
         cleaned = cleaned.replace('%', '')
         
+        # 检查是否包含中文字符
+        if self.CHINESE_CHAR.search(cleaned):
+            return True
+        # 检查是否不包含英文字母
         return not self.ENGLISH_LETTER.search(cleaned)
     
     def _get_ordered_keys(self, content: str, file_format: str) -> List[str]:

@@ -53,6 +53,34 @@ jobs:
           --hidden-import "urllib3" `
           --hidden-import "openai" `
           --hidden-import "httpx" `
+          --hidden-import "core" `
+          --hidden-import "core.extractor" `
+          --hidden-import "core.models" `
+          --hidden-import "core.translator" `
+          --hidden-import "core.builder" `
+          --hidden-import "core.pack_builder" `
+          --hidden-import "core.dictionary_manager" `
+          --hidden-import "core.term_database" `
+          --hidden-import "core.decision_engine" `
+          --hidden-import "core.data_aggregator" `
+          --hidden-import "core.orchestrator" `
+          --hidden-import "core.quest_converter" `
+          --hidden-import "core.workflow" `
+          --hidden-import "core.exceptions" `
+          --hidden-import "utils" `
+          --hidden-import "utils.config_manager" `
+          --hidden-import "utils.logger_setup" `
+          --hidden-import "utils.file_utils" `
+          --hidden-import "utils.error_logger" `
+          --hidden-import "utils.dictionary_searcher" `
+          --hidden-import "utils.update_checker" `
+          --hidden-import "utils.session_manager" `
+          --hidden-import "utils.retry_logic" `
+          --hidden-import "services" `
+          --hidden-import "services.ai_translator" `
+          --hidden-import "services.github_service" `
+          --hidden-import "services.punctuation_corrector" `
+          --hidden-import "services.space_remover" `
           --hidden-import "gui" `
           --hidden-import "gui.main_window" `
           --hidden-import "gui.settings_window" `
@@ -76,34 +104,6 @@ jobs:
           --hidden-import "gui.enhanced_comprehensive_processing" `
           --hidden-import "gui.github_upload_ui" `
           --hidden-import "gui.dialog.github_version_select" `
-          --hidden-import "services" `
-          --hidden-import "services.ai_translator" `
-          --hidden-import "services.github_service" `
-          --hidden-import "services.punctuation_corrector" `
-          --hidden-import "services.space_remover" `
-          --hidden-import "utils" `
-          --hidden-import "utils.config_manager" `
-          --hidden-import "utils.logger_setup" `
-          --hidden-import "utils.file_utils" `
-          --hidden-import "utils.error_logger" `
-          --hidden-import "utils.dictionary_searcher" `
-          --hidden-import "utils.update_checker" `
-          --hidden-import "utils.session_manager" `
-          --hidden-import "utils.retry_logic" `
-          --hidden-import "core" `
-          --hidden-import "core.translator" `
-          --hidden-import "core.builder" `
-          --hidden-import "core.extractor" `
-          --hidden-import "core.pack_builder" `
-          --hidden-import "core.dictionary_manager" `
-          --hidden-import "core.term_database" `
-          --hidden-import "core.decision_engine" `
-          --hidden-import "core.data_aggregator" `
-          --hidden-import "core.orchestrator" `
-          --hidden-import "core.quest_converter" `
-          --hidden-import "core.workflow" `
-          --hidden-import "core.models" `
-          --hidden-import "core.exceptions" `
           main.py
 
     - name: Get release notes from tag

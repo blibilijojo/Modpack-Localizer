@@ -1292,6 +1292,9 @@ class ProjectTab:
             "output_dir": self.project_info.get('output_dir')
         }
         
+        # 更新标签页标题
+        self.main_window.update_tab_title(self.tab_id, self.project_name)
+        
         # 先保存配置（不包含临时目录），然后再设置运行时需要的 mods_dir
         from utils import config_manager
         config = config_manager.load_config()
@@ -1518,6 +1521,9 @@ class MainWindow:
                 self.notebook.forget(close_tab_id)
                 del self.close_tab_map[close_tab_id]
             
+            # 保存最后创建的标签页ID
+            last_tab_id = None
+            
             # 只根据索引文件创建所有标签页，不加载任何内容
             for tab_uuid, tab_name in index_data["tabs"].items():
                 new_tab = self._add_new_tab(select_tab=False)
@@ -1525,6 +1531,13 @@ class MainWindow:
                 self.update_tab_title(new_tab.tab_id, tab_name)
                 # 保存标签页UUID，以便后续切换时加载
                 new_tab.tab_uuid = tab_uuid
+                # 记录最后创建的标签页ID
+                last_tab_id = new_tab.tab_id
+            
+            # 选中最后一个标签页
+            if last_tab_id:
+                self.notebook.select(last_tab_id)
+                self.update_menu_state()
             
             self._dispatch_log_to_active_tab(f"已创建 {tab_count} 个标签页，未加载任何标签页内容", "INFO")
         else:
@@ -1632,6 +1645,26 @@ class MainWindow:
                     tab_state = session_manager.load_tab_state(current_tab.tab_uuid)
                     if tab_state:
                         current_tab.restore_from_state(tab_state)
+            
+            # 检查当前标签页是否包含项目列表组件
+            if hasattr(current_tab, 'content_frame'):
+                for widget in current_tab.content_frame.winfo_children():
+                    # 处理 GitHubDownloadUI 的项目列表
+                    if hasattr(widget, 'project_list'):
+                        # 检查项目列表是否有子项
+                        items = widget.project_list.get_children()
+                        if items:
+                            # 自动选中第一个项目
+                            widget.project_list.selection_set(items[0])
+                    # 处理 TranslationWorkbench 的模组/任务列表
+                    elif hasattr(widget, 'ns_tree'):
+                        # 检查模组/任务列表是否有子项
+                        items = widget.ns_tree.get_children()
+                        if items:
+                            # 自动选中第一个项目
+                            widget.ns_tree.selection_set(items[0])
+                            # 触发项目选择事件，更新右侧翻译列表
+                            widget._on_namespace_selected()
         
         state = "normal" if current_tab and current_tab.workbench_instance else "disabled"
         

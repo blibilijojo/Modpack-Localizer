@@ -60,8 +60,6 @@ class Builder:
                     translated_value = translations[translated_key]
                     # 处理引号，将 " 替换为 \"
                     translated_value = translated_value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    translated_value = translated_value.replace('\n', '\\n')
                     # 保持原始键的格式，只替换值
                     output.append(f'"{info["key"]}":"{translated_value}"')
                 else:
@@ -71,8 +69,6 @@ class Builder:
                 translated_value = translations[info['key']]
                 # 处理引号，将 " 替换为 \"
                 translated_value = translated_value.replace('"', '\\"')
-                # 处理换行符，确保 \n 被正确保留
-                translated_value = translated_value.replace('\n', '\\n')
                 # 保持原始键的格式，只替换值
                 output.append(f'"{info["key"]}":"{translated_value}"')
             else:
@@ -195,8 +191,6 @@ class Builder:
                     translated_value = translations[translated_key]
                     # 处理引号，将 " 替换为 \"
                     translated_value = translated_value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    translated_value = translated_value.replace('\n', '\\n')
                     # 保持原始键的格式，只替换值
                     output_content += f'"{key}":"{translated_value}"'
                     processed_keys.add(translated_key)
@@ -207,8 +201,6 @@ class Builder:
                 translated_value = translations[key]
                 # 处理引号，将 " 替换为 \"
                 translated_value = translated_value.replace('"', '\\"')
-                # 处理换行符，确保 \n 被正确保留
-                translated_value = translated_value.replace('\n', '\\n')
                 # 保持原始键的格式，只替换值
                 output_content += f'"{key}":"{translated_value}"'
                 processed_keys.add(key)
@@ -231,8 +223,6 @@ class Builder:
                 if key not in processed_keys:
                     # 处理引号，将 " 替换为 \"
                     processed_value = value.replace('"', '\\"')
-                    # 处理换行符，确保 \n 被正确保留
-                    processed_value = processed_value.replace('\n', '\\n')
                     unprocessed_pairs.append(f'    "{key}":"{processed_value}"')
             
             if unprocessed_pairs:

@@ -31,7 +31,7 @@ class Extractor:
     def __init__(self):
         # 保持原有正则表达式规则不变
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
-        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"(.*?)"', re.DOTALL)
+        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"((?:\\.|[^\\"])*)"', re.DOTALL)
         self._module_names_cache = {}  # 添加缓存属性
         self._curseforge_names_cache = {}  # 添加curseforge名称缓存属性
         self._modrinth_names_cache = {}  # 添加modrinth名称缓存属性
@@ -144,7 +144,7 @@ class Extractor:
         
         return user_dict_by_key, user_dict_by_origin, community_dict_by_key
     
-    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None) -> ExtractionResult:
         """从Mods文件夹中提取语言数据"""
         logging.info(f"  - 正在扫描Mods文件夹: {mods_dir}")
         
@@ -157,9 +157,6 @@ class Extractor:
         jar_files = file_utils.find_files_in_dir(mods_dir, "*.jar") if mods_dir.exists() else []
         
         for i, jar_file in enumerate(jar_files):
-            if stop_event and stop_event.is_set():
-                logging.info("提取过程被用户中断")
-                return result
             if progress_update_callback:
                 progress_update_callback(i + 1, len(jar_files))
             
@@ -239,7 +236,7 @@ class Extractor:
         logging.info(f"  - Mods扫描完成。共扫描 {len(jar_files)} 个JAR文件，发现 {len(master_english)} 个含语言文件的命名空间。")
         return result
     
-    def extract_from_packs(self, zip_paths: List[Path], master_english: Dict[str, Dict[str, LanguageEntry]], stop_event=None) -> Dict[str, str]:
+    def extract_from_packs(self, zip_paths: List[Path], master_english: Dict[str, Dict[str, LanguageEntry]]) -> Dict[str, str]:
         """从第三方汉化包中提取语言数据"""
         final_pack_chinese_dict = {}
         
@@ -263,9 +260,6 @@ class Extractor:
                 namespace_map[full_namespace].append(full_namespace)
         
         for zip_path in reversed(zip_paths):
-            if stop_event and stop_event.is_set():
-                logging.info("提取过程被用户中断")
-                return final_pack_chinese_dict
             if not zip_path.exists() or not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
                 logging.warning(f"  - 无效的ZIP文件，已跳过: {zip_path}")
                 continue
@@ -1019,15 +1013,15 @@ class Extractor:
         except Exception as e:
             logging.warning(f"从TOML文件提取Modrinth名称时发生错误: {file_path} - {e}")
 
-    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("--- 阶段 1: 开始聚合所有语言数据 ---")
         
         # 从Mods中提取数据
-        result = self.extract_from_mods(mods_dir, progress_update_callback, stop_event)
+        result = self.extract_from_mods(mods_dir, progress_update_callback)
         
         # 从第三方汉化包中提取数据
-        result.pack_chinese = self.extract_from_packs(zip_paths, result.master_english, stop_event)
+        result.pack_chinese = self.extract_from_packs(zip_paths, result.master_english)
         
         # 统计结果
         total_en = sum(len(d) for d in result.master_english.values())

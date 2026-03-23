@@ -1,27 +1,3 @@
 # GUI module
-# 显式导入所有子模块，确保 PyInstaller 能够识别并打包
-import gui.main_window
-import gui.settings_window
-import gui.translation_workbench
-import gui.dialogs
-import gui.custom_widgets
-import gui.ui_utils
-import gui.theme_utils
-import gui.find_replace_dialog
-import gui.dictionary_search_window
-import gui.user_dictionary_editor
-import gui.quest_workflow_manager
-import gui.comprehensive_processing_dialog
-import gui.enhanced_comprehensive_processing
-import gui.github_upload_ui
-import gui.github_download_ui
-import gui.tab_pack_settings
-import gui.tab_settings_unified
-import gui.settings_components.basic_settings
-import gui.settings_components.ai_settings
-import gui.settings_components.resource_pack_settings
-import gui.settings_components.github_settings
-import gui.settings_components.advanced_settings
-import gui.settings_components.general_settings
-import gui.settings_components.external_services_settings
-import gui.dialog.github_version_select
+# 空文件，让 PyInstaller 识别 gui 为包
+# 所有子模块通过 --collect-submodules "gui" 自动收集

@@ -41,8 +41,23 @@ jobs:
 
     - name: Build Main Executable (Modpack-Localizer-Pro.exe)
       run: |
-        # 使用 spec 文件构建主程序（updater.exe 已经在 dist 目录中）
-        pyinstaller --noconfirm Modpack-Localizer-Pro.spec
+        pyinstaller --noconfirm --onefile --windowed --name "Modpack-Localizer-Pro" --add-data "dist/updater.exe;." `
+          --collect-submodules "core" `
+          --collect-submodules "gui" `
+          --collect-submodules "services" `
+          --collect-submodules "utils" `
+          --hidden-import "psutil" `
+          --hidden-import "collections" `
+          --hidden-import "tkinter" `
+          --hidden-import "ttkbootstrap" `
+          --hidden-import "requests" `
+          --hidden-import "charset_normalizer" `
+          --hidden-import "certifi" `
+          --hidden-import "idna" `
+          --hidden-import "urllib3" `
+          --hidden-import "openai" `
+          --hidden-import "httpx" `
+          main.py
 
     - name: Get release notes from tag
       id: get_release_notes

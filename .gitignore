@@ -10,9 +10,6 @@ dist/
 *.spec
 *.exe
 
-# 但允许特定的 spec 文件
-!Modpack-Localizer-Pro.spec
-
 # 日志目录和文件
 logs/
 error_logs/

@@ -1,1 +1,1 @@
-from .github_version_select import GitHubVersionSelectDialog
+from gui.dialog.github_version_select import GitHubVersionSelectDialog

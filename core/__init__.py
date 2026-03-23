@@ -23,19 +23,8 @@ __all__ = [
     'DictionaryEntry'
 ]
 
-# 显式导入所有子模块，确保 PyInstaller 能够识别
-import core.extractor
-import core.translator
-import core.builder
-import core.dictionary_manager
-import core.term_database
-import core.decision_engine
-import core.data_aggregator
-import core.orchestrator
-import core.quest_converter
-import core.workflow
-import core.models
-import core.exceptions
+# 注意：移除显式导入语句，避免 PyInstaller 单文件模式下的导入失败
+# 所有导入都通过__getattr__延迟加载
 
 def __getattr__(name):
     """延迟导入，避免循环导入和 PyInstaller 打包问题"""

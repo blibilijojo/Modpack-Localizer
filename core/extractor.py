@@ -159,7 +159,7 @@ def process_jar_worker(jar_path_str):
     
     return jar_file.name, mod_name, curseforge_hash, modrinth_hash, game_version
 
-from .models import (
+from core.models import (
     LanguageEntry, NamespaceInfo, ExtractionResult,
     DictionaryEntry
 )

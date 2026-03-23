@@ -8,7 +8,7 @@ import zipfile
 import os
 import json
 
-from .models import (
+from core.models import (
     TranslationResult, ExtractionResult, NamespaceInfo,
     PackSettings
 )

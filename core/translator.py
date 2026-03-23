@@ -5,7 +5,7 @@ import re
 import json
 from typing import Dict, List, Any, Optional
 
-from .models import (
+from core.models import (
     LanguageEntry, TranslationResult, NamespaceInfo,
     ExtractionResult
 )

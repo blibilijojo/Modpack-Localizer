@@ -128,6 +128,9 @@ class ProjectTab:
 
     def _lazy_load_workbench(self):
         """懒加载工作台数据"""
+        # 在方法内部导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.orchestrator import Orchestrator
+        
         if self._is_fully_loaded or not self._restored_state_data:
             return
         
@@ -511,6 +514,10 @@ class ProjectTab:
         except (RuntimeError, tk.TclError): pass
 
     def _setup_new_mod_project(self):
+        """设置新的模组项目"""
+        # 在方法内部导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.orchestrator import Orchestrator
+        
         mods_dir = self.mods_dir_var.get()
         output_dir = self.output_dir_var.get()
         if not mods_dir or not output_dir:
@@ -1333,6 +1340,10 @@ class ProjectTab:
         thread.start()
 
     def _load_project(self):
+        """加载项目存档"""
+        # 在方法内部导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.orchestrator import Orchestrator
+        
         path = filedialog.askopenfilename(
             title="选择一个项目存档文件",
             filetypes=[("项目存档", "*.sav"), ("JSON 文件", "*.json"), ("所有文件", "*.*")]

@@ -23,66 +23,80 @@ __all__ = [
     'DictionaryEntry'
 ]
 
+# 显式导入所有子模块，确保 PyInstaller 能够识别
+import core.extractor
+import core.translator
+import core.builder
+import core.dictionary_manager
+import core.term_database
+import core.decision_engine
+import core.data_aggregator
+import core.orchestrator
+import core.quest_converter
+import core.workflow
+import core.models
+import core.exceptions
+
 def __getattr__(name):
     """延迟导入，避免循环导入和 PyInstaller 打包问题"""
     if name == 'Builder':
-        from .builder import Builder
+        from core.builder import Builder
         return Builder
     elif name == 'DataAggregator':
-        from .data_aggregator import DataAggregator
+        from core.data_aggregator import DataAggregator
         return DataAggregator
     elif name == 'DecisionEngine':
-        from .decision_engine import DecisionEngine
+        from core.decision_engine import DecisionEngine
         return DecisionEngine
     elif name == 'DictionaryManager':
-        from .dictionary_manager import DictionaryManager
+        from core.dictionary_manager import DictionaryManager
         return DictionaryManager
     elif name == 'Extractor':
-        from .extractor import Extractor
+        from core.extractor import Extractor
         return Extractor
     elif name == 'ExtractionResult':
-        from .models import ExtractionResult
+        from core.models import ExtractionResult
         return ExtractionResult
     elif name == 'TranslationResult':
-        from .models import TranslationResult
+        from core.models import TranslationResult
         return TranslationResult
     elif name == 'PackSettings':
-        from .models import PackSettings
+        from core.models import PackSettings
         return PackSettings
     elif name == 'WorkflowContext':
-        from .models import WorkflowContext
+        from core.models import WorkflowContext
         return WorkflowContext
     elif name == 'LanguageEntry':
-        from .models import LanguageEntry
+        from core.models import LanguageEntry
         return LanguageEntry
     elif name == 'NamespaceInfo':
-        from .models import NamespaceInfo
+        from core.models import NamespaceInfo
         return NamespaceInfo
     elif name == 'DictionaryEntry':
-        from .models import DictionaryEntry
+        from core.models import DictionaryEntry
         return DictionaryEntry
     elif name == 'Orchestrator':
-        from .orchestrator import Orchestrator
+        from core.orchestrator import Orchestrator
         return Orchestrator
     elif name == 'PackBuilder':
-        from .pack_builder import PackBuilder
+        from core.pack_builder import PackBuilder
         return PackBuilder
     elif name == 'FTBQuestConverter':
-        from .quest_converter import FTBQuestConverter
+        from core.quest_converter import FTBQuestConverter
         return FTBQuestConverter
     elif name == 'BQMQuestConverter':
-        from .quest_converter import BQMQuestConverter
+        from core.quest_converter import BQMQuestConverter
         return BQMQuestConverter
     elif name == 'ConversionManager':
-        from .quest_converter import ConversionManager
+        from core.quest_converter import ConversionManager
         return ConversionManager
     elif name == 'TermDatabase':
-        from .term_database import TermDatabase
+        from core.term_database import TermDatabase
         return TermDatabase
     elif name == 'Translator':
-        from .translator import Translator
+        from core.translator import Translator
         return Translator
     elif name == 'Workflow':
-        from .workflow import Workflow
+        from core.workflow import Workflow
         return Workflow
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

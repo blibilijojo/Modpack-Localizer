@@ -6,15 +6,17 @@ from core.models import (
     ExtractionResult, TranslationResult, PackSettings,
     WorkflowContext
 )
-from core.extractor import Extractor
-from core.translator import Translator
-from core.builder import Builder
-from core.dictionary_manager import DictionaryManager
 
 class Workflow:
     """工作流协调器"""
     
     def __init__(self):
+        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.extractor import Extractor
+        from core.translator import Translator
+        from core.builder import Builder
+        from core.dictionary_manager import DictionaryManager
+        
         self.extractor = Extractor()
         self.translator = Translator()
         self.builder = Builder()

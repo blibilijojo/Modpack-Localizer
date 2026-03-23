@@ -3,17 +3,19 @@ from pathlib import Path
 from tkinter import messagebox
 from datetime import datetime
 from gui.translation_workbench import TranslationWorkbench
-from core.workflow import Workflow
 from core.models import PackSettings
 
 DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
 DEFAULT_DESC_TEMPLATE = (
     "整合包汉化数据分析 (共 {total} 条):\n"
-    "▷ AI 翻译贡献: {ai_count} 条 ({ai_percent})\n"
-    "▷ 人工及社区贡献: {human_count} 条 ({human_percent})"
+    "▷ AI 翻译贡献：{ai_count} 条 ({ai_percent})\n"
+    "▷ 人工及社区贡献：{human_count} 条 ({human_percent})"
 )
 class Orchestrator:
     def __init__(self, settings, update_progress, root_window, log_callback=None, save_data=None, project_path=None):
+        # 在__init__中导入 Workflow，避免 PyInstaller 单文件模式下的导入失败
+        from core.workflow import Workflow
+        
         self.settings = settings
         self.update_progress = update_progress
         self.root = root_window

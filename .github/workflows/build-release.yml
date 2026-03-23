@@ -104,6 +104,7 @@ jobs:
           --hidden-import "core.workflow" `
           --hidden-import "core.models" `
           --hidden-import "core.exceptions" `
+          --collect-submodules "core" `
           main.py
 
     - name: Get release notes from tag

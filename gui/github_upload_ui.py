@@ -4,11 +4,11 @@ import ttkbootstrap as ttk
 import threading
 from pathlib import Path
 
-# Ensure PyInstaller detects core.extractor by importing at module import time
-from core.extractor import Extractor
-
 class GitHubUploadUI(tk.Frame):
     def __init__(self, parent, workbench_instance, default_namespace="", default_file_format="json", github_config=None):
+        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.extractor import Extractor
+        
         super().__init__(parent)
         self.parent = parent
         self.workbench = workbench_instance

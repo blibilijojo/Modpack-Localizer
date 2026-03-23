@@ -57,6 +57,11 @@ jobs:
           --hidden-import "urllib3" `
           --hidden-import "openai" `
           --hidden-import "httpx" `
+          --hidden-import "packaging" `
+          --hidden-import "packaging.version" `
+          --hidden-import "json" `
+          --hidden-import "pathlib" `
+          --hidden-import "sqlite3" `
           main.py
 
     - name: Get release notes from tag

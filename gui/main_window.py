@@ -14,7 +14,6 @@ import sys
 from gui import ui_utils
 from gui.dialogs import PackPresetDialog, DownloadProgressDialog
 from utils import config_manager, session_manager
-from core.orchestrator import Orchestrator
 from _version import __version__
 from gui.quest_workflow_manager import QuestWorkflowManager
 from gui.translation_workbench import TranslationWorkbench
@@ -24,6 +23,9 @@ from gui.settings_window import SettingsWindow
 
 class ProjectTab:
     def __init__(self, parent_notebook, root_window, main_window_instance):
+        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
+        from core.orchestrator import Orchestrator
+        
         self.root = root_window
         self.main_window = main_window_instance
         self.frame = ttk.Frame(parent_notebook)

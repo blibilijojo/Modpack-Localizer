@@ -42,14 +42,13 @@ jobs:
           company-name: Modpack-Localizer
           file-description: Modpack Localizer Application
           copyright: Modpack-Localizer
-          windows-icon-from-ico: gui/resources/icon.ico
           windows-uac-admin: false
           include-package: |
             gui
             services
             utils
             core
-          include-data-file: |
+          include-data-files: |
             requirements.txt=requirements.txt
 
       - name: Upload Release Artifact

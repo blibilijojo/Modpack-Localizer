@@ -12,6 +12,7 @@ import re
 import sys
 
 from gui import ui_utils
+from utils.file_utils import is_frozen
 from gui.dialogs import PackPresetDialog, DownloadProgressDialog
 from utils import config_manager, session_manager
 from core.orchestrator import Orchestrator
@@ -1683,8 +1684,7 @@ class MainWindow:
 
     def start_update_check(self, user_initiated=False):
         # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
-        is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
-        if not is_frozen:
+        if not is_frozen():
             if user_initiated:
                 messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。")
             return

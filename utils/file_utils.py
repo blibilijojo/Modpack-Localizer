@@ -1,6 +1,42 @@
 import json
+import sys
+import tempfile
 from pathlib import Path
 import logging
+
+def is_frozen() -> bool:
+    """
+    检测当前是否在打包后的 exe 环境中运行（支持 PyInstaller 和 Nuitka）
+    
+    使用多层检测逻辑：
+    1. 检查 sys.frozen 或 sys.nuitka 属性
+    2. 检查是否有 _MEIPASS 或 _NUITKA_SYS 属性（打包后的临时目录）
+    3. 检查可执行文件是否在系统临时目录中（Nuitka 的打包特征）
+    
+    Returns:
+        如果是打包后的 exe 环境返回 True，否则返回 False
+    """
+    # 方法 1: 检查 sys.frozen 或 sys.nuitka 属性
+    frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
+    if frozen:
+        return True
+    
+    # 方法 2: 检查是否在 PyInstaller/Nuitka 的临时目录中运行
+    if hasattr(sys, '_MEIPASS') or hasattr(sys, '_NUITKA_SYS'):
+        return True
+    
+    # 方法 3: 检查可执行文件是否在临时目录中（Nuitka 会在临时目录运行）
+    exe_path = Path(sys.executable) if hasattr(sys, 'executable') else None
+    if exe_path:
+        temp_dir = Path(tempfile.gettempdir())
+        try:
+            exe_path.resolve().relative_to(temp_dir)
+            return True  # 在临时目录中运行，说明是打包的 exe
+        except ValueError:
+            pass
+    
+    return False
+
 def load_json(file_path: Path) -> dict | None:
     try:
         with open(file_path, 'r', encoding='utf-8') as f:

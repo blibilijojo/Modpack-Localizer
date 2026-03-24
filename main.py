@@ -7,15 +7,14 @@ from pathlib import Path
 from gui.main_window import MainWindow
 from utils import config_manager
 from utils.error_logger import ErrorLogger
+from utils.file_utils import is_frozen
 
 # 清理旧文件
 
 def cleanup_old_files():
     """在程序启动时清理上一次更新留下的临时文件。"""
     try:
-        # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
-        is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
-        if not is_frozen:
+        if not is_frozen():
             return
 
         current_exe_path = Path(sys.executable)

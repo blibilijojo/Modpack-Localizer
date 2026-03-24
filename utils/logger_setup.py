@@ -4,12 +4,11 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from utils import config_manager
+from .file_utils import is_frozen
 
 # 处理 PyInstaller 和 Nuitka 单文件打包时的路径问题
 def get_app_data_path():
-    # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
-    is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
-    if is_frozen:
+    if is_frozen():
         # 单文件打包模式，使用可执行文件所在目录
         return Path(sys.executable).parent
     else:

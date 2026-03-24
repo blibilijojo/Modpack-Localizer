@@ -171,13 +171,13 @@ class UnifiedSettingsTab(ttk.Frame):
         log_level_desc.pack(anchor="w", pady=2)
         
         # 详细的日志级别说明，直接显示在界面上
-        desc_text = "        
+        desc_text = """        
 DEBUG: 最详细的日志，记录所有程序运行细节（适合开发调试）
 INFO: 基本的程序运行信息，如任务开始、完成等（适合普通用户）
 WARNING: 警告信息，提示潜在问题但不影响程序运行
 ERROR: 错误信息，表示部分功能可能无法正常工作
 CRITICAL: 致命错误，程序即将崩溃
-        "
+        """
         log_level_details = ttk.Label(log_level_desc_frame, 
                                     text=desc_text.strip(), 
                                     justify="left",

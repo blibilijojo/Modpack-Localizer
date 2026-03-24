@@ -1292,32 +1292,43 @@ class TranslationWorkbench(ttk.Frame):
                 display_text = namespace
             self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(display_untranslated, display_completed))
 
-    def _determine_source(self, en_text: str, zh_text: str, current_source: str = None) -> str:
-        """根据原文和译文内容确定正确的 source 标签"""
-        if not en_text:
-            if zh_text:
-                return '手动校对'  # 原文为空但有译文，标记为手动校对
-            else:
-                return '空'  # 原文为空且没有译文，标记为空
-        elif not zh_text:
-            return '待翻译'  # 原文不为空但没有译文，标记为待翻译
-        else:
-            return '手动校对'  # 原文不为空且有译文，标记为手动校对
-    
     def _validate_and_fix_source(self, item_data: dict) -> str:
-        """验证并修正条目的 source 标签，返回正确的 source"""
+        """验证并修正条目的 source 标签，只在 source 与内容明显矛盾时修正"""
         en_text = item_data.get('en', '').strip()
         zh_text = item_data.get('zh', '').strip()
         current_source = item_data.get('source', '')
         
-        # 确定正确的 source
-        expected_source = self._determine_source(en_text, zh_text, current_source)
+        # 只在 source 与内容明显矛盾时才修正
+        # 矛盾情况 1：source 为'空'但原文不为空 → 应该根据是否有译文判断为'待翻译'或'手动校对'
+        if current_source == '空' and en_text:
+            if zh_text:
+                new_source = '手动校对'
+            else:
+                new_source = '待翻译'
+            item_data['source'] = new_source
+            return new_source
         
-        # 如果不匹配，更新数据中的 source 字段
-        if current_source != expected_source:
-            item_data['source'] = expected_source
+        # 矛盾情况 2：source 为'待翻译'但原文为空 → 应该根据是否有译文判断为'空'或'手动校对'
+        if current_source == '待翻译' and not en_text:
+            if zh_text:
+                new_source = '手动校对'
+            else:
+                new_source = '空'
+            item_data['source'] = new_source
+            return new_source
         
-        return expected_source
+        # 矛盾情况 3：原文和译文都为空，但 source 不是'空'
+        if not en_text and not zh_text and current_source != '空':
+            item_data['source'] = '空'
+            return '空'
+        
+        # 矛盾情况 4：原文不为空且译文不为空，但 source 为'待翻译'或'空'
+        if en_text and zh_text and current_source in ['待翻译', '空']:
+            item_data['source'] = '手动校对'
+            return '手动校对'
+        
+        # 其他情况保持原有 source 不变（包括模组自带、社区词典、个人词典等）
+        return current_source
     
     def _update_namespace_summary(self, ns: str):
         if not self.ns_tree.exists(ns):

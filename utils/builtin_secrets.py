@@ -1,14 +1,18 @@
 """
 内置密钥管理模块
 用于在打包时嵌入敏感密钥，并防止其被写入配置文件
+
+注意：内置密钥在构建时通过环境变量注入，编译后成为常量
 """
-import os
 
 # 内置 CurseForge API 密钥（在构建时由 GitHub Secrets 注入）
-BUILTIN_CURSEFORGE_API_KEY = os.environ.get('CURSEFORGE_API_KEY', '')
+# 如果是在开发环境或未设置环境变量，则为空字符串
+import os
+_BUILTIN_KEY = os.environ.get('CURSEFORGE_API_KEY', '')
 
-# 标记是否为内置密钥
-IS_BUILTIN_CURSEFORGE_KEY = bool(BUILTIN_CURSEFORGE_API_KEY)
+# 在模块加载时立即捕获环境变量值，防止后续变化
+BUILTIN_CURSEFORGE_API_KEY = _BUILTIN_KEY
+IS_BUILTIN_CURSEFORGE_KEY = bool(_BUILTIN_KEY)
 
 
 def get_builtin_curseforge_key() -> str:

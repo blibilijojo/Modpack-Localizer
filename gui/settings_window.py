@@ -22,6 +22,7 @@ from gui import ui_utils
 from gui.settings_components.general_settings import GeneralSettings
 from gui.settings_components.ai_settings import AISettings
 from gui.settings_components.resource_pack_settings import ResourcePackSettings
+from gui.settings_components.external_services_settings import ExternalServicesSettings
 from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
 
@@ -58,6 +59,7 @@ class SettingsWindow(ttk.Toplevel):
             self._create_general_tab,
             self._create_ai_tab,
             self._create_translation_resources_tab,
+            self._create_external_services_tab,
             self._create_pack_config_tab,
             self._create_advanced_tab
         ]
@@ -90,6 +92,11 @@ class SettingsWindow(ttk.Toplevel):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text=" 资源包配置 ")
         self.pack_settings_manager = TabPackSettings(tab)
+    
+    def _create_external_services_tab(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text=" 外部服务 ")
+        self.external_services_settings = ExternalServicesSettings(tab, self.config, self._save_config)
 
     def _create_advanced_tab(self):
         tab = ttk.Frame(self.notebook)
@@ -126,6 +133,10 @@ class SettingsWindow(ttk.Toplevel):
         # 收集翻译资源设置
         if hasattr(self, 'resource_pack_settings'):
             self.config.update(self.resource_pack_settings.get_config())
+        
+        # 收集外部服务设置
+        if hasattr(self, 'external_services_settings'):
+            self.config.update(self.external_services_settings.get_config())
 
         # 收集高级设置
         if hasattr(self, 'advanced_settings'):

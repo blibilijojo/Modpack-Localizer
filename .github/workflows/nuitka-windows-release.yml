@@ -42,18 +42,6 @@ jobs:
           Write-Output "version=$version" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
-      - name: Set CurseForge API Key
-        id: cf_key
-        run: |
-          if ($env:CURSEFORGE_API_KEY) {
-            Write-Output "has_key=true" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Output "has_key=false" >> $env:GITHUB_OUTPUT
-          }
-        shell: pwsh
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-
       - name: Build Windows Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -76,8 +64,8 @@ jobs:
             core
           include-data-files: |
             requirements.txt=requirements.txt
-          environment-variables: |
-            CURSEFORGE_API_KEY=${{ secrets.CURSEFORGE_API_KEY }}
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4

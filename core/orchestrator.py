@@ -3,14 +3,14 @@ from pathlib import Path
 from tkinter import messagebox
 from datetime import datetime
 from gui.translation_workbench import TranslationWorkbench
-from core.models import PackSettings, ExtractionResult, NamespaceInfo, TranslationResult, LanguageEntry
 from core.workflow import Workflow
+from core.models import PackSettings
 
 DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
 DEFAULT_DESC_TEMPLATE = (
     "整合包汉化数据分析 (共 {total} 条):\n"
-    "▷ AI 翻译贡献：{ai_count} 条 ({ai_percent})\n"
-    "▷ 人工及社区贡献：{human_count} 条 ({human_percent})"
+    "▷ AI 翻译贡献: {ai_count} 条 ({ai_percent})\n"
+    "▷ 人工及社区贡献: {human_count} 条 ({human_percent})"
 )
 class Orchestrator:
     def __init__(self, settings, update_progress, root_window, log_callback=None, save_data=None, project_path=None):
@@ -338,9 +338,10 @@ class Orchestrator:
                 context.stop_event = self.stop_event
             
             # 手动构建提取结果对象（简化版）
+            from core.models import ExtractionResult, NamespaceInfo
             extraction_result = ExtractionResult()
             extraction_result.raw_english_files = self.raw_english_files
-            # 转换 namespace_formats 为 namespace_info
+            # 转换namespace_formats为namespace_info
             for ns, fmt in self.namespace_formats.items():
                 extraction_result.namespace_info[ns] = NamespaceInfo(
                     name=ns,
@@ -349,6 +350,7 @@ class Orchestrator:
                 )
             
             # 手动构建翻译结果对象（简化版）
+            from core.models import TranslationResult, LanguageEntry
             translation_result = TranslationResult()
             # 转换final_workbench_data为TranslationResult格式
             for ns, ns_data in self.final_workbench_data.items():

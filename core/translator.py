@@ -5,20 +5,25 @@ import re
 import json
 from typing import Dict, List, Any, Optional
 
-from core.models import LanguageEntry, TranslationResult, NamespaceInfo, ExtractionResult
+from .models import (
+    LanguageEntry, TranslationResult, NamespaceInfo,
+    ExtractionResult
+)
 
 class Translator:
     """翻译决策引擎"""
     
+    # 预编译正则表达式，避免重复编译
+    PLACEHOLDER_PERCENT = re.compile(r'%\d*\$?[a-zA-Z]+')
+    PLACEHOLDER_BRACE = re.compile(r'\$\{[^}]+\}')
+    PLACEHOLDER_DOLLAR = re.compile(r'\$\d+')
+    CHINESE_CHAR = re.compile('[一-鿿]')
+    ENGLISH_LETTER = re.compile(r'[a-zA-Z]')
+    JSON_KEY_VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    LANG_KEY_VALUE = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+    
     def __init__(self):
-        # 预编译正则表达式，避免重复编译
-        self.PLACEHOLDER_PERCENT = re.compile(r'%\d*\$?[a-zA-Z]+')
-        self.PLACEHOLDER_BRACE = re.compile(r'\$\{[^}]+\}')
-        self.PLACEHOLDER_DOLLAR = re.compile(r'\$\d+')
-        self.CHINESE_CHAR = re.compile('[一 - 鿿]')
-        self.ENGLISH_LETTER = re.compile(r'[a-zA-Z]')
-        self.JSON_KEY_VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
-        self.LANG_KEY_VALUE = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+        pass
     
     def _resolve_origin_name_conflict(self, candidates: List[Dict]) -> Optional[str]:
         """解决原文翻译冲突"""

@@ -8,7 +8,10 @@ import zipfile
 import os
 import json
 
-from core.models import TranslationResult, ExtractionResult, NamespaceInfo, PackSettings
+from .models import (
+    TranslationResult, ExtractionResult, NamespaceInfo,
+    PackSettings
+)
 
 class Builder:
     """资源包构建器"""

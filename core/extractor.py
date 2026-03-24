@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 from collections import defaultdict
 from utils import file_utils, config_manager
+from core.models import (
+    LanguageEntry, NamespaceInfo, ExtractionResult,
+    DictionaryEntry
+)
 
 def is_json_content(content: str) -> bool:
     """检查内容是否为JSON格式"""
@@ -158,11 +162,6 @@ def process_jar_worker(jar_path_str):
         mod_name = jar_file.stem
     
     return jar_file.name, mod_name, curseforge_hash, modrinth_hash, game_version
-
-from core.models import (
-    LanguageEntry, NamespaceInfo, ExtractionResult,
-    DictionaryEntry
-)
 
 class Extractor:
     """语言数据提取器"""

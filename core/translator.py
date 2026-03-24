@@ -5,13 +5,12 @@ import re
 import json
 from typing import Dict, List, Any, Optional
 
+from core.models import LanguageEntry, TranslationResult, NamespaceInfo, ExtractionResult
+
 class Translator:
     """翻译决策引擎"""
     
     def __init__(self):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.models import LanguageEntry, TranslationResult, NamespaceInfo, ExtractionResult
-        
         # 预编译正则表达式，避免重复编译
         self.PLACEHOLDER_PERCENT = re.compile(r'%\d*\$?[a-zA-Z]+')
         self.PLACEHOLDER_BRACE = re.compile(r'\$\{[^}]+\}')

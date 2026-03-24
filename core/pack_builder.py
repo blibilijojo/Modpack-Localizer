@@ -8,6 +8,8 @@ import zipfile
 import os
 import json
 
+from core.data_aggregator import DataAggregator
+
 class PackBuilder:
     def _build_json_file(self, template_content: str, translations: Dict[str, str]) -> str:
         """
@@ -118,10 +120,9 @@ class PackBuilder:
     
     def _build_json_file_robust(self, template_content: str, translations: Dict[str, str]) -> str:
         """
-        健壮的JSON文件构建，处理各种特殊情况
+        健壮的 JSON 文件构建，处理各种特殊情况
         """
         # 使用与提取时相同的正则表达式
-        from core.data_aggregator import DataAggregator
         agg = DataAggregator(None, [], None)
         
         # 提取模板中所有的键值对位置信息

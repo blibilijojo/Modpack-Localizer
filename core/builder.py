@@ -8,12 +8,12 @@ import zipfile
 import os
 import json
 
+from core.models import TranslationResult, ExtractionResult, NamespaceInfo, PackSettings
+
 class Builder:
     """资源包构建器"""
     
     def __init__(self):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.models import TranslationResult, ExtractionResult, NamespaceInfo, PackSettings
         # 保持原有正则表达式规则不变
         self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
         self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)

@@ -3,7 +3,8 @@ from pathlib import Path
 from tkinter import messagebox
 from datetime import datetime
 from gui.translation_workbench import TranslationWorkbench
-from core.models import PackSettings
+from core.models import PackSettings, ExtractionResult, NamespaceInfo, TranslationResult, LanguageEntry
+from core.workflow import Workflow
 
 DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
 DEFAULT_DESC_TEMPLATE = (
@@ -13,9 +14,6 @@ DEFAULT_DESC_TEMPLATE = (
 )
 class Orchestrator:
     def __init__(self, settings, update_progress, root_window, log_callback=None, save_data=None, project_path=None):
-        # 在__init__中导入 Workflow，避免 PyInstaller 单文件模式下的导入失败
-        from core.workflow import Workflow
-        
         self.settings = settings
         self.update_progress = update_progress
         self.root = root_window
@@ -340,10 +338,9 @@ class Orchestrator:
                 context.stop_event = self.stop_event
             
             # 手动构建提取结果对象（简化版）
-            from core.models import ExtractionResult, NamespaceInfo
             extraction_result = ExtractionResult()
             extraction_result.raw_english_files = self.raw_english_files
-            # 转换namespace_formats为namespace_info
+            # 转换 namespace_formats 为 namespace_info
             for ns, fmt in self.namespace_formats.items():
                 extraction_result.namespace_info[ns] = NamespaceInfo(
                     name=ns,
@@ -352,7 +349,6 @@ class Orchestrator:
                 )
             
             # 手动构建翻译结果对象（简化版）
-            from core.models import TranslationResult, LanguageEntry
             translation_result = TranslationResult()
             # 转换final_workbench_data为TranslationResult格式
             for ns, ns_data in self.final_workbench_data.items():

@@ -1757,10 +1757,6 @@ class MainWindow:
             updater_path = Path(sys._MEIPASS) / "updater.exe"
             if not updater_path.exists():
                  raise FileNotFoundError("关键更新组件 'updater.exe' 未被打包进主程序！")
-        except AttributeError:
-            # 如果是直接运行 .py 文件进行开发调试，则无法使用此功能
-            self.root.after(0, lambda: messagebox.showerror("更新错误", "开发环境下无法使用自动更新功能。"))
-            return
         except FileNotFoundError as e:
             self.root.after(0, lambda: messagebox.showerror("更新错误", str(e)))
             return

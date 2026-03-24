@@ -56,6 +56,7 @@ jobs:
           copyright: Modpack-Localizer
           windows-uac-admin: false
           windows-disable-console: true
+          output-file: Modpack-Localizer-Pro.exe
           include-package: |
             gui
             services
@@ -68,13 +69,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Modpack-Localizer-Pro-Windows
-          path: build/main.exe
+          path: build/Modpack-Localizer-Pro.exe
           include-hidden-files: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/main.exe
+          files: build/Modpack-Localizer-Pro.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

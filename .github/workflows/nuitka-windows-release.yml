@@ -47,7 +47,7 @@ jobs:
         with:
           nuitka-version: main
           script-name: main.py
-          mode: standalone
+          mode: onefile
           enable-plugins: tk-inter
           product-name: Modpack-Localizer-Pro
           product-version: ${{ steps.version.outputs.version }}
@@ -55,6 +55,7 @@ jobs:
           file-description: Modpack Localizer Application
           copyright: Modpack-Localizer
           windows-uac-admin: false
+          windows-disable-console: true
           include-package: |
             gui
             services
@@ -67,13 +68,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Modpack-Localizer-Pro-Windows
-          path: build/main.dist/
+          path: build/main.exe
           include-hidden-files: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/main.dist/*
+          files: build/main.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 from collections import defaultdict
 from utils import file_utils, config_manager
+from core.models import (
+    LanguageEntry, NamespaceInfo, ExtractionResult,
+    DictionaryEntry
+)
 
 def is_json_content(content: str) -> bool:
     """检查内容是否为JSON格式"""
@@ -158,11 +162,6 @@ def process_jar_worker(jar_path_str):
         mod_name = jar_file.stem
     
     return jar_file.name, mod_name, curseforge_hash, modrinth_hash, game_version
-
-from .models import (
-    LanguageEntry, NamespaceInfo, ExtractionResult,
-    DictionaryEntry
-)
 
 class Extractor:
     """语言数据提取器"""
@@ -735,8 +734,9 @@ class Extractor:
             if not project_ids:
                 return {}
 
-            # 步骤2：获取工程信息
-            url = f"https://api.modrinth.com/v2/projects?ids=[{','.join([f'\"{pid}\"' for pid in project_ids])}]"
+            # 步骤 2：获取工程信息
+            ids_str = ','.join([f'"{pid}"' for pid in project_ids])
+            url = f"https://api.modrinth.com/v2/projects?ids=[{ids_str}]"
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             project_info = response.json()

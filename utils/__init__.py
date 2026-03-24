@@ -1,3 +1,8 @@
-# Utils module
-# 空文件，让 PyInstaller 识别 utils 为包
-# 所有子模块通过 --collect-submodules "utils" 自动收集
+from .multithreading_utils import MultithreadingUtils
+from . import file_utils
+from . import config_manager
+from . import error_logger
+from . import logger_setup
+from . import retry_logic
+from . import session_manager
+from . import update_checker

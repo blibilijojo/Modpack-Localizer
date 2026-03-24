@@ -12,14 +12,12 @@ import ftb_snbt_lib as slib
 from ftb_snbt_lib import tag
 
 from gui import ui_utils
+from core.quest_converter import FTBQuestConverter, BQMQuestConverter, LANGConverter, ConversionManager
 from gui.translation_workbench import TranslationWorkbench
 from utils import config_manager
 
 class QuestWorkflowManager:
     def __init__(self, project_info, main_window):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.quest_converter import FTBQuestConverter, BQMQuestConverter, LANGConverter, ConversionManager
-        
         self.project_info = project_info
         self.main_window = main_window
         self.instance_path = Path(project_info['instance_dir'])

@@ -2,14 +2,14 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Callable
 
-from core.models import (
+from .models import (
     ExtractionResult, TranslationResult, PackSettings,
     WorkflowContext
 )
-from core.extractor import Extractor
-from core.translator import Translator
-from core.builder import Builder
-from core.dictionary_manager import DictionaryManager
+from .extractor import Extractor
+from .translator import Translator
+from .builder import Builder
+from .dictionary_manager import DictionaryManager
 
 class Workflow:
     """工作流协调器"""

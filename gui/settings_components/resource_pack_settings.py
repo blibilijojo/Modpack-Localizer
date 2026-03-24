@@ -6,6 +6,7 @@ from gui import custom_widgets
 from gui.dialogs import DownloadProgressDialog
 import threading
 import sqlite3
+from core.term_database import TermDatabase
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -16,9 +17,6 @@ from collections import deque
 
 class ResourcePackSettings:
     def __init__(self, parent, config, save_callback):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.term_database import TermDatabase
-        
         self.parent = parent
         self.config = config.copy()
         self.save_callback = save_callback

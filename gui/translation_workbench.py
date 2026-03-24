@@ -19,12 +19,10 @@ from services.ai_translator import AITranslator
 from gui import ui_utils
 from gui.custom_widgets import ToolTip
 from gui.find_replace_dialog import FindReplaceDialog
+from core.term_database import TermDatabase
 
 class TranslationWorkbench(ttk.Frame):
     def __init__(self, parent_frame, initial_data: dict, namespace_formats: dict, raw_english_files: dict, current_settings: dict, log_callback=None, project_path: str | None = None, finish_button_text: str = "完成", finish_callback=None, cancel_callback=None, project_name: str = "Unnamed_Project", main_window_instance=None, undo_history: dict = None, module_names: list = None):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.term_database import TermDatabase
-        
         super().__init__(parent_frame)
         self.translation_data = initial_data
         self.namespace_formats = namespace_formats

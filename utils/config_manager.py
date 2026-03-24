@@ -2,9 +2,10 @@ import json
 import sqlite3
 from pathlib import Path
 import logging
+import os
 import sys
 
-# 处理PyInstaller单文件打包时的路径问题
+# 处理 PyInstaller 单文件打包时的路径问题
 def get_app_data_path():
     if getattr(sys, 'frozen', False):
         # 单文件打包模式，使用可执行文件所在目录
@@ -22,7 +23,7 @@ def _init_user_dict_db():
     conn = sqlite3.connect(USER_DICT_PATH)
     cursor = conn.cursor()
     
-    # 创建表：by_key表存储以key为索引的翻译
+    # 创建表：by_key 表存储以 key 为索引的翻译
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS by_key (
         key TEXT PRIMARY KEY,
@@ -30,7 +31,7 @@ def _init_user_dict_db():
     )
     ''')
     
-    # 创建表：by_origin_name表存储以原文为索引的翻译
+    # 创建表：by_origin_name 表存储以原文为索引的翻译
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS by_origin_name (
         origin_name TEXT PRIMARY KEY,
@@ -42,15 +43,15 @@ def _init_user_dict_db():
     conn.close()
 
 DEFAULT_PROMPT = """
-你是一个只输出JSON的翻译AI。
-任务：将输入JSON对象中，每个数字键对应的字符串值翻译为简体中文。
+你是一个只输出 JSON 的翻译 AI。
+任务：将输入 JSON 对象中，每个数字键对应的字符串值翻译为简体中文。
 核心指令:
 1. 保持所有格式代码 (如 %s, §a, \n) 不变。
-2. 返回的JSON对象的键必须与输入的数字键完全一致。
+2. 返回的 JSON 对象的键必须与输入的数字键完全一致。
 最终要求:
-你的回复必须是、且只能是一个JSON对象, 例如 `{"0": "译文1", "1": "译文2"}`。
+你的回复必须是、且只能是一个 JSON 对象，例如 `{"0": "译文 1", "1": "译文 2"}`。
 禁止在 `[` 和 `]` 或 `{` 和 `}` 的前后添加任何多余的文字或代码标记。
-输入: {input_data_json}
+输入：{input_data_json}
 """
 
 DEFAULT_CONFIG = {
@@ -98,7 +99,7 @@ DEFAULT_CONFIG = {
     "theme": "litera",
     # 社区词典导入过滤设置
     "community_dict_filter": {
-        "max_word_count": 0,  # 原文最大单词数，0表示不限制
+        "max_word_count": 0,  # 原文最大单词数，0 表示不限制
         "require_chinese_translation": True  # 译文必须包含中文
     },
     "github_proxies": [
@@ -107,17 +108,17 @@ DEFAULT_CONFIG = {
         "https://cdn.gh-proxy.org/",
         "https://gh-proxy.org/"
     ],
-    # GitHub汉化仓库上传设置
+    # GitHub 汉化仓库上传设置
     "github_repo": "",
     "github_token": "",
     
-    # AI翻译批次处理默认值
+    # AI 翻译批次处理默认值
     "ai_batch_count": 10,       # 批次数默认值
     "ai_batch_items": 200,      # 每批次条目数默认值
     "ai_batch_words": 2000,      # 每批次单词数默认值
 
-    # CurseForge API设置
-    "curseforge_api_key": "",    # CurseForge API密钥
+    # CurseForge API 设置
+    "curseforge_api_key": "",    # CurseForge API 密钥
 }
 
 def load_config() -> dict:
@@ -130,7 +131,7 @@ def load_config() -> dict:
             config = json.load(f)
         config_updated = False
         if "api_keys_raw" not in config and "api_keys" in config:
-            logging.warning("检测到旧版配置，正在迁移API密钥以在UI中保留格式...")
+            logging.warning("检测到旧版配置，正在迁移 API 密钥以在 UI 中保留格式...")
             config["api_keys_raw"] = "\n".join(config["api_keys"])
             config_updated = True
         presets = config.get("pack_settings_presets", {})
@@ -139,7 +140,7 @@ def load_config() -> dict:
              config["pack_settings_presets"]["默认预案"]["pack_description"] = ""
              config_updated = True
         last_settings = config.get("last_pack_settings", {})
-        old_desc = "一个由Modpack Localizer生成的汉化包"
+        old_desc = "一个由 Modpack Localizer 生成的汉化包"
         if last_settings.get("pack_description", "") == old_desc:
              logging.warning("检测到旧的'最后使用的设置'简介，将自动清空。")
              config["last_pack_settings"]["pack_description"] = ""
@@ -149,7 +150,7 @@ def load_config() -> dict:
             config["community_dict_path"] = config.pop("global_dict_path")
             config_updated = True
         
-        # 转换旧的community_dict_path为新的community_dict_dir
+        # 转换旧的 community_dict_path 为新的 community_dict_dir
         if "community_dict_path" in config and "community_dict_dir" not in config:
             import os
             old_path = config["community_dict_path"]
@@ -169,9 +170,9 @@ def load_config() -> dict:
             del config["ai_retry_interval"]
             config_updated = True
         
-        # 转换旧的api_keys和api_endpoint格式为新的api_services格式
+        # 转换旧的 api_keys 和 api_endpoint 格式为新的 api_services 格式
         if "api_keys" in config and "api_services" not in config:
-            logging.warning("检测到旧版API密钥配置，将自动转换为新版服务配置格式。")
+            logging.warning("检测到旧版 API 密钥配置，将自动转换为新版服务配置格式。")
             api_keys = config.get("api_keys", [])
             api_endpoint = config.get("api_endpoint", "")
             api_keys_raw = config.get("api_keys_raw", "")
@@ -194,11 +195,9 @@ def load_config() -> dict:
                 config[key] = value
                 config_updated = True
         if '数字键' not in config.get("prompt", ""):
-            logging.warning("检测到旧版AI提示词，已自动更新为最稳健的键值对模式。")
+            logging.warning("检测到旧版 AI 提示词，已自动更新为最稳健的键值对模式。")
             config["prompt"] = DEFAULT_PROMPT.strip()
             config_updated = True
-        
-
         
         if config_updated:
             logging.info("配置文件已自动更新和补充，正在保存...")
@@ -211,18 +210,13 @@ def load_config() -> dict:
 
 def save_config(config_data: dict):
     try:
-        # 创建配置副本以避免修改原始数据
-        config_copy = config_data.copy()
-        
-
-        
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config_copy, f, indent=4, ensure_ascii=False)
+            json.dump(config_data, f, indent=4, ensure_ascii=False)
         logging.debug("配置已自动保存")
     except Exception as e:
-        logging.error(f"保存配置文件时出错: {e}")
+        logging.error(f"保存配置文件时出错：{e}")
 
-# 添加自动保存功能，包装原有的config_manager.save_config函数
+# 添加自动保存功能，包装原有的 config_manager.save_config 函数
 def auto_save_config(func):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
@@ -254,11 +248,11 @@ def load_user_dict() -> dict:
     conn = sqlite3.connect(USER_DICT_PATH)
     cursor = conn.cursor()
     
-    # 从by_key表读取数据
+    # 从 by_key 表读取数据
     cursor.execute("SELECT key, translation FROM by_key")
     by_key = {row[0]: row[1] for row in cursor.fetchall()}
     
-    # 从by_origin_name表读取数据
+    # 从 by_origin_name 表读取数据
     cursor.execute("SELECT origin_name, translation FROM by_origin_name")
     by_origin_name = {row[0]: row[1] for row in cursor.fetchall()}
     
@@ -282,7 +276,7 @@ def save_user_dict(dict_data: dict):
         cursor.execute("SELECT origin_name FROM by_origin_name")
         existing_origins = set(row[0] for row in cursor.fetchall())
         
-        # 处理by_key数据
+        # 处理 by_key 数据
         new_keys = set(dict_data.get("by_key", {}).keys())
         
         # 删除不再存在的键
@@ -293,7 +287,7 @@ def save_user_dict(dict_data: dict):
         for key, translation in dict_data.get("by_key", {}).items():
             cursor.execute("INSERT OR REPLACE INTO by_key (key, translation) VALUES (?, ?)", (key, translation))
         
-        # 处理by_origin_name数据
+        # 处理 by_origin_name 数据
         new_origins = set(dict_data.get("by_origin_name", {}).keys())
         
         # 删除不再存在的原文
@@ -307,4 +301,4 @@ def save_user_dict(dict_data: dict):
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"保存用户个人词典时出错: {e}")
+        logging.error(f"保存用户个人词典时出错：{e}")

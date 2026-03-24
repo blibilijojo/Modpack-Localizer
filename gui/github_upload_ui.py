@@ -6,9 +6,6 @@ from pathlib import Path
 
 class GitHubUploadUI(tk.Frame):
     def __init__(self, parent, workbench_instance, default_namespace="", default_file_format="json", github_config=None):
-        # 在__init__中导入，避免 PyInstaller 单文件模式下的导入失败
-        from core.extractor import Extractor
-        
         super().__init__(parent)
         self.parent = parent
         self.workbench = workbench_instance
@@ -472,6 +469,7 @@ class GitHubUploadUI(tk.Frame):
                     
                     if versions and game_version:
                         # 使用提取器的版本匹配方法
+                        from core.extractor import Extractor
                         extractor = Extractor()
                         matched_version = extractor._match_github_version(game_version, loaders, versions)
                         if matched_version:

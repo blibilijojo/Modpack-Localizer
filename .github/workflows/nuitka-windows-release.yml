@@ -44,10 +44,11 @@ jobs:
           copyright: Modpack-Localizer
           windows-icon-from-ico: gui/resources/icon.ico
           windows-uac-admin: false
-          include-package: gui
-          include-package: services
-          include-package: utils
-          include-package: core
+          include-package: |
+            gui
+            services
+            utils
+            core
           include-data-file: |
             requirements.txt=requirements.txt
 

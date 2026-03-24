@@ -734,8 +734,9 @@ class Extractor:
             if not project_ids:
                 return {}
 
-            # 步骤2：获取工程信息
-            url = f"https://api.modrinth.com/v2/projects?ids=[{','.join([f'\"{pid}\"' for pid in project_ids])}]"
+            # 步骤 2：获取工程信息
+            ids_str = ','.join([f'"{pid}"' for pid in project_ids])
+            url = f"https://api.modrinth.com/v2/projects?ids=[{ids_str}]"
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             project_info = response.json()

@@ -12,7 +12,6 @@ import re
 import sys
 
 from gui import ui_utils
-from utils.file_utils import is_frozen
 from gui.dialogs import PackPresetDialog, DownloadProgressDialog
 from utils import config_manager, session_manager
 from core.orchestrator import Orchestrator
@@ -1683,12 +1682,6 @@ class MainWindow:
             self.find_replace_window.lift()
 
     def start_update_check(self, user_initiated=False):
-        # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
-        if not is_frozen():
-            if user_initiated:
-                messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。")
-            return
-
         logging.info("准备启动后台更新检查线程...")
         update_thread = threading.Thread(target=self._check_for_updates_thread, args=(user_initiated,), daemon=True)
         update_thread.start()

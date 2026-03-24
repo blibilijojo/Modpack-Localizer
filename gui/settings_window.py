@@ -112,6 +112,9 @@ class SettingsWindow(ttk.Toplevel):
                 # 从所有组件收集配置
                 self._collect_all_configs()
             
+            # 在保存前清除内置密钥，防止泄露
+            self._sanitize_config_before_save()
+            
             config_manager.save_config(self.config)
             
             # 如果有workbench实例，通知它更新显示
@@ -119,6 +122,19 @@ class SettingsWindow(ttk.Toplevel):
                 self.workbench_instance.update_all_namespace_displays()
         except Exception as e:
             ui_utils.show_error("保存失败", f"保存配置时发生错误：{str(e)}")
+    
+    def _sanitize_config_before_save(self):
+        """在保存配置前清理敏感信息，防止内置密钥泄露"""
+        try:
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            builtin_key = get_builtin_curseforge_key()
+            if builtin_key:
+                # 如果当前配置中的密钥与内置密钥相同，清空它
+                current_key = self.config.get('curseforge_api_key', '').strip()
+                if current_key == builtin_key:
+                    self.config['curseforge_api_key'] = ''
+        except ImportError:
+            pass
     
     def _collect_all_configs(self):
         """从所有设置组件收集配置"""

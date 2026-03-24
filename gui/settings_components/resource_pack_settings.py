@@ -326,7 +326,7 @@ class ResourcePackSettings:
                     return accelerated_url
         return url
     
-    def _get_remote_dict_info(self):
+    def _get_remote_dict_info(self) -> dict | None:
         import requests
         import logging
         api_url = "https://api.github.com/repos/VM-Chinese-translate-group/i18n-Dict-Extender/releases/latest"
@@ -336,10 +336,7 @@ class ResourcePackSettings:
             data = response.json()
             version = data.get("tag_name")
             url = next((asset.get("browser_download_url") for asset in data.get("assets", []) if asset.get("name") == "Dict-Sqlite.db"), None)
-            if version and url:
-                # 使用lucky-moth-20.deno.dev作为加速链接
-                accelerated_url = f"https://lucky-moth-20.deno.dev/{url}"
-                return {"version": version, "url": accelerated_url}
+            if version and url: return {"version": version, "url": url}
         except Exception as e: logging.error(f"获取远程词典信息失败: {e}")
         return None
     

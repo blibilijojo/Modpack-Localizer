@@ -61,6 +61,26 @@ environment-variables: |
   - 监控 API 使用情况
   - 如发现泄露立即在 CurseForge 控制台撤销密钥
 
+## 紧急处理（如果密钥已泄露）
+
+如果内置密钥已经意外写入配置文件并泄露：
+
+1. **立即在 CurseForge 控制台撤销该 API 密钥**
+   - 访问 https://console.curseforge.com
+   - 删除已泄露的 API 密钥
+
+2. **生成新的 API 密钥**
+   - 在 CurseForge 控制台创建新的 API 密钥
+   - 更新 GitHub Secrets 中的 `CURSEFORGE_API_KEY`
+
+3. **重新构建并发布新版本**
+   - 触发新的 GitHub Actions 构建
+   - 通知用户更新到新版本
+
+4. **清理已泄露的配置文件**
+   - 如果 `config.json` 中包含了密钥，手动编辑删除 `curseforge_api_key` 字段
+   - 或使用新版本打开程序，它会自动清除泄露的密钥
+
 ## 开发调试
 
 在本地开发时，可以通过环境变量设置测试密钥：

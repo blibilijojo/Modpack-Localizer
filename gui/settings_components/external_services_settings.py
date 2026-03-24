@@ -195,8 +195,19 @@ class ExternalServicesSettings:
         self.save_callback(cf_config)
     
     def get_config(self):
+        api_key = self.cf_api_key_var.get().strip()
+        
+        # 检查是否为内置密钥，如果是则返回空字符串以防止泄露
+        try:
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            builtin_key = get_builtin_curseforge_key()
+            if builtin_key and api_key == builtin_key:
+                api_key = ''
+        except ImportError:
+            pass
+        
         return {
             'github_repo': self.repo_var.get().strip(),
             'github_token': self.token_var.get().strip(),
-            'curseforge_api_key': self.cf_api_key_var.get().strip()
+            'curseforge_api_key': api_key
         }

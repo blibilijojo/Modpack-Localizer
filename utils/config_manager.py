@@ -122,6 +122,19 @@ def load_config() -> dict:
         with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
+        # 检查并清理可能泄露的内置密钥
+        try:
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            builtin_key = get_builtin_curseforge_key()
+            if builtin_key:
+                # 如果配置文件中错误地包含了内置密钥，立即清除它
+                if config.get('curseforge_api_key', '').strip() == builtin_key:
+                    config['curseforge_api_key'] = ''
+                    logging.warning("检测到配置文件中包含内置密钥，已自动清除以防止泄露")
+                    save_config(config)  # 立即保存清理后的配置
+        except ImportError:
+            pass
+        
         # 注入内置 CurseForge API 密钥（如果存在且用户未自定义）
         try:
             from utils.builtin_secrets import get_builtin_curseforge_key
@@ -219,12 +232,15 @@ def save_config(config_data: dict):
         # 防止内置密钥被写入配置文件
         config_to_save = config_data.copy()
         try:
-            from utils.builtin_secrets import is_protected_key, get_builtin_curseforge_key
-            if get_builtin_curseforge_key():
-                # 如果设置了内置密钥，则从保存的配置中移除
-                if config_to_save.get('curseforge_api_key', '').strip() == get_builtin_curseforge_key():
-                    config_to_save['curseforge_api_key'] = ''
-                    logging.debug("已阻止内置 CurseForge API 密钥写入配置文件")
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            builtin_key = get_builtin_curseforge_key()
+            current_key = config_to_save.get('curseforge_api_key', '').strip()
+            
+            # 只要有内置密钥，并且当前配置中的密钥非空，就清空它
+            # 这样可以确保内置密钥永远不会被写入配置文件
+            if builtin_key and current_key:
+                config_to_save['curseforge_api_key'] = ''
+                logging.debug("已阻止内置 CurseForge API 密钥写入配置文件")
         except ImportError:
             pass
         

@@ -2,27 +2,29 @@
 
 ## 概述
 
-为了防止 CurseForge API 密钥泄露，项目实现了内置密钥保护机制。当通过 GitHub Actions 打包时，可以将 `CURSEFORGE_API_KEY` 作为 GitHub Secret 注入到编译后的 exe 文件中，并且该密钥不会被写入配置文件。
+为了防止 CurseForge API 密钥泄露，项目采用了**纯内置密钥机制**。当通过 GitHub Actions 打包时，将 `CURSEFORGE_API_KEY` 作为 GitHub Secret 硬编码到编译后的 exe 文件中。**设置界面中已移除 CurseForge 配置项**，用户无法通过界面修改密钥。
 
 ## 工作原理
 
 ### 1. 构建时注入
-在 GitHub Actions 工作流中，通过 `environment-variables` 将 Secret 注入到编译环境：
+在 GitHub Actions 工作流中，通过 PowerShell 脚本将 Secret 写入 `utils/builtin_secrets.py` 文件：
 
 ```yaml
-environment-variables: |
-  CURSEFORGE_API_KEY=${{ secrets.CURSEFORGE_API_KEY }}
+- name: Generate builtin_secrets with API key
+  run: |
+    $apiKey = $env:CURSEFORGE_API_KEY
+    # 生成包含密钥的 builtin_secrets.py 文件
 ```
 
-### 2. 运行时保护
-- **加载时**：程序启动时自动从环境变量读取内置密钥，并注入到配置中
-- **保存时**：检测到当前使用的密钥与内置密钥相同时，自动阻止写入配置文件
+### 2. 运行时使用
+- **加载时**：程序启动时从 `utils/builtin_secrets` 模块读取内置密钥
+- **使用时**：直接从内存中的常量获取密钥
+- **不保存**：密钥永远不会写入配置文件
 
 ### 3. 核心文件
-- `utils/builtin_secrets.py` - 内置密钥管理模块
-- `utils/config_manager.py` - 配置加载/保存时处理密钥保护
-- `gui/settings_components/curseforge_settings.py` - UI 层保护
-- `gui/settings_components/external_services_settings.py` - 外部服务设置保护
+- `utils/builtin_secrets.py` - 内置密钥管理模块（构建时生成）
+- `utils/config_manager.py` - 配置加载时注入密钥
+- `core/extractor.py` - 使用密钥访问 CurseForge API
 
 ## 配置 GitHub Secrets
 
@@ -35,21 +37,29 @@ environment-variables: |
 
 ## 用户行为
 
-### 对于普通用户（无内置密钥）
-- 需要手动输入自己的 CurseForge API 密钥
-- 密钥会正常保存到 `config.json`
-
 ### 对于使用官方构建的用户（有内置密钥）
-- 程序自动使用内置的 API 密钥
-- 在设置界面查看时，显示的是内置密钥（但不会显示完整内容）
-- **即使修改设置，内置密钥也不会被覆盖或写入配置文件**
+- **无需任何配置**，程序自动使用内置的 API 密钥
+- **设置界面中没有 CurseForge 配置项**
 - 配置文件中的 `curseforge_api_key` 字段始终为空
+- 完全透明，用户无感知使用
+
+### 对于自行构建的用户
+- 需要自行设置 `CURSEFORGE_API_KEY` 环境变量或修改 `builtin_secrets.py`
+- 或者输入自己的 CurseForge API 密钥到配置文件中
 
 ## 安全优势
 
-1. **防止泄露**：即使用户分享配置文件，也不会泄露内置 API 密钥
+1. **绝对防止泄露**：
+   - 设置界面已移除，用户无法看到或修改密钥
+   - 配置文件永远不会包含密钥
+   - 即使用户分享配置文件，也不会泄露内置 API 密钥
+
 2. **透明使用**：用户无需配置即可使用 CurseForge 功能
-3. **防篡改**：用户无法通过修改配置文件来窃取内置密钥
+
+3. **防篡改**：
+   - 用户无法通过修改配置文件来窃取内置密钥
+   - 需要反编译 exe 才能提取密钥
+
 4. **可追溯**：如果密钥泄露，可以追溯到具体的构建版本
 
 ## 注意事项

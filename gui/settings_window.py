@@ -22,7 +22,6 @@ from gui import ui_utils
 from gui.settings_components.general_settings import GeneralSettings
 from gui.settings_components.ai_settings import AISettings
 from gui.settings_components.resource_pack_settings import ResourcePackSettings
-from gui.settings_components.external_services_settings import ExternalServicesSettings
 from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
 
@@ -59,7 +58,6 @@ class SettingsWindow(ttk.Toplevel):
             self._create_general_tab,
             self._create_ai_tab,
             self._create_translation_resources_tab,
-            self._create_external_services_tab,
             self._create_pack_config_tab,
             self._create_advanced_tab
         ]
@@ -92,11 +90,6 @@ class SettingsWindow(ttk.Toplevel):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text=" 资源包配置 ")
         self.pack_settings_manager = TabPackSettings(tab)
-    
-    def _create_external_services_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text=" 外部服务 ")
-        self.external_services_settings = ExternalServicesSettings(tab, self.config, self._save_config)
 
     def _create_advanced_tab(self):
         tab = ttk.Frame(self.notebook)
@@ -112,29 +105,13 @@ class SettingsWindow(ttk.Toplevel):
                 # 从所有组件收集配置
                 self._collect_all_configs()
             
-            # 在保存前清除内置密钥，防止泄露
-            self._sanitize_config_before_save()
-            
             config_manager.save_config(self.config)
             
-            # 如果有workbench实例，通知它更新显示
+            # 如果有 workbench 实例，通知它更新显示
             if self.workbench_instance and hasattr(self.workbench_instance, 'update_all_namespace_displays'):
                 self.workbench_instance.update_all_namespace_displays()
         except Exception as e:
             ui_utils.show_error("保存失败", f"保存配置时发生错误：{str(e)}")
-    
-    def _sanitize_config_before_save(self):
-        """在保存配置前清理敏感信息，防止内置密钥泄露"""
-        try:
-            from utils.builtin_secrets import get_builtin_curseforge_key
-            builtin_key = get_builtin_curseforge_key()
-            if builtin_key:
-                # 如果当前配置中的密钥与内置密钥相同，清空它
-                current_key = self.config.get('curseforge_api_key', '').strip()
-                if current_key == builtin_key:
-                    self.config['curseforge_api_key'] = ''
-        except ImportError:
-            pass
     
     def _collect_all_configs(self):
         """从所有设置组件收集配置"""
@@ -142,17 +119,13 @@ class SettingsWindow(ttk.Toplevel):
         if hasattr(self, 'general_settings'):
             self.config.update(self.general_settings.get_config())
         
-        # 收集AI设置
+        # 收集 AI 设置
         if hasattr(self, 'ai_settings'):
             self.config.update(self.ai_settings.get_config())
         
         # 收集翻译资源设置
         if hasattr(self, 'resource_pack_settings'):
             self.config.update(self.resource_pack_settings.get_config())
-        
-        # 收集外部服务设置
-        if hasattr(self, 'external_services_settings'):
-            self.config.update(self.external_services_settings.get_config())
 
         # 收集高级设置
         if hasattr(self, 'advanced_settings'):

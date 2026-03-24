@@ -14,15 +14,11 @@ class ExternalServicesSettings:
         self._create_widgets()
     
     def _create_variables(self):
-        # GitHub设置
+        # GitHub 设置
         self.repo_var = tk.StringVar()
         self.token_var = tk.StringVar()
         self.show_token_var = tk.BooleanVar(value=False)
         self.github_status_var = tk.StringVar(value="")
-        
-        # CurseForge设置
-        self.cf_api_key_var = tk.StringVar()
-        self.show_cf_key_var = tk.BooleanVar(value=False)
         
         self._load_config()
         self._bind_events()
@@ -30,19 +26,16 @@ class ExternalServicesSettings:
     def _bind_events(self):
         self.repo_var.trace_add("write", lambda *args: self._save_github_settings())
         self.token_var.trace_add("write", lambda *args: self._save_github_settings())
-        self.cf_api_key_var.trace_add("write", lambda *args: self._save_cf_settings())
     
     def _load_config(self):
         self.repo_var.set(self.config.get('github_repo', ''))
         self.token_var.set(self.config.get('github_token', ''))
-        self.cf_api_key_var.set(self.config.get('curseforge_api_key', ''))
     
     def _create_widgets(self):
         main_frame = ttk.Frame(self.parent)
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
         self._create_github_settings(main_frame)
-        self._create_curseforge_settings(main_frame)
     
     def _create_github_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="GitHub 汉化仓库", padding="10")
@@ -78,48 +71,11 @@ class ExternalServicesSettings:
         self.github_status_label = ttk.Label(frame, textvariable=self.github_status_var, bootstyle="secondary")
         self.github_status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
     
-    def _create_curseforge_settings(self, parent):
-        frame = tk_ttk.LabelFrame(parent, text="CurseForge API", padding="10")
-        frame.pack(fill="x", pady=(0, 10), padx=5)
-        frame.columnconfigure(1, weight=1)
-        
-        info_label = ttk.Label(frame, 
-            text="用于获取模组信息、从 CurseForge 平台搜索和下载模组\n官方版本已内置密钥；自行构建请自行输入。", 
-            bootstyle="secondary")
-        info_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
-        
-        # API密钥
-        ttk.Label(frame, text="API密钥:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        self.cf_key_entry = ttk.Entry(frame, textvariable=self.cf_api_key_var, show="*")
-        self.cf_key_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-        self.cf_key_entry.after_idle(self.cf_key_entry.selection_clear)
-        
-        self.show_cf_key_btn = ttk.Checkbutton(frame, text="显示", variable=self.show_cf_key_var, command=self._toggle_cf_key_visibility)
-        self.show_cf_key_btn.grid(row=1, column=2, sticky="w", padx=5, pady=5)
-        
-        # 帮助信息
-        help_frame = tk_ttk.LabelFrame(parent, text="获取CurseForge API密钥", padding="10")
-        help_frame.pack(fill="x", pady=(0, 10), padx=5)
-        
-        help_text = (
-            "1. 访问 https://console.curseforge.com 注册账号\n"
-            "2. 在 API Keys 页面创建新的API密钥\n"
-            "3. 复制密钥并粘贴到上方输入框中"
-        )
-        help_label = ttk.Label(help_frame, text=help_text, bootstyle="secondary")
-        help_label.pack(anchor="w")
-    
     def _toggle_token_visibility(self):
         if self.show_token_var.get():
             self.token_entry.config(show="")
         else:
             self.token_entry.config(show="*")
-    
-    def _toggle_cf_key_visibility(self):
-        if self.show_cf_key_var.get():
-            self.cf_key_entry.config(show="")
-        else:
-            self.cf_key_entry.config(show="*")
     
     def _test_github_auth(self):
         repo = self.repo_var.get().strip()
@@ -172,42 +128,8 @@ class ExternalServicesSettings:
         self.config.update(github_config)
         self.save_callback(github_config)
     
-    def _save_cf_settings(self):
-        api_key = self.cf_api_key_var.get().strip()
-        
-        # 检查是否为内置密钥
-        is_builtin = False
-        try:
-            from utils.builtin_secrets import get_builtin_curseforge_key
-            if get_builtin_curseforge_key() and api_key == get_builtin_curseforge_key():
-                is_builtin = True
-        except ImportError:
-            pass
-        
-        # 如果是内置密钥，不触发保存
-        if is_builtin:
-            return
-        
-        cf_config = {
-            'curseforge_api_key': api_key
-        }
-        self.config.update(cf_config)
-        self.save_callback(cf_config)
-    
     def get_config(self):
-        api_key = self.cf_api_key_var.get().strip()
-        
-        # 检查是否为内置密钥，如果是则返回空字符串以防止泄露
-        try:
-            from utils.builtin_secrets import get_builtin_curseforge_key
-            builtin_key = get_builtin_curseforge_key()
-            if builtin_key and api_key == builtin_key:
-                api_key = ''
-        except ImportError:
-            pass
-        
         return {
             'github_repo': self.repo_var.get().strip(),
-            'github_token': self.token_var.get().strip(),
-            'curseforge_api_key': api_key
+            'github_token': self.token_var.get().strip()
         }

@@ -1292,6 +1292,33 @@ class TranslationWorkbench(ttk.Frame):
                 display_text = namespace
             self.ns_tree.insert("", "end", iid=ns, text=display_text, values=(display_untranslated, display_completed))
 
+    def _determine_source(self, en_text: str, zh_text: str, current_source: str = None) -> str:
+        """根据原文和译文内容确定正确的 source 标签"""
+        if not en_text:
+            if zh_text:
+                return '手动校对'  # 原文为空但有译文，标记为手动校对
+            else:
+                return '空'  # 原文为空且没有译文，标记为空
+        elif not zh_text:
+            return '待翻译'  # 原文不为空但没有译文，标记为待翻译
+        else:
+            return '手动校对'  # 原文不为空且有译文，标记为手动校对
+    
+    def _validate_and_fix_source(self, item_data: dict) -> str:
+        """验证并修正条目的 source 标签，返回正确的 source"""
+        en_text = item_data.get('en', '').strip()
+        zh_text = item_data.get('zh', '').strip()
+        current_source = item_data.get('source', '')
+        
+        # 确定正确的 source
+        expected_source = self._determine_source(en_text, zh_text, current_source)
+        
+        # 如果不匹配，更新数据中的 source 字段
+        if current_source != expected_source:
+            item_data['source'] = expected_source
+        
+        return expected_source
+    
     def _update_namespace_summary(self, ns: str):
         if not self.ns_tree.exists(ns):
             return
@@ -1378,22 +1405,8 @@ class TranslationWorkbench(ttk.Frame):
             iid = f"{ns}___{idx}"
             expected_items.append(iid)
             
-            # 确定条目的 source 标签
-            en_text = item_data.get('en', '').strip()
-            zh_text = item_data.get('zh', '').strip()
-            source = item_data.get('source', '')
-            
-            # 如果没有 source 标签或者 source 标签为'待翻译'且原文为空，根据内容自动确定
-            if not source or (source == '待翻译' and not en_text):
-                if not en_text:
-                    if zh_text:
-                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
-                    else:
-                        source = '空'  # 原文为空且没有译文，标记为空
-                elif not zh_text:
-                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
-                else:
-                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
+            # 验证并修正 source 标签，确保 source 与实际内容一致
+            source = self._validate_and_fix_source(item_data)
             
             # 前台显示时将 _comment_* 格式的键显示为 _comment
             display_key = item_data['key']
@@ -1463,22 +1476,8 @@ class TranslationWorkbench(ttk.Frame):
         # 准备排序数据
         sortable_items = []
         for idx, item_data in enumerate(items):
-            en_text = item_data.get('en', '').strip()
-            zh_text = item_data.get('zh', '').strip()
-            source = item_data.get('source', '')
-            
-            # 如果没有 source 标签或者 source 标签为'待翻译'且原文为空，根据内容自动确定
-            if not source or (source == '待翻译' and not en_text):
-                if not en_text:
-                    if zh_text:
-                        source = '手动校对'  # 原文为空但有译文，标记为手动校对
-                    else:
-                        source = '空'  # 原文为空且没有译文，标记为空
-                elif not zh_text:
-                    source = '待翻译'  # 原文不为空但没有译文，标记为待翻译
-                else:
-                    source = '手动校对'  # 原文不为空且有译文，标记为手动校对
-            
+            # 验证并修正 source 标签，确保 source 与实际内容一致
+            source = self._validate_and_fix_source(item_data)
             sortable_items.append((source, idx, item_data))
         
         # 按照来源排序

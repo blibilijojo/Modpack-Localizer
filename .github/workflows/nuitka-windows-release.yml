@@ -30,6 +30,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Set version from tag
+        id: version
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ($version -notmatch '^v?\d+\.\d+\.\d+') {
+            $version = "1.0.0"
+          }
+          # 移除 'v' 前缀
+          $version = $version -replace '^v', ''
+          Write-Output "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
       - name: Build Windows Executable with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -38,7 +50,7 @@ jobs:
           mode: standalone
           enable-plugins: tk-inter
           product-name: Modpack-Localizer-Pro
-          product-version: ${{ github.ref_name }}
+          product-version: ${{ steps.version.outputs.version }}
           company-name: Modpack-Localizer
           file-description: Modpack Localizer Application
           copyright: Modpack-Localizer

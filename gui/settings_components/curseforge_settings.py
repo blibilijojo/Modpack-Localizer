@@ -36,7 +36,9 @@ class CurseForgeSettings:
         frame.pack(fill="x", pady=(0, 10), padx=5)
         frame.columnconfigure(1, weight=1)
 
-        info_label = ttk.Label(frame, text="请输入您的CurseForge API密钥", bootstyle="secondary")
+        info_label = ttk.Label(frame, 
+            text="官方版本已内置 API 密钥，可直接使用；\n如为自行构建或使用单文件版本，请自行输入密钥。", 
+            bootstyle="secondary")
         info_label.pack(anchor="w", pady=(0, 10))
 
         key_frame = ttk.Frame(frame)
@@ -69,8 +71,23 @@ class CurseForgeSettings:
             self.key_entry.config(show="*")
 
     def _save_settings(self):
+        api_key = self.api_key_var.get().strip()
+        
+        # 检查是否为内置密钥
+        is_builtin = False
+        try:
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            if get_builtin_curseforge_key() and api_key == get_builtin_curseforge_key():
+                is_builtin = True
+        except ImportError:
+            pass
+        
+        # 如果是内置密钥，不触发保存（因为会被 config_manager 拦截）
+        if is_builtin:
+            return
+        
         curseforge_config = {
-            'curseforge_api_key': self.api_key_var.get().strip()
+            'curseforge_api_key': api_key
         }
 
         self.config.update(curseforge_config)

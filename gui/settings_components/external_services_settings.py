@@ -83,7 +83,9 @@ class ExternalServicesSettings:
         frame.pack(fill="x", pady=(0, 10), padx=5)
         frame.columnconfigure(1, weight=1)
         
-        info_label = ttk.Label(frame, text="用于从CurseForge平台搜索和下载模组", bootstyle="secondary")
+        info_label = ttk.Label(frame, 
+            text="用于获取模组信息、从 CurseForge 平台搜索和下载模组\n官方版本已内置密钥；自行构建请自行输入。", 
+            bootstyle="secondary")
         info_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
         
         # API密钥
@@ -171,8 +173,23 @@ class ExternalServicesSettings:
         self.save_callback(github_config)
     
     def _save_cf_settings(self):
+        api_key = self.cf_api_key_var.get().strip()
+        
+        # 检查是否为内置密钥
+        is_builtin = False
+        try:
+            from utils.builtin_secrets import get_builtin_curseforge_key
+            if get_builtin_curseforge_key() and api_key == get_builtin_curseforge_key():
+                is_builtin = True
+        except ImportError:
+            pass
+        
+        # 如果是内置密钥，不触发保存
+        if is_builtin:
+            return
+        
         cf_config = {
-            'curseforge_api_key': self.cf_api_key_var.get().strip()
+            'curseforge_api_key': api_key
         }
         self.config.update(cf_config)
         self.save_callback(cf_config)

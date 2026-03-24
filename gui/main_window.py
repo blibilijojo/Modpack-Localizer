@@ -1775,7 +1775,13 @@ class MainWindow:
         subprocess.Popen(command, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
 
         # 5. 主程序安排自己退出，将控制权完全交给更新器
-        self.root.after(100, self.root.destroy)
+        def _exit_application():
+            self.root.quit()  # 退出主循环
+            self.root.destroy()  # 销毁窗口
+            import os
+            os._exit(0)  # 强制退出进程
+        
+        self.root.after(100, _exit_application)
 
     def _show_about(self):
         """显示关于对话框"""

@@ -5,9 +5,11 @@ import logging
 import os
 import sys
 
-# 处理 PyInstaller 单文件打包时的路径问题
+# 处理 PyInstaller 和 Nuitka 单文件打包时的路径问题
 def get_app_data_path():
-    if getattr(sys, 'frozen', False):
+    # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
+    is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
+    if is_frozen:
         return Path(sys.executable).parent
     else:
         return Path.cwd()

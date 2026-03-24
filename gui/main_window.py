@@ -1682,7 +1682,9 @@ class MainWindow:
             self.find_replace_window.lift()
 
     def start_update_check(self, user_initiated=False):
-        if not getattr(sys, 'frozen', False):
+        # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
+        is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
+        if not is_frozen:
             if user_initiated:
                 messagebox.showinfo("提示", "此功能仅在打包后的 .exe 程序中可用。")
             return

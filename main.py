@@ -13,7 +13,9 @@ from utils.error_logger import ErrorLogger
 def cleanup_old_files():
     """在程序启动时清理上一次更新留下的临时文件。"""
     try:
-        if not getattr(sys, 'frozen', False):
+        # 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
+        is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
+        if not is_frozen:
             return
 
         current_exe_path = Path(sys.executable)

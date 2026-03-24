@@ -8,7 +8,9 @@ import sys
 base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 
 # 确保导入路径正确
-if hasattr(sys, 'frozen'):  # 单文件打包环境
+# 检测是否为打包环境（支持 PyInstaller 和 Nuitka）
+is_frozen = getattr(sys, 'frozen', False) or getattr(sys, 'nuitka', False)
+if is_frozen:  # 单文件打包环境
     sys.path.append(base_path)
     sys.path.append(os.path.dirname(base_path))
     sys.path.append(os.path.dirname(os.path.dirname(base_path)))

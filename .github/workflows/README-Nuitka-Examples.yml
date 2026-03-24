@@ -1,0 +1,207 @@
+# Nuitka 构建配置示例
+# 这个文件展示了如何使用 Nuitka-Action 的各种配置选项
+
+# ============================================
+# 示例 1: 基本的 GUI 应用构建 (TkInter)
+# ============================================
+- name: Build TkInter GUI App
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    enable-plugins: tk-inter
+
+# ============================================
+# 示例 2: PySide6/Qt 应用构建
+# ============================================
+- name: Build PySide6 Qt App
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: my_qt_app.py
+    mode: standalone
+    enable-plugins: pyside6
+
+# ============================================
+# 示例 3: PyQt6 应用构建
+# ============================================
+- name: Build PyQt6 App
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: my_pyqt_app.py
+    mode: standalone
+    enable-plugins: pyqt6
+
+# ============================================
+# 示例 4: 带版本信息的产品构建
+# ============================================
+- name: Build with Product Info
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    product-name: Modpack-Localizer-Pro
+    product-version: 1.0.0
+    company-name: Modpack-Localizer
+    file-description: Modpack Localizer Application
+    copyright: Modpack-Localizer
+
+# ============================================
+# 示例 5: 包含数据文件和目录
+# ============================================
+- name: Build with Data Files
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    include-data-file: |
+      config.json=config.json
+      requirements.txt=requirements.txt
+    include-data-dir: |
+      assets=assets
+      locales=locales
+      gui/resources=resources
+
+# ============================================
+# 示例 6: 包含特定的 Python 包
+# ============================================
+- name: Build with Package Includes
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    include-package: gui
+    include-package: services
+    include-package: utils
+    include-package: core
+
+# ============================================
+# 示例 7: 排除不需要的包 (减小程序体积)
+# ============================================
+- name: Build with Package Excludes
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    # 排除不需要的包来减小体积
+    # 注意：这个选项需要通过 nuitka-args 传递
+    nuitka-args: --nofollow-imports --follow-import-to=gui --follow-import-to=services --follow-import-to=utils --follow-import-to=core
+
+# ============================================
+# 示例 8: 启用优化选项
+# ============================================
+- name: Build with Optimizations
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    nuitka-args: --optimize-all --no-debug-output --python-flag=no_site
+
+# ============================================
+# 示例 9: Windows 图标和 UAC 设置
+# ============================================
+- name: Build Windows App with Icon
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    windows-icon-from-ico: gui/resources/icon.ico
+    windows-uac-admin: false
+
+# ============================================
+# 示例 10: 多平台构建
+# ============================================
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Build Executable
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: standalone
+          enable-plugins: tk-inter
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-Build
+          path: |
+            build/*.exe
+            build/*.bin
+            build/*.app/**/*
+            build/*.dist/**/*
+          include-hidden-files: true
+
+# ============================================
+# 示例 11: 构建 Python 模块 (.pyd/.so)
+# ============================================
+- name: Build Python Module
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: my_module.py
+    mode: module
+
+# ============================================
+# 示例 12: 商业版功能 (需要许可证)
+# ============================================
+- name: Build with Commercial Features
+  uses: Nuitka/Nuitka-Action@main
+  with:
+    nuitka-version: main
+    script-name: main.py
+    mode: standalone
+    nuitka-args: --commercial --obfuscate
+
+# ============================================
+# 重要提示
+# ============================================
+# 1. mode 参数:
+#    - standalone: 独立可执行文件 (默认)
+#    - app: 应用程序模式 (macOS 上创建 .app 包)
+#    - module: 构建 Python 模块
+#
+# 2. 常见陷阱:
+#    - 上传 artifacts 时必须包含 include-hidden-files: true
+#    - 对于模块构建，mode 必须设置为 module
+#    - GUI 应用必须启用相应的插件 (tk-inter, pyside6, pyqt6)
+#
+# 3. 输出目录:
+#    - build/main.dist/ : 包含所有必需文件的目录
+#    - build/main.exe : Windows 上的可执行文件
+#    - build/main.bin : Linux 上的可执行文件
+#    - build/main.app/ : macOS 上的应用程序包
+#
+# 4. 性能优化:
+#    - 使用 --python-flag=no_site 禁用 site 模块加载
+#    - 使用 --no-debug-output 禁用调试输出
+#    - 排除不需要的包来减小体积

@@ -1,0 +1,67 @@
+# .github/workflows/nuitka-windows-release.yml
+
+name: Nuitka Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements*.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Windows Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: standalone
+          enable-plugins: tk-inter
+          product-name: Modpack-Localizer-Pro
+          product-version: ${{ github.ref_name }}
+          company-name: Modpack-Localizer
+          file-description: Modpack Localizer Application
+          copyright: Modpack-Localizer
+          windows-icon-from-ico: gui/resources/icon.ico
+          windows-uac-admin: false
+          include-package: gui
+          include-package: services
+          include-package: utils
+          include-package: core
+          include-data-file: |
+            requirements.txt=requirements.txt
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Modpack-Localizer-Pro-Windows
+          path: build/main.dist/
+          include-hidden-files: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: build/main.dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

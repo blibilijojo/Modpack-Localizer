@@ -815,7 +815,7 @@ class ProjectTab:
                 "gameId": 432,
                 "sortField": 2,
                 "sortOrder": "desc",
-                "pageSize": 40,
+                "pageSize": 50,
                 "classId": 6  # Mod 分类
             }
             
@@ -988,6 +988,7 @@ class ProjectTab:
         """获取CurseForge模组文件"""
         try:
             import requests
+            import threading
             config = config_manager.load_config()
             api_key = config.get('curseforge_api_key', '')
 
@@ -1006,65 +1007,54 @@ class ProjectTab:
                 "Content-Type": "application/json"
             }
             
+            # 首先获取总文件数
+            total_files = None
             base_url = base_urls[0]
+            address = f"{base_url}/v1/mods/{project_id}/files?index=0&limit=1"
+            response = requests.get(address, headers=headers, timeout=15)
             
-            # 第一步：获取工程信息，提取所有文件ID
-            project_address = f"{base_url}/v1/mods/{project_id}"
-            self.log_message(f"获取工程信息: {project_address}", "INFO")
-            project_response = requests.get(project_address, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                pagination = data.get("pagination", {})
+                total_files = pagination.get("totalCount", 0)
+                self.log_message(f"开始获取 {total_files} 个文件", "INFO")
+            else:
+                raise Exception(f"获取总文件数失败: {response.text}")
             
-            if project_response.status_code != 200:
-                raise Exception(f"获取工程信息失败: {project_response.text}")
-            
-            project_data = project_response.json().get("data", {})
-            file_ids = []
-            
-            # 从 latestFiles 提取文件ID
-            latest_files = project_data.get("latestFiles", [])
-            for file_info in latest_files:
-                file_id = file_info.get("id")
-                if file_id:
-                    file_ids.append(file_id)
-            
-            # 从 latestFilesIndexes 提取文件ID
-            latest_files_indexes = project_data.get("latestFilesIndexes", [])
-            for file_index in latest_files_indexes:
-                file_id = file_index.get("fileId")
-                if file_id:
-                    file_ids.append(file_id)
-            
-            # 去重
-            file_ids = list(set(file_ids))
-            total_files = len(file_ids)
-            self.log_message(f"提取到 {total_files} 个文件ID", "INFO")
-            
-            if total_files == 0:
-                raise Exception("无法提取文件ID，请检查网络连接或稍后再试")
-            
-            # 第二步：批量获取文件详情（每次最多获取50个）
+            # 多线程并行获取所有文件
             all_files = []
-            batch_size = 50
-            total_batches = (total_files + batch_size - 1) // batch_size
+            limit = 50  # CurseForge API 最大每页限制
+            total_pages = (total_files + limit - 1) // limit  # 计算总页数
+            lock = threading.Lock()
+            threads = []
             
-            for batch in range(total_batches):
-                start = batch * batch_size
-                end = min(start + batch_size, total_files)
-                batch_file_ids = file_ids[start:end]
-                
-                batch_address = f"{base_url}/v1/mods/files"
-                batch_data = {"fileIds": batch_file_ids}
-                
-                self.log_message(f"批量获取文件详情: 批次 {batch + 1}/{total_batches}，文件数 {len(batch_file_ids)}", "INFO")
-                batch_response = requests.post(batch_address, json=batch_data, headers=headers, timeout=15)
-                
-                if batch_response.status_code == 200:
-                    batch_files = batch_response.json().get("data", [])
-                    all_files.extend(batch_files)
-                    self.log_message(f"批次 {batch + 1} 获取到 {len(batch_files)} 个文件", "INFO")
-                else:
-                    self.log_message(f"批次 {batch + 1} 失败: {batch_response.text}", "ERROR")
+            def fetch_page(page):
+                offset = page * limit
+                try:
+                    page_address = f"{base_url}/v1/mods/{project_id}/files?index={offset}&limit={limit}"
+                    page_response = requests.get(page_address, headers=headers, timeout=15)
+                    if page_response.status_code == 200:
+                        page_data = page_response.json()
+                        page_files = page_data.get("data", [])
+                        with lock:
+                            all_files.extend(page_files)
+                    else:
+                        self.log_message(f"获取文件失败: {page_response.text}", "ERROR")
+                except Exception as e:
+                    self.log_message(f"获取文件异常: {str(e)}", "ERROR")
             
-            self.log_message(f"批量获取完成，总共获取到 {len(all_files)} 个文件", "INFO")
+            # 启动线程
+            self.log_message(f"启动 {total_pages} 个线程并行获取文件", "INFO")
+            for page in range(total_pages):
+                thread = threading.Thread(target=fetch_page, args=(page,))
+                threads.append(thread)
+                thread.start()
+            
+            # 等待所有线程完成
+            for thread in threads:
+                thread.join()
+            
+            self.log_message(f"文件获取完成，共获取 {len(all_files)} 个文件", "INFO")
             
             if len(all_files) == 0:
                 raise Exception("无法获取文件列表，请检查网络连接或稍后再试")

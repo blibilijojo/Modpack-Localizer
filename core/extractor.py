@@ -7,10 +7,94 @@ import hashlib
 import requests
 import threading
 import io
+import time
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from collections import defaultdict
+from functools import wraps
 from utils import file_utils, config_manager
+
+
+def api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0, backoff_factor=2.0):
+    """
+    API请求重试装饰器
+    
+    Args:
+        max_retries: 最大重试次数
+        initial_delay: 初始延迟时间（秒）
+        max_delay: 最大延迟时间（秒）
+        backoff_factor: 退避因子
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.Timeout as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                        jitter = random.uniform(0, 0.5)
+                        sleep_time = delay + jitter
+                        logging.warning(f"API请求超时 ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                        logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                        time.sleep(sleep_time)
+                    else:
+                        logging.error(f"API请求超时，已达到最大重试次数 ({max_retries + 1}): {e}")
+                except requests.exceptions.ConnectionError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                        jitter = random.uniform(0, 0.5)
+                        sleep_time = delay + jitter
+                        logging.warning(f"API连接错误 ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                        logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                        time.sleep(sleep_time)
+                    else:
+                        logging.error(f"API连接错误，已达到最大重试次数 ({max_retries + 1}): {e}")
+                except requests.exceptions.HTTPError as e:
+                    last_exception = e
+                    status_code = e.response.status_code if hasattr(e, 'response') and e.response else None
+                    
+                    # 对于特定的HTTP错误码进行处理
+                    if status_code == 429:  # 速率限制
+                        if attempt < max_retries:
+                            delay = min(initial_delay * (backoff_factor ** (attempt + 2)), max_delay)
+                            jitter = random.uniform(0, 1)
+                            sleep_time = delay + jitter
+                            logging.warning(f"API速率限制 (429) ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1})")
+                            logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                            time.sleep(sleep_time)
+                        else:
+                            logging.error(f"API速率限制，已达到最大重试次数 ({max_retries + 1})")
+                    elif status_code in [500, 502, 503, 504]:  # 服务器错误
+                        if attempt < max_retries:
+                            delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                            jitter = random.uniform(0, 0.5)
+                            sleep_time = delay + jitter
+                            logging.warning(f"服务器错误 ({status_code}) ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1})")
+                            logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                            time.sleep(sleep_time)
+                        else:
+                            logging.error(f"服务器错误，已达到最大重试次数 ({max_retries + 1})")
+                    else:
+                        # 对于其他HTTP错误，直接抛出
+                        raise
+                except Exception as e:
+                    # 对于其他未预期的错误，记录后抛出
+                    logging.error(f"API请求发生未预期错误 ({func.__name__}): {e}")
+                    raise
+            
+            # 如果所有重试都失败了，抛出最后一个异常
+            if last_exception:
+                raise last_exception
+            
+        return wrapper
+    return decorator
 from core.models import (
     LanguageEntry, NamespaceInfo, ExtractionResult,
     DictionaryEntry
@@ -689,6 +773,30 @@ class Extractor:
         version_info.sort(key=lambda x: (version_diff(main_game_version, x[0]), 0 if x[1] == "" else 1))
         
         return version_info[0][2] if version_info else ""
+
+    @api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0)
+    def _fetch_modrinth_version_files(self, modrinth_hashes: List[str]) -> Dict:
+        """从Modrinth获取版本文件信息（带重试机制）"""
+        url = "https://api.modrinth.com/v2/version_files"
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "hashes": modrinth_hashes,
+            "algorithm": "sha1"
+        }
+        
+        logging.info(f"从Modrinth API获取 {len(modrinth_hashes)} 个模组的信息...")
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    @api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0)
+    def _fetch_modrinth_projects(self, project_ids: List[str]) -> List[Dict]:
+        """从Modrinth获取项目信息（带重试机制）"""
+        ids_str = ','.join([f'"{pid}"' for pid in project_ids])
+        url = f"https://api.modrinth.com/v2/projects?ids=[{ids_str}]"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.json()
     
     def _get_mod_info_from_modrinth(self, modrinth_hashes: List[str]) -> Dict[str, Dict]:
         """从Modrinth获取模组信息"""
@@ -696,18 +804,8 @@ class Extractor:
             return {}
 
         try:
-            # 步骤1：获取Hash与对应的版本信息
-            url = "https://api.modrinth.com/v2/version_files"
-            headers = {"Content-Type": "application/json"}
-            data = {
-                "hashes": modrinth_hashes,
-                "algorithm": "sha1"
-            }
-
-            logging.info(f"从Modrinth API获取 {len(modrinth_hashes)} 个模组的信息...")
-            response = requests.post(url, json=data, headers=headers, timeout=30)
-            response.raise_for_status()
-            modrinth_version = response.json()
+            # 步骤1：获取Hash与对应的版本信息（带重试）
+            modrinth_version = self._fetch_modrinth_version_files(modrinth_hashes)
 
             logging.info(f"从Modrinth获取到 {len(modrinth_version)} 个本地模组的对应信息")
 
@@ -734,12 +832,8 @@ class Extractor:
             if not project_ids:
                 return {}
 
-            # 步骤 2：获取工程信息
-            ids_str = ','.join([f'"{pid}"' for pid in project_ids])
-            url = f"https://api.modrinth.com/v2/projects?ids=[{ids_str}]"
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            project_info = response.json()
+            # 步骤 2：获取工程信息（带重试）
+            project_info = self._fetch_modrinth_projects(project_ids)
 
             # 构建项目信息映射
             project_map = {}
@@ -771,6 +865,46 @@ class Extractor:
             logging.error(f"从Modrinth获取模组信息失败: {e}")
             return {}
 
+    @api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0)
+    def _fetch_curseforge_fingerprints(self, base_url: str, curseforge_hashes: List[str], api_key: str) -> Dict:
+        """从CurseForge获取指纹匹配信息（带重试机制）"""
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key
+        }
+        fingerprint_url = f"{base_url}/v1/fingerprints/432"
+        data = {
+            "fingerprints": [int(h) for h in curseforge_hashes]
+        }
+        
+        logging.info(f"从CurseForge API ({base_url})获取 {len(curseforge_hashes)} 个模组的信息...")
+        response = requests.post(fingerprint_url, json=data, headers=headers, timeout=30)
+        
+        # 检查API响应状态
+        if response.status_code == 403:
+            logging.error("CurseForge API密钥无效或已过期，请在设置中更新API密钥")
+            raise requests.exceptions.HTTPError("API密钥无效", response=response)
+        elif response.status_code == 429:
+            logging.warning("CurseForge API请求频率超限")
+            raise requests.exceptions.HTTPError("请求频率超限 (429)", response=response)
+        
+        response.raise_for_status()
+        return response.json()
+
+    @api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0)
+    def _fetch_curseforge_mods(self, base_url: str, project_ids: List[int], api_key: str) -> List[Dict]:
+        """从CurseForge获取模组基本信息（带重试机制）"""
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key
+        }
+        url = f"{base_url}/v1/mods"
+        data = {"modIds": project_ids}
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        response.raise_for_status()
+        response_data = response.json()
+        return response_data.get("data", [])
+
     def _get_mod_info_from_curseforge(self, curseforge_hashes: List[str]) -> Dict[str, Dict]:
         """从CurseForge获取模组信息"""
         if not curseforge_hashes:
@@ -789,11 +923,6 @@ class Extractor:
                 "https://api.curseforge.com"
             ]
 
-            headers = {
-                "Content-Type": "application/json",
-                "x-api-key": api_key
-            }
-
             # 步骤1：获取Hash与对应的工程ID
             exact_matches = []
             hash_to_project_id = {}
@@ -804,24 +933,8 @@ class Extractor:
             # 尝试多个API源
             for base_url in base_urls:
                 try:
-                    fingerprint_url = f"{base_url}/v1/fingerprints/432"
-                    data = {
-                        "fingerprints": [int(h) for h in curseforge_hashes]
-                    }
-
-                    logging.info(f"从CurseForge API ({base_url})获取 {len(curseforge_hashes)} 个模组的信息...")
-                    response = requests.post(fingerprint_url, json=data, headers=headers, timeout=30)
-                    
-                    # 检查API响应状态
-                    if response.status_code == 403:
-                        logging.error("CurseForge API密钥无效或已过期，请在设置中更新API密钥")
-                        return {}
-                    elif response.status_code == 429:
-                        logging.warning("CurseForge API请求频率超限，请稍后再试")
-                        return {}
-                    
-                    response.raise_for_status()
-                    response_data = response.json()
+                    # 使用带重试的方法获取指纹信息
+                    response_data = self._fetch_curseforge_fingerprints(base_url, curseforge_hashes, api_key)
                     exact_matches = response_data.get("data", {}).get("exactMatches", [])
                     
                     # 调试：记录API响应详情
@@ -885,15 +998,8 @@ class Extractor:
                                 else:
                                     hash_to_loaders[fingerprint] = ""
 
-                            # 步骤3：获取工程基本信息
-                            url = f"{base_url}/v1/mods"
-                            data = {
-                                "modIds": project_ids
-                            }
-                            response = requests.post(url, json=data, headers=headers, timeout=30)
-                            response.raise_for_status()
-                            response_data = response.json()
-                            project_info = response_data.get("data", [])
+                            # 步骤3：获取工程基本信息（带重试）
+                            project_info = self._fetch_curseforge_mods(base_url, project_ids, api_key)
 
                             # 构建项目信息映射
                             for project in project_info:
@@ -905,6 +1011,12 @@ class Extractor:
                                         "url": f"https://www.curseforge.com/minecraft/mc-mods/{project.get('slug')}"
                                     }
                             break
+                except requests.exceptions.HTTPError as e:
+                    # 对于403和429错误，不需要重试其他API源
+                    if "API密钥无效" in str(e) or "请求频率超限" in str(e):
+                        return {}
+                    logging.error(f"从CurseForge API ({base_url})获取模组信息失败: {e}")
+                    continue
                 except Exception as e:
                     logging.error(f"从CurseForge API ({base_url})获取模组信息失败: {e}")
                     continue

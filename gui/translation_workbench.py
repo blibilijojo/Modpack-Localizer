@@ -3363,16 +3363,15 @@ class TranslationWorkbench(ttk.Frame):
         if not hasattr(self, '_github_upload_ui'):
             from gui.github_upload_ui import GitHubUploadUI
             self._github_upload_ui = GitHubUploadUI(
-                self.github_upload_ui_container, 
-                self, 
-                current_namespace, 
-                current_file_format, 
+                self.github_upload_ui_container,
+                self,
+                current_namespace,
+                current_file_format,
                 github_config
             )
             self._github_upload_ui.pack(fill="both", expand=True)
-        else:
-            # 更新GitHub上传UI中的命名空间和分支
-            self._github_upload_ui.update_namespace_and_branch(current_namespace)
+        # 更新GitHub上传UI中的命名空间和分支（包括版本计算）
+        self._github_upload_ui.update_namespace_and_branch(current_namespace)
     
     def _show_operation_history(self):
         """显示操作历史窗口"""

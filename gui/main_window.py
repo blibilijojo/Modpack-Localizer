@@ -955,13 +955,26 @@ class ProjectTab:
         """获取Modrinth模组文件"""
         try:
             import requests
-            response = requests.get(f"https://api.modrinth.com/v2/project/{project_id}/version", timeout=30)
+            # 一次性获取所有文件，设置较大的limit值去除50个的上限
+            url = f"https://api.modrinth.com/v2/project/{project_id}/version"
+            params = {"limit": 10000, "offset": 0}
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             files = response.json()
             
             # 添加平台信息
             for file_info in files:
                 file_info["platform"] = "Modrinth"
+            
+            # 根据选择的游戏版本过滤
+            selected_version = self.game_version_var.get()
+            if selected_version and selected_version != "全部":
+                filtered_files = []
+                for file_info in files:
+                    game_versions = file_info.get("game_versions", [])
+                    if selected_version in game_versions:
+                        filtered_files.append(file_info)
+                files = filtered_files
             
             self.current_files = files
             self.root.after(0, self.update_files_list)
@@ -993,32 +1006,70 @@ class ProjectTab:
                 "Content-Type": "application/json"
             }
             
-            # 发送API请求，尝试多个源
-            response = None
-            for base_url in base_urls:
-                try:
-                    address = f"{base_url}/v1/mods/{project_id}/files"
-                    
-                    # 打印请求信息以便调试
-                    self.log_message(f"尝试CurseForge文件API请求: {address}", "INFO")
-                    
-                    response = requests.get(address, headers=headers, timeout=15)
-                    
-                    # 打印响应状态码
-                    self.log_message(f"CurseForge文件API响应状态: {response.status_code}", "INFO")
-                    if response.status_code == 200:
-                        break
-                    else:
-                        self.log_message(f"CurseForge文件API错误: {response.text}", "ERROR")
-                except Exception as e:
-                    self.log_message(f"尝试{base_url}失败: {str(e)}", "WARNING")
-                    continue
+            base_url = base_urls[0]
             
-            if not response or response.status_code != 200:
-                raise Exception("无法连接到CurseForge API，请检查网络连接或稍后再试")
+            # 第一步：获取工程信息，提取所有文件ID
+            project_address = f"{base_url}/v1/mods/{project_id}"
+            self.log_message(f"获取工程信息: {project_address}", "INFO")
+            project_response = requests.get(project_address, headers=headers, timeout=15)
             
-            data = response.json()
-            files = data.get("data", [])
+            if project_response.status_code != 200:
+                raise Exception(f"获取工程信息失败: {project_response.text}")
+            
+            project_data = project_response.json().get("data", {})
+            file_ids = []
+            
+            # 从 latestFiles 提取文件ID
+            latest_files = project_data.get("latestFiles", [])
+            for file_info in latest_files:
+                file_id = file_info.get("id")
+                if file_id:
+                    file_ids.append(file_id)
+            
+            # 从 latestFilesIndexes 提取文件ID
+            latest_files_indexes = project_data.get("latestFilesIndexes", [])
+            for file_index in latest_files_indexes:
+                file_id = file_index.get("fileId")
+                if file_id:
+                    file_ids.append(file_id)
+            
+            # 去重
+            file_ids = list(set(file_ids))
+            total_files = len(file_ids)
+            self.log_message(f"提取到 {total_files} 个文件ID", "INFO")
+            
+            if total_files == 0:
+                raise Exception("无法提取文件ID，请检查网络连接或稍后再试")
+            
+            # 第二步：批量获取文件详情（每次最多获取50个）
+            all_files = []
+            batch_size = 50
+            total_batches = (total_files + batch_size - 1) // batch_size
+            
+            for batch in range(total_batches):
+                start = batch * batch_size
+                end = min(start + batch_size, total_files)
+                batch_file_ids = file_ids[start:end]
+                
+                batch_address = f"{base_url}/v1/mods/files"
+                batch_data = {"fileIds": batch_file_ids}
+                
+                self.log_message(f"批量获取文件详情: 批次 {batch + 1}/{total_batches}，文件数 {len(batch_file_ids)}", "INFO")
+                batch_response = requests.post(batch_address, json=batch_data, headers=headers, timeout=15)
+                
+                if batch_response.status_code == 200:
+                    batch_files = batch_response.json().get("data", [])
+                    all_files.extend(batch_files)
+                    self.log_message(f"批次 {batch + 1} 获取到 {len(batch_files)} 个文件", "INFO")
+                else:
+                    self.log_message(f"批次 {batch + 1} 失败: {batch_response.text}", "ERROR")
+            
+            self.log_message(f"批量获取完成，总共获取到 {len(all_files)} 个文件", "INFO")
+            
+            if len(all_files) == 0:
+                raise Exception("无法获取文件列表，请检查网络连接或稍后再试")
+            
+            files = all_files
             
             # 转换为与Modrinth类似的格式
             formatted_files = []
@@ -1059,6 +1110,16 @@ class ProjectTab:
             
             # 按发布日期排序，最新的在前
             formatted_files.sort(key=lambda x: x.get("date_published", ""), reverse=True)
+            
+            # 根据选择的游戏版本过滤
+            selected_version = self.game_version_var.get()
+            if selected_version and selected_version != "全部":
+                filtered_files = []
+                for file_info in formatted_files:
+                    game_versions = file_info.get("game_versions", [])
+                    if selected_version in game_versions:
+                        filtered_files.append(file_info)
+                formatted_files = filtered_files
             
             self.current_files = formatted_files
             self.root.after(0, self.update_files_list)

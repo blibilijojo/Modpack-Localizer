@@ -1553,6 +1553,13 @@ class MainWindow:
     def _save_current_session(self):
         active_tabs = list(self.project_tabs.values())
         if active_tabs:
+            # 检查是否只有一个标签页且是"新项目"（空标签页）
+            if len(active_tabs) == 1:
+                tab = active_tabs[0]
+                if tab.get_state() is None:
+                    # 只有一个空的"新项目"标签页，清理缓存
+                    session_manager.clear_session()
+                    return
             session_manager.save_session(active_tabs)
         else:
             session_manager.clear_session()
@@ -2021,6 +2028,8 @@ class MainWindow:
                 tab_to_close.workbench_instance._on_close_request(force_close=False, on_confirm=self._reset_active_tab)
             else:
                 self._reset_active_tab()
+            # 删除最后一个标签页时，清理缓存
+            self._save_current_session()
             return
 
         project_tab_ids = [tid for tid in self.notebook.tabs() if tid in self.project_tabs]
@@ -2066,11 +2075,12 @@ class MainWindow:
                 # 如果要选择的标签页不存在，跳过选择操作
                 pass
         
-        if not self.project_tabs and not force:
-             self._add_new_tab()
-
+        # 在自动创建新标签页之前，先保存当前状态（如果 project_tabs 为空则清理缓存）
         self.update_menu_state()
         self._save_current_session()
+        
+        if not self.project_tabs and not force:
+             self._add_new_tab()
         
     def _open_github_download_ui(self):
         """打开GitHub下载UI"""

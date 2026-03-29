@@ -2255,8 +2255,7 @@ class MainWindow:
             if keys and any(keys):
                 has_valid_keys = True
                 break
-        if not has_valid_keys:
-            self.root.after(100, lambda: self._dispatch_log_to_active_tab("提醒: AI API密钥为空，请在""配置""菜单中打开设置面板进行配置，否则AI翻译功能将不可用。", "WARNING"))
+
     
     def _open_find_replace(self, event=None):
         active_tab = self._get_current_tab()

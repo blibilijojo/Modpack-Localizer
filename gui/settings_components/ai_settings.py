@@ -692,7 +692,7 @@ class AISettings:
         }
         
         # 保留其他AI相关参数
-        other_keys = ["prompt", "use_grounding"]
+        other_keys = ["use_grounding"]
         for key in other_keys:
             if key in self.config:
                 config[key] = self.config[key]

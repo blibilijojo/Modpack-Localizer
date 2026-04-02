@@ -689,7 +689,7 @@ class UnifiedSettingsTab(ttk.Frame):
         
         if hasattr(self, 'prompt_text'):
             self.prompt_text.delete("1.0", tk.END)
-            self.prompt_text.insert(tk.END, self.config.get("prompt", config_manager.DEFAULT_PROMPT))
+            self.prompt_text.insert(tk.END, config_manager.DEFAULT_PROMPT)
         
         # 更新社区包列表
         self.packs_listbox.delete(0, tk.END)

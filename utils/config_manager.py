@@ -54,7 +54,7 @@ DEFAULT_PROMPT = """
 6. 针对游戏文本按场景翻译：
    - 刷怪蛋/实体相关：体现“X 刷怪蛋”等游戏内叫法，避免误译为现实词义。
    - 玩家死亡消息：保持“被……”“因……而死”等死亡播报语气与句式。
-   - 环境音/音效字幕：保持“[环境音]”“[方块声]”这类字幕风格（若原文是字幕语气）。
+   - 隐藏式字幕/音效字幕（Subtitles）：必须像“字幕标签”而不是一句话——短、名词化、无句号；若文本内含方向符号/箭头（如 <、>）必须保留；不要擅自添加/移除任何颜色或样式代码（§e 等），只在原文已有时保留。
    - 进度/提示/系统消息：保持简洁、可读、符合原版提示风格。
 7. 标点与大小写风格尽量贴近原文功能：专有名词、按键名、指令片段不要误改。
 8. 若文本已是中文、为空、或仅符号/ID/占位符，返回原文。
@@ -68,7 +68,6 @@ DEFAULT_PROMPT = """
 
 DEFAULT_CONFIG = {
     "api_services": [], "model": "gpt-3.5-turbo", "model_list": [],
-    "prompt": DEFAULT_PROMPT.strip(),
     "use_grounding": False, "ai_batch_size": 50, "ai_max_threads": 4,
     "ai_max_retries": 3,
     "ai_retry_initial_delay": 2.0,
@@ -227,9 +226,9 @@ def load_config() -> dict:
                 config[key] = value
                 config_updated = True
         
-        if '数字键' not in config.get("prompt", ""):
-            logging.warning("检测到旧版 AI 提示词，已自动更新为最稳健的键值对模式。")
-            config["prompt"] = DEFAULT_PROMPT.strip()
+        if "prompt" in config:
+            logging.info("检测到旧版 prompt 配置，已迁移为仅使用代码内置提示词。")
+            del config["prompt"]
             config_updated = True
         
         if config_updated:
@@ -245,6 +244,8 @@ def save_config(config_data: dict):
     try:
         # 防止内置密钥被写入配置文件
         config_to_save = config_data.copy()
+        # prompt 已弃用：始终使用代码内置提示词，禁止写入配置文件
+        config_to_save.pop("prompt", None)
         try:
             from utils.builtin_secrets import get_builtin_curseforge_key
             builtin_key = get_builtin_curseforge_key()

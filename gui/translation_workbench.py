@@ -2896,7 +2896,13 @@ class TranslationWorkbench(ttk.Frame):
             from concurrent.futures import ThreadPoolExecutor
             self._current_ai_executor = ThreadPoolExecutor(max_workers=s['ai_max_threads'])
             try:
-                future_map = {self._current_ai_executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'])): i for i, batch in enumerate(batches)}
+                future_map = {
+                    self._current_ai_executor.submit(
+                        translator.translate_batch,
+                        (i, batch, s['model'], utils.config_manager.DEFAULT_PROMPT.strip())
+                    ): i
+                    for i, batch in enumerate(batches)
+                }
                 for i, future in enumerate(as_completed(future_map), 1):
                     # 检查取消标志
                     if self._ai_translation_cancelled:

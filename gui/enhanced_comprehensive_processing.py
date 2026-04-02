@@ -1297,7 +1297,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     if not self.processing:
                         break
                     # 根据模式调整提示词
-                    batch_prompt = self._adjust_prompt_for_mode(s['prompt'], translation_mode, contexts)
+                    batch_prompt = self._adjust_prompt_for_mode(config_manager.DEFAULT_PROMPT.strip(), translation_mode, contexts)
                     future_map[ai_executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt))] = i
                 
                 for i, future in enumerate(as_completed(future_map), 1):
@@ -1594,7 +1594,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 1. 严格保留格式与占位符（如 %s, %d, {0}, %1$s, \\n, §a），不得增删改顺序。
 2. 严格保留命名空间 ID 与资源键（如 minecraft:zombie、item.minecraft.apple）本体不翻译。
 3. 使用 Minecraft 语境：刷怪蛋、玩家死亡消息、环境音字幕、系统提示等采用游戏内自然表达。
-4. 同一术语保持一致，避免直译腔与语义漂移。"""
+4. 字幕（Subtitles，如 key 包含 subtitles.）：输出必须像字幕标签——短、名词化、无句号；若文本含 < 或 > 必须保留；不要擅自添加/移除任何颜色或样式代码（§e 等），只在原文已有时保留。
+5. 同一术语保持一致，避免直译腔与语义漂移。"""
         if mode == "basic":
             # 基础翻译模式：简洁直接的翻译要求
             format_note = "(如 %s, §a, \n)"  # 单独定义包含转义字符的字符串

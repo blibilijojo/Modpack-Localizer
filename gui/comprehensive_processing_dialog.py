@@ -251,7 +251,13 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             
             # 使用线程池执行翻译
             with ThreadPoolExecutor(max_workers=s['ai_max_threads']) as executor:
-                future_map = {executor.submit(translator.translate_batch, (i, batch, s['model'], s['prompt'])): i for i, batch in enumerate(batches)}
+                future_map = {
+                    executor.submit(
+                        translator.translate_batch,
+                        (i, batch, s['model'], utils.config_manager.DEFAULT_PROMPT.strip())
+                    ): i
+                    for i, batch in enumerate(batches)
+                }
                 
                 for i, future in enumerate(as_completed(future_map), 1):
                     if not self.processing:

@@ -1697,7 +1697,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                             'new': final_translation
                         })
                         item['zh'] = final_translation
-                        item['source'] = 'AI翻译'
+                        item['source'] = 'AI润色'
                         updated_count += 1
                     else:
                         skipped_count += 1

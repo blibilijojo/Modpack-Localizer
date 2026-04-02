@@ -270,8 +270,12 @@ class AITranslator:
                 client = self._get_client(api_key)
                 input_dict = dict(enumerate(texts_to_translate))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
-                # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
-                prompt_content = f"{prompt_template}\n\n输入: {input_json}"
+                # 兼容 prompt 模板中的占位符：{input_data_json}
+                # 如果模板已包含该占位符，则直接替换；否则追加输入区块。
+                if "{input_data_json}" in (prompt_template or ""):
+                    prompt_content = (prompt_template or "").replace("{input_data_json}", input_json)
+                else:
+                    prompt_content = f"{prompt_template}\n\n输入: {input_json}"
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
                 
                 # 检查取消标志
@@ -298,7 +302,15 @@ class AITranslator:
                         return [None] * len(batch_inner)
                     logging.error(f"批次 {batch_index_inner + 1}：API调用失败: {e}")
                     self.key_manager.penalize_key(api_key, 10)
-                    self.key_manager.release_key(api_key)
+                    # 不要在惩罚冷却期间立即 release key，避免冷却失效
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
+                        # 返回原文作为回退
+                        for idx, text in enumerate(batch_inner):
+                            if cached_results[idx] is None:
+                                cached_results[idx] = text
+                        return cached_results
                     continue
                 
                 # 检查取消标志
@@ -642,8 +654,12 @@ class AITranslator:
                 client = self._get_client(api_key)
                 input_dict = dict(enumerate(texts_to_translate))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
-                # 将输入数据添加到提示词末尾，确保AI能够正确接收输入数据
-                prompt_content = f"{prompt_template}\n\n输入: {input_json}"
+                # 兼容 prompt 模板中的占位符：{input_data_json}
+                # 如果模板已包含该占位符，则直接替换；否则追加输入区块。
+                if "{input_data_json}" in (prompt_template or ""):
+                    prompt_content = (prompt_template or "").replace("{input_data_json}", input_json)
+                else:
+                    prompt_content = f"{prompt_template}\n\n输入: {input_json}"
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
 
                 # 异步执行API调用

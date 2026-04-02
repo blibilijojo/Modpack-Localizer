@@ -1238,7 +1238,7 @@ class TranslationWorkbench(ttk.Frame):
             self.ns_tree.move(k, '', index)
     
     def _setup_treeview_tags(self):
-        source_colors = { "个人词典 [Key]": "#8B00FF", "个人词典 [原文]": "#8B00FF", "模组自带": "#00AA00", "第三方汉化包": "#00CED1", "社区词典 [Key]": "#4169E1", "社区词典 [原文]": "#4169E1", "待翻译": "#DC143C", "AI翻译": "#20B2AA", "手动校对": "#FF8C00", "标点修正": "#FF6347", "空": "#A9A9A9" }
+        source_colors = { "个人词典 [Key]": "#8B00FF", "个人词典 [原文]": "#8B00FF", "模组自带": "#00AA00", "第三方汉化包": "#00CED1", "社区词典 [Key]": "#4169E1", "社区词典 [原文]": "#4169E1", "待翻译": "#DC143C", "AI翻译": "#20B2AA", "AI润色": "#2CB8B1", "手动校对": "#FF8C00", "标点修正": "#FF6347", "空": "#A9A9A9" }
         for source, color in source_colors.items(): self.trans_tree.tag_configure(source, foreground=color)
         self.trans_tree.tag_configure("手动校对", font=('Microsoft YaHei UI', 9, 'normal'))
 

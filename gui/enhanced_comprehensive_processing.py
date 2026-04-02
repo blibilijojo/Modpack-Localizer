@@ -1586,12 +1586,18 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     
     def _adjust_prompt_for_mode(self, base_prompt, mode, contexts):
         """根据翻译模式调整提示词"""
+        mc_rules = """Minecraft 专用规范:
+1. 严格保留格式与占位符（如 %s, %d, {0}, %1$s, \\n, §a），不得增删改顺序。
+2. 严格保留命名空间 ID 与资源键（如 minecraft:zombie、item.minecraft.apple）本体不翻译。
+3. 使用 Minecraft 语境：刷怪蛋、玩家死亡消息、环境音字幕、系统提示等采用游戏内自然表达。
+4. 同一术语保持一致，避免直译腔与语义漂移。"""
         if mode == "basic":
             # 基础翻译模式：简洁直接的翻译要求
             format_note = "(如 %s, §a, \n)"  # 单独定义包含转义字符的字符串
             example = '{"0": "译文1", "1": "译文2"}'
             adjusted_prompt = f"""你是一个只输出JSON的翻译AI。
 任务：将输入JSON对象中，每个数字键对应的英文字符串值翻译为简体中文。
+{mc_rules}
 核心指令:
 1. 仅对提供的英文文本进行直接翻译，不参考任何其他内容
 2. 保持原文的语气、风格和意图
@@ -1607,6 +1613,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             example = '{"0": "润色后的译文1", "1": "润色后的译文2"}'
             adjusted_prompt = f"""你是一个只输出JSON的翻译润色AI。
 任务：对输入JSON对象中每个数字键对应的文本进行处理，输入格式为"英文原文 -> 中文译文"，你需要基于英文原文和现有中文译文生成更优质的中文翻译。
+{mc_rules}
 核心指令:
 1. 首先解析输入格式：英文原文 -> 中文译文
 2. 基于英文原文的准确含义，对现有中文译文进行优化
@@ -1631,6 +1638,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             example = '{"0": "译文1", "1": "译文2"}'
             adjusted_prompt = f"""你是一个只输出JSON的智能翻译AI。
 任务：将输入JSON对象中每个数字键对应的英文字符串值翻译为简体中文，严格参考提供的上下文。
+{mc_rules}
 
 翻译参考上下文：
 {most_common_context}

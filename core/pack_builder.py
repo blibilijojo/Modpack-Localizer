@@ -208,76 +208,58 @@ class PackBuilder:
             counter += 1
     
     def run(self, output_dir: Path, final_translations_lookup_by_ns: dict, pack_settings: dict, namespace_formats: dict, raw_english_files: dict):
-        logging.info(f"--- 开始资源包构建流程 (正则替换模式) ---")
-        pack_as_zip = pack_settings.get('pack_as_zip', False)
-        pack_description = pack_settings.get('pack_description', 'A Modpack Localization Pack')
-        base_name_raw = pack_settings.get('pack_base_name', 'Generated_Pack')
-        base_name = self._sanitize_filename(base_name_raw)
-        with tempfile.TemporaryDirectory() as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
-            logging.info(f"在临时目录中构建资源包内容: {temp_dir}")
-            for namespace, translations in final_translations_lookup_by_ns.items():
-                template_content = raw_english_files.get(namespace, '{\n}')
-                try:
-                    lang_dir = temp_dir / "assets" / namespace / "lang"
-                    lang_dir.mkdir(parents=True, exist_ok=True)
-                    file_format = namespace_formats.get(namespace, 'json')
-                    
-                    if file_format == 'json':
-                        output_content = self._build_json_file(template_content, translations)
-                        target_path = lang_dir / "zh_cn.json"
-                    elif file_format == 'lang':
-                        output_content = self._build_lang_file(template_content, translations)
-                        target_path = lang_dir / "zh_cn.lang"
-                    else:
-                        continue
-                        
-                    target_path.write_text(output_content, encoding='utf-8')
-                except Exception as e:
-                    logging.error(f"为 '{namespace}' 构建文件时出错: {e}", exc_info=True)
-                    return False, f"构建 '{namespace}' 文件时出错: {e}"
-            try:
-                pack_mcmeta_data = {
-                    "pack": {
-                        "pack_format": pack_settings["pack_format"],
-                        "description": pack_description
-                    }
-                }
-                (temp_dir / "pack.mcmeta").write_text(
-                    json.dumps(pack_mcmeta_data, indent=4, ensure_ascii=False),
-                    encoding='utf-8'
+        """
+        兼容旧版 PackBuilder 的接口（薄封装）。
+
+        统一委托给 `core/builder.py`，避免资源包构建出现多套实现。
+        """
+        logging.info("--- 开始资源包构建流程（委托实现） ---")
+
+        from .builder import Builder
+        from .models import TranslationResult, ExtractionResult, LanguageEntry, NamespaceInfo, PackSettings
+
+        output_dir = Path(output_dir)
+
+        # 1) 构建 ExtractionResult（只需要 raw_english_files + namespace_info）
+        extraction_result = ExtractionResult()
+        extraction_result.raw_english_files = raw_english_files or {}
+
+        all_namespaces = set((final_translations_lookup_by_ns or {}).keys()) | set((namespace_formats or {}).keys())
+        for ns in all_namespaces:
+            extraction_result.namespace_info[ns] = NamespaceInfo(
+                name=ns,
+                jar_name="Unknown",
+                file_format=(namespace_formats or {}).get(ns, "json"),
+                raw_content=(raw_english_files or {}).get(ns, ""),
+            )
+
+        # 2) 构建 TranslationResult（仅用于提供每个 ns 的 zh 值）
+        translation_result = TranslationResult()
+        for ns, translations in (final_translations_lookup_by_ns or {}).items():
+            translation_result.workbench_data[ns] = {}
+            for key, zh_value in (translations or {}).items():
+                zh_text = zh_value if isinstance(zh_value, str) else str(zh_value)
+                translation_result.workbench_data[ns][key] = LanguageEntry(
+                    key=key,
+                    en="",
+                    zh=zh_text,
+                    source="待翻译",
+                    namespace=ns,
                 )
-                icon_path_str = pack_settings.get('pack_icon_path', '')
-                if icon_path_str and Path(icon_path_str).is_file():
-                    shutil.copy(icon_path_str, temp_dir / "pack.png")
-            except Exception as e:
-                logging.error(f"写入元数据时出错: {e}", exc_info=True)
-                return False, f"写入元数据时出错: {e}"
-            try:
-                if pack_as_zip:
-                    final_zip_path = output_dir / (base_name + '.zip')
-                    final_unique_path = self._get_unique_path(final_zip_path)
-                    temp_zip_path = final_unique_path.with_suffix('.zip.tmp')
-                    try:
-                        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                            for file_path in temp_dir.rglob('*'):
-                                if file_path.is_file():
-                                    arcname = file_path.relative_to(temp_dir)
-                                    zf.write(file_path, arcname)
-                        os.rename(temp_zip_path, final_unique_path)
-                        logging.info(f"成功将资源包压缩到: {final_unique_path}")
-                    finally:
-                        if temp_zip_path.exists():
-                            os.remove(temp_zip_path)
-                    final_output_path = final_unique_path
-                else:
-                    final_folder_path = output_dir / base_name
-                    final_unique_path = self._get_unique_path(final_folder_path)
-                    shutil.move(str(temp_dir), str(final_unique_path))
-                    final_output_path = final_unique_path
-                logging.info(f"成功创建资源包: {final_output_path.name}")
-            except Exception as e:
-                logging.error(f"完成最终资源包时出错: {e}", exc_info=True)
-                return False, f"完成最终资源包时出错: {e}"
-        logging.info("--- 资源包构建成功！ ---")
-        return True, "资源包构建成功！"
+
+        # 3) 构建 PackSettings
+        builder_pack_settings = PackSettings(
+            pack_as_zip=pack_settings.get("pack_as_zip", False),
+            pack_description=pack_settings.get("pack_description", "A Modpack Localization Pack"),
+            pack_base_name=pack_settings.get("pack_base_name", "Generated_Pack"),
+            pack_format=pack_settings.get("pack_format", 7),
+            pack_icon_path=pack_settings.get("pack_icon_path", ""),
+        )
+
+        builder = Builder()
+        return builder.run(
+            output_dir=output_dir,
+            translation_result=translation_result,
+            extraction_result=extraction_result,
+            pack_settings=builder_pack_settings,
+        )

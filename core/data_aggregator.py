@@ -36,15 +36,65 @@ class DataAggregator:
                 data[key] = value
         return data
     def run(self, progress_update_callback=None):
-        logging.info("--- 阶段 1: 开始聚合所有语言数据 ---")
-        user_dictionary = self._load_user_dictionary()
-        community_dict_by_key, community_dict_by_origin = self._load_community_dictionary()
-        master_english_dicts, internal_chinese_dicts, namespace_formats, namespace_to_jar = self._aggregate_from_mods(progress_update_callback)
-        pack_chinese_dict = self._aggregate_from_zips(master_english_dicts)
+        """
+        兼容旧版的聚合接口（薄封装）。
+
+        为避免代码库出现多套逻辑长期漂移，本方法统一委托给：
+        - `core/extractor.py`：语言提取
+        - `core/dictionary_manager.py`：词典加载
+        """
+        logging.info("--- 阶段 1: 开始聚合所有语言数据（委托实现） ---")
+
+        # 1) 词典加载（与新工作流一致）
+        from .dictionary_manager import DictionaryManager
+        dict_mgr = DictionaryManager()
+        user_dictionary, community_dict_by_key, community_dict_by_origin = dict_mgr.get_all_dictionaries(
+            self.community_dict_dir,
+            progress_callback=progress_update_callback,
+        )
+
+        # 2) 语言提取（与新工作流一致）
+        from .extractor import Extractor
+        extractor = Extractor()
+        extraction_result = extractor.run(
+            mods_dir=self.mods_dir,
+            zip_paths=list(self.zip_paths or []),
+            community_dict_dir=self.community_dict_dir,
+            progress_update_callback=progress_update_callback,
+            stop_event=None,
+        )
+
+        # 3) 映射回旧版 DataAggregator 的返回结构（dict[str -> str]）
+        master_english_dicts = {}
+        internal_chinese_dicts = {}
+        for ns, entries in (extraction_result.master_english or {}).items():
+            master_english_dicts[ns] = {k: v.en for k, v in entries.items()}
+        for ns, entries in (extraction_result.internal_chinese or {}).items():
+            internal_chinese_dicts[ns] = {k: (v.zh or "") for k, v in entries.items()}
+
+        namespace_formats = {ns: info.file_format for ns, info in (extraction_result.namespace_info or {}).items()}
+        namespace_to_jar = {ns: info.jar_name for ns, info in (extraction_result.namespace_info or {}).items()}
+        pack_chinese_dict = extraction_result.pack_chinese or {}
+        self.raw_english_files = extraction_result.raw_english_files or {}
+
         total_en = sum(len(d) for d in master_english_dicts.values())
         total_zh_internal = sum(len(d) for d in internal_chinese_dicts.values())
-        logging.info(f"数据聚合完成。共发现 {len(master_english_dicts)} 个命名空间, {total_en} 条英文原文, {total_zh_internal} 条模组自带中文。")
-        return user_dictionary, community_dict_by_key, community_dict_by_origin, master_english_dicts, internal_chinese_dicts, pack_chinese_dict, namespace_formats, namespace_to_jar, self.raw_english_files
+        logging.info(
+            f"数据聚合完成（委托实现）。共发现 {len(master_english_dicts)} 个命名空间, "
+            f"{total_en} 条英文原文, {total_zh_internal} 条模组自带中文。"
+        )
+
+        return (
+            user_dictionary,
+            community_dict_by_key,
+            community_dict_by_origin,
+            master_english_dicts,
+            internal_chinese_dicts,
+            pack_chinese_dict,
+            namespace_formats,
+            namespace_to_jar,
+            self.raw_english_files,
+        )
     def _load_user_dictionary(self) -> dict:
         logging.info("  - 正在加载用户个人词典...")
         user_dict = config_manager.load_user_dict()

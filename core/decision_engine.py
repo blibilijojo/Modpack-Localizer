@@ -195,42 +195,73 @@ class DecisionEngine:
             master_english_dicts: dict, internal_chinese_dicts: dict, pack_chinese_dict: dict, 
             use_origin_name_lookup: bool, namespace_to_jar: dict,
             raw_english_files: dict, namespace_formats: dict):
-        logging.info("翻译决策开始")
-        workbench_data = {}
-        user_dict_by_key = user_dictionary.get('by_key', {})
-        user_dict_by_origin = user_dictionary.get('by_origin_name', {})
-        total_entries = 0
-        source_counts = Counter()
-        
-        # 对于CPU密集型任务，串行处理可能比并行更高效（避免GIL开销）
-        # 直接使用串行处理，提高稳定性和性能
-        logging.info(f"处理 {len(master_english_dicts)} 个命名空间")
-        
-        for namespace, english_dict in master_english_dicts.items():
-            jar_name = namespace_to_jar.get(namespace, 'Unknown')
-            internal_chinese = internal_chinese_dicts.get(namespace, {})
-            raw_content = raw_english_files.get(namespace)
-            file_format = namespace_formats.get(namespace)
-            
-            # 直接调用处理方法
-            ns_data, ns_source_counts = self._process_namespace(
-                namespace, english_dict, user_dict_by_key, user_dict_by_origin,
-                community_dict_by_key, community_dict_by_origin, internal_chinese,
-                pack_chinese_dict, use_origin_name_lookup, jar_name,
-                raw_content, file_format
+        """
+        兼容旧版 DecisionEngine 的接口（薄封装）。
+
+        统一委托给 `core/translator.py`，避免决策逻辑出现多套实现。
+        """
+        logging.info("翻译决策开始（委托实现）")
+
+        from .translator import Translator
+        from .models import ExtractionResult, LanguageEntry, NamespaceInfo
+
+        extraction_result = ExtractionResult()
+        extraction_result.raw_english_files = raw_english_files or {}
+        extraction_result.pack_chinese = pack_chinese_dict or {}
+
+        # 收集所有 namespace（避免某些来源只存在其一）
+        all_namespaces = set(master_english_dicts.keys()) | set(internal_chinese_dicts.keys())
+
+        for ns in all_namespaces:
+            extraction_result.namespace_info[ns] = NamespaceInfo(
+                name=ns,
+                jar_name=namespace_to_jar.get(ns, "Unknown"),
+                file_format=namespace_formats.get(ns, "json"),
+                raw_content=(raw_english_files or {}).get(ns, ""),
             )
-            
-            workbench_data[namespace] = ns_data
-            source_counts.update(ns_source_counts)
-            total_entries += len(ns_data['items'])
-            logging.debug(f"命名空间 '{namespace}' 处理完成，共 {len(ns_data['items'])} 条")
-        
-        # 统计各来源占比
-        source_summary = []
-        for source, count in sorted(source_counts.items()):
-            percentage = (count / total_entries) * 100 if total_entries > 0 else 0
-            source_summary.append(f"{source}: {count}条({percentage:.1f}%)")
-        
-        logging.info(f"翻译决策完成: {total_entries}条, {', '.join(source_summary)}")
-        
+
+        # master_english：key -> en
+        for ns, english_dict in (master_english_dicts or {}).items():
+            extraction_result.master_english[ns] = {
+                key: LanguageEntry(key=key, en=en_value, namespace=ns)
+                for key, en_value in (english_dict or {}).items()
+            }
+
+        # internal_chinese：key -> zh
+        for ns, zh_dict in (internal_chinese_dicts or {}).items():
+            extraction_result.internal_chinese[ns] = {
+                key: LanguageEntry(key=key, en="", zh=zh_value, namespace=ns)
+                for key, zh_value in (zh_dict or {}).items()
+            }
+
+        # 调用统一的翻译决策引擎
+        translator = Translator()
+        translation_result = translator.run(
+            extraction_result=extraction_result,
+            user_dictionary=user_dictionary,
+            community_dict_by_key=community_dict_by_key,
+            community_dict_by_origin=community_dict_by_origin,
+            use_origin_name_lookup=use_origin_name_lookup,
+            dictionary_manager=None,
+        )
+
+        # 转回旧版 workbench_data 结构
+        workbench_data = {}
+        for ns, entries in (translation_result.workbench_data or {}).items():
+            items = []
+            for key, entry in entries.items():
+                items.append({
+                    "key": key,
+                    "en": entry.en,
+                    "zh": entry.zh or "",
+                    "source": entry.source or "待翻译",
+                })
+
+            workbench_data[ns] = {
+                "jar_name": namespace_to_jar.get(ns, "Unknown"),
+                "display_name": ns,
+                "git_name": "",
+                "items": items,
+            }
+
         return workbench_data

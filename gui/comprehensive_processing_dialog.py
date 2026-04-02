@@ -232,7 +232,10 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
         """AI翻译工作线程"""
         try:
             # 提取要翻译的文本
-            texts_to_translate = [item[2]['en'] for item in items_to_process]
+            translation_inputs = [
+                {"text": item[2]['en'], "key": item[2].get('key', '')}
+                for item in items_to_process
+            ]
             
             # 每次翻译时都从配置文件加载最新设置
             import utils.config_manager
@@ -242,7 +245,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             translator = AITranslator(s.get('api_services', []))
             
             # 分批次处理原文
-            batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
+            batches = [translation_inputs[i:i + s['ai_batch_size']] for i in range(0, len(translation_inputs), s['ai_batch_size'])]
             total_batches = len(batches)
             translations_nested = [None] * total_batches
             
@@ -271,8 +274,8 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             # 合并翻译结果
             translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
             
-            if len(translations) != len(texts_to_translate):
-                raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
+            if len(translations) != len(translation_inputs):
+                raise ValueError(f"AI返回数量不匹配! 预期:{len(translation_inputs)}, 实际:{len(translations)}")
             
             # 更新翻译结果
             self.after(0, self._update_translations, items_to_process, translations)

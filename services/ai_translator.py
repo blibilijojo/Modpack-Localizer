@@ -173,6 +173,33 @@ class AITranslator:
         with self.cache_lock:
             self.translation_cache[text] = (translation, time.time())
             logging.debug(f"缓存翻译结果: {text} → {translation}")
+
+    def _normalize_batch_entry(self, entry):
+        """
+        规范化批次条目，兼容旧版字符串输入与新版结构化输入。
+
+        Returns:
+            tuple[str, dict|str, str]:
+            - source_text: 用于回填与结果映射的原始文本
+            - prompt_value: 发送给模型的输入值（字符串或对象）
+            - cache_key: 缓存键（包含key上下文时可区分同文不同键）
+        """
+        if isinstance(entry, dict):
+            source_text = str(entry.get("text", ""))
+            source_key = str(entry.get("key", "") or "")
+            prompt_value = {"text": source_text, "key": source_key}
+            cache_key = f"{source_key}\x1f{source_text}" if source_key else source_text
+            return source_text, prompt_value, cache_key
+
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            source_key = str(entry[0] or "")
+            source_text = str(entry[1] or "")
+            prompt_value = {"text": source_text, "key": source_key}
+            cache_key = f"{source_key}\x1f{source_text}" if source_key else source_text
+            return source_text, prompt_value, cache_key
+
+        source_text = str(entry or "")
+        return source_text, source_text, source_text
     def fetch_models(self) -> list[str]:
         logging.info(f"正在获取模型列表...")
         for key in cycle(self.all_keys):
@@ -213,19 +240,22 @@ class AITranslator:
         # 检查缓存，收集需要翻译的文本
         texts_to_translate = []
         text_indices = {}
-        for idx, text in enumerate(batch_inner):
+        normalized_entries = [self._normalize_batch_entry(entry) for entry in batch_inner]
+        source_texts = [entry[0] for entry in normalized_entries]
+
+        for idx, (_, _, cache_key) in enumerate(normalized_entries):
             # 检查取消标志
             if self._cancelled:
                 logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
                 return [None] * len(batch_inner)
             
             # 从缓存中获取翻译结果
-            cached_translation = self._get_cached_translation(text)
+            cached_translation = self._get_cached_translation(cache_key)
             if cached_translation:
                 cached_results[idx] = cached_translation
-                logging.debug(f"批次 {batch_index_inner + 1}：文本 '{text}' 命中缓存")
+                logging.debug(f"批次 {batch_index_inner + 1}：条目命中缓存")
             else:
-                texts_to_translate.append(text)
+                texts_to_translate.append(normalized_entries[idx][1])
                 text_indices[len(texts_to_translate) - 1] = idx
         
         # 检查取消标志
@@ -307,7 +337,7 @@ class AITranslator:
                     if attempt >= max_attempts:
                         logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
                         # 返回原文作为回退
-                        for idx, text in enumerate(batch_inner):
+                        for idx, text in enumerate(source_texts):
                             if cached_results[idx] is None:
                                 cached_results[idx] = text
                         return cached_results
@@ -320,7 +350,8 @@ class AITranslator:
                     return [None] * len(batch_inner)
                 
                 response_text = response.choices[0].message.content
-                translated_texts = self._parse_response(response_text, texts_to_translate)
+                untranslated_source_texts = [source_texts[text_indices[idx]] for idx in range(len(texts_to_translate))]
+                translated_texts = self._parse_response(response_text, untranslated_source_texts)
                 
                 # 检查取消标志
                 if self._cancelled:
@@ -338,9 +369,10 @@ class AITranslator:
                             return [None] * len(batch_inner)
                         
                         # 获取原始文本
-                        text = texts_to_translate[idx]
+                        source_text = untranslated_source_texts[idx]
+                        source_cache_key = normalized_entries[text_indices[idx]][2]
                         # 缓存翻译结果
-                        self._cache_translation(text, translation)
+                        self._cache_translation(source_cache_key, translation)
                         # 填充到结果列表中
                         original_idx = text_indices[idx]
                         cached_results[original_idx] = translation
@@ -391,7 +423,7 @@ class AITranslator:
                 if attempt >= max_attempts:
                     logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
                     # 返回原文作为回退
-                    for idx, text in enumerate(batch_inner):
+                    for idx, text in enumerate(source_texts):
                         if cached_results[idx] is None:
                             cached_results[idx] = text
                     return cached_results
@@ -620,14 +652,17 @@ class AITranslator:
         # 检查缓存，收集需要翻译的文本
         texts_to_translate = []
         text_indices = {}
-        for idx, text in enumerate(batch_inner):
+        normalized_entries = [self._normalize_batch_entry(entry) for entry in batch_inner]
+        source_texts = [entry[0] for entry in normalized_entries]
+
+        for idx, (_, _, cache_key) in enumerate(normalized_entries):
             # 从缓存中获取翻译结果
-            cached_translation = self._get_cached_translation(text)
+            cached_translation = self._get_cached_translation(cache_key)
             if cached_translation:
                 cached_results[idx] = cached_translation
-                logging.debug(f"批次 {batch_index_inner + 1}：文本 '{text}' 命中缓存")
+                logging.debug(f"批次 {batch_index_inner + 1}：条目命中缓存")
             else:
-                texts_to_translate.append(text)
+                texts_to_translate.append(normalized_entries[idx][1])
                 text_indices[len(texts_to_translate) - 1] = idx
         
         # 如果所有文本都命中缓存，直接返回结果
@@ -665,14 +700,15 @@ class AITranslator:
                 # 异步执行API调用
                 response = await asyncio.to_thread(client.chat.completions.create, **request_params)
                 response_text = response.choices[0].message.content
-                translated_texts = self._parse_response(response_text, texts_to_translate)
+                untranslated_source_texts = [source_texts[text_indices[idx]] for idx in range(len(texts_to_translate))]
+                translated_texts = self._parse_response(response_text, untranslated_source_texts)
 
                 if translated_texts:
                     # 将翻译结果存入缓存并构建完整的结果列表
                     for idx, translation in enumerate(translated_texts):
                         # 缓存翻译结果
-                        text = texts_to_translate[idx]
-                        self._cache_translation(text, translation)
+                        source_cache_key = normalized_entries[text_indices[idx]][2]
+                        self._cache_translation(source_cache_key, translation)
                         # 填充到结果列表中
                         original_idx = text_indices[idx]
                         cached_results[original_idx] = translation
@@ -720,7 +756,7 @@ class AITranslator:
                 if attempt >= max_attempts:
                     logging.error(f"批次 {batch_index_inner + 1} 达到最大重试次数 ({max_attempts})，翻译失败。")
                     # 返回原文作为回退
-                    for idx, text in enumerate(batch_inner):
+                    for idx, text in enumerate(source_texts):
                         if cached_results[idx] is None:
                             cached_results[idx] = text
                     return cached_results

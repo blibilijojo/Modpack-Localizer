@@ -2848,7 +2848,17 @@ class TranslationWorkbench(ttk.Frame):
                 self.log_callback("AI翻译已取消，停止执行", "INFO")
                 return
             
-            items_to_translate_info = [{'ns': ns, 'idx': idx, 'en': item['en']} for ns, data in self.translation_data.items() for idx, item in enumerate(data.get('items', [])) if not item.get('zh', '').strip() and item.get('en', '').strip()]
+            items_to_translate_info = [
+                {
+                    'ns': ns,
+                    'idx': idx,
+                    'en': item['en'],
+                    'key': item.get('key', '')
+                }
+                for ns, data in self.translation_data.items()
+                for idx, item in enumerate(data.get('items', []))
+                if not item.get('zh', '').strip() and item.get('en', '').strip()
+            ]
             if not items_to_translate_info:
                 try:
                     if self.winfo_exists():
@@ -2862,7 +2872,10 @@ class TranslationWorkbench(ttk.Frame):
                 self.log_callback("AI翻译已取消，停止执行", "INFO")
                 return
             
-            texts_to_translate = [info['en'] for info in items_to_translate_info]
+            translation_inputs = [
+                {"text": info['en'], "key": info.get('key', '')}
+                for info in items_to_translate_info
+            ]
             # 每次翻译时都从配置文件加载最新设置
             import utils.config_manager
             s = utils.config_manager.load_config()
@@ -2876,7 +2889,7 @@ class TranslationWorkbench(ttk.Frame):
                 return
             
             # 分批次处理文本
-            batches = [texts_to_translate[i:i + s['ai_batch_size']] for i in range(0, len(texts_to_translate), s['ai_batch_size'])]
+            batches = [translation_inputs[i:i + s['ai_batch_size']] for i in range(0, len(translation_inputs), s['ai_batch_size'])]
             total_batches, translations_nested = len(batches), [None] * len(batches)
             
             # 创建并保存AI翻译线程池
@@ -2917,7 +2930,7 @@ class TranslationWorkbench(ttk.Frame):
             # 合并翻译结果
             translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
             
-            if len(translations) != len(texts_to_translate): raise ValueError(f"AI返回数量不匹配! 预期:{len(texts_to_translate)}, 实际:{len(translations)}")
+            if len(translations) != len(translation_inputs): raise ValueError(f"AI返回数量不匹配! 预期:{len(translation_inputs)}, 实际:{len(translations)}")
             
             # 检查取消标志
             if self._ai_translation_cancelled:

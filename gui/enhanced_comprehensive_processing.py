@@ -1076,6 +1076,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
             # 3. 准备翻译数据
             all_texts_to_translate = []
+            all_translation_inputs = []
             all_item_mapping = []
             all_group_contexts = []
 
@@ -1090,9 +1091,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 润色模式：传递英文原文和中文译文，格式为 "原文 -> 译文"
                     combined_text = f"{en_text} -> {zh_text}"
                     all_texts_to_translate.append(combined_text)
+                    all_translation_inputs.append({"text": combined_text, "key": item.get("key", "")})
                 else:
                     # 其他模式：仅传递英文原文
                     all_texts_to_translate.append(en_text)
+                    all_translation_inputs.append({"text": en_text, "key": item.get("key", "")})
                 
                 all_item_mapping.append((ns, idx, item))
                 all_group_contexts.append(group_context)
@@ -1145,11 +1148,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
                 # 为每个命名空间分别创建批次
                 for ns, indices in ns_to_items.items():
-                    ns_texts = [all_texts_to_translate[i] for i in indices]
+                    ns_inputs = [all_translation_inputs[i] for i in indices]
                     ns_contexts = [all_group_contexts[i] for i in indices]
 
                     if batch_mode == "words":
-                        ns_words = sum(self._count_words(text) for text in ns_texts)
+                        ns_words = sum(self._count_words(item["text"]) for item in ns_inputs)
                         ns_batches_count = max(1, (ns_words + batch_value - 1) // batch_value)
                         words_per_batch = max(1, (ns_words + ns_batches_count - 1) // ns_batches_count)
 
@@ -1157,13 +1160,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         current_contexts = []
                         current_words = 0
 
-                        for text, context in zip(ns_texts, ns_contexts):
-                            text_words = self._count_words(text)
-                            current_batch.append(text)
+                        for payload, context in zip(ns_inputs, ns_contexts):
+                            text_words = self._count_words(payload["text"])
+                            current_batch.append(payload)
                             current_contexts.append(context)
                             current_words += text_words
 
-                            if len(current_batch) < len(ns_texts) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(ns_texts[len(current_batch)]) - words_per_batch)):
+                            if len(current_batch) < len(ns_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(ns_inputs[len(current_batch)]["text"]) - words_per_batch)):
                                 ns_batches_list.append((current_batch.copy(), current_contexts.copy()))
                                 current_batch.clear()
                                 current_contexts.clear()
@@ -1172,27 +1175,27 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         if current_batch:
                             ns_batches_list.append((current_batch, current_contexts))
                     elif batch_mode == "items":
-                        ns_items_count = len(ns_texts)
+                        ns_items_count = len(ns_inputs)
                         ns_batches_count = max(1, (ns_items_count + batch_value - 1) // batch_value)
                         items_per_batch = max(1, (ns_items_count + ns_batches_count - 1) // ns_batches_count)
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_texts[i:end_idx], ns_contexts[i:end_idx]))
+                            ns_batches_list.append((ns_inputs[i:end_idx], ns_contexts[i:end_idx]))
                     else:
-                        ns_items_count = len(ns_texts)
+                        ns_items_count = len(ns_inputs)
                         ns_batches_count = batch_value
                         items_per_batch = max(1, (ns_items_count + ns_batches_count - 1) // ns_batches_count)
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_texts[i:end_idx], ns_contexts[i:end_idx]))
+                            ns_batches_list.append((ns_inputs[i:end_idx], ns_contexts[i:end_idx]))
 
                 batches = ns_batches_list
                 batch_size = batch_value
             elif batch_mode == "words":
                 # 基于单词数量的批次划分：平均分配每批次单词数
-                total_words = sum(self._count_words(text) for text in all_texts_to_translate)
+                total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
                 # 计算需要的批次数：向上取整(total_words / batch_value)
                 total_batches = max(1, (total_words + batch_value - 1) // batch_value)
                 # 计算每批次的平均单词数
@@ -1203,14 +1206,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 current_contexts = []
                 current_words = 0
                 
-                for text, context in zip(all_texts_to_translate, all_group_contexts):
-                    text_words = self._count_words(text)
-                    current_batch.append(text)
+                for payload, context in zip(all_translation_inputs, all_group_contexts):
+                    text_words = self._count_words(payload["text"])
+                    current_batch.append(payload)
                     current_contexts.append(context)
                     current_words += text_words
                     
                     # 当当前批次的单词数接近平均单词数，且还有下一个条目时，考虑是否拆分
-                    if len(current_batch) < len(all_texts_to_translate) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(all_texts_to_translate[len(current_batch)]) - words_per_batch)):
+                    if len(current_batch) < len(all_translation_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(all_translation_inputs[len(current_batch)]["text"]) - words_per_batch)):
                         # 当前批次更接近平均单词数，创建新批次
                         batches.append((current_batch.copy(), current_contexts.copy()))
                         current_batch.clear()
@@ -1225,7 +1228,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 batch_size = words_per_batch
             elif batch_mode == "items":
                 # 基于条目数量的批次划分：平均分配每批次条目数
-                total_items = len(all_texts_to_translate)
+                total_items = len(all_translation_inputs)
                 # 计算需要的批次数：向上取整(total_items / batch_value)
                 total_batches = max(1, (total_items + batch_value - 1) // batch_value)
                 # 计算每批次的平均条目数
@@ -1237,7 +1240,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 for i in range(total_batches):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
-                    batch_texts = all_texts_to_translate[start_idx:end_idx]
+                    batch_texts = all_translation_inputs[start_idx:end_idx]
                     batch_contexts = all_group_contexts[start_idx:end_idx]
                     batches.append((batch_texts, batch_contexts))
                     start_idx = end_idx
@@ -1260,7 +1263,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 for i in range(num_batches):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
-                    batch_texts = all_texts_to_translate[start_idx:end_idx]
+                    batch_texts = all_translation_inputs[start_idx:end_idx]
                     batch_contexts = all_group_contexts[start_idx:end_idx]
                     batches.append((batch_texts, batch_contexts))
                     start_idx = end_idx
@@ -1587,6 +1590,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _adjust_prompt_for_mode(self, base_prompt, mode, contexts):
         """根据翻译模式调整提示词"""
         mc_rules = """Minecraft 专用规范:
+0. 输入值可能是字符串，或 {"text":"原文","key":"资源键"}；若为对象，仅翻译 text，key 只用于语义判断。
 1. 严格保留格式与占位符（如 %s, %d, {0}, %1$s, \\n, §a），不得增删改顺序。
 2. 严格保留命名空间 ID 与资源键（如 minecraft:zombie、item.minecraft.apple）本体不翻译。
 3. 使用 Minecraft 语境：刷怪蛋、玩家死亡消息、环境音字幕、系统提示等采用游戏内自然表达。

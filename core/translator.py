@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict, Counter
+from functools import lru_cache
 from packaging.version import parse as parse_version
 import re
 import json
@@ -53,22 +54,25 @@ class Translator:
         except Exception:
             return top_candidates[0]["trans"]
     
-    def _is_valid_translation(self, text: Optional[str]) -> bool:
-        """验证翻译是否有效"""
+    @staticmethod
+    @lru_cache(maxsize=65536)
+    def _is_valid_translation_cached(text: str) -> bool:
+        """验证翻译是否有效（有界缓存，重复英文/译文可共用结果）"""
         if not text or not text.strip():
             return False
-        
-        # 移除占位符后检查是否还有英文字母
-        cleaned = self.PLACEHOLDER_PERCENT.sub('', text)
-        cleaned = self.PLACEHOLDER_BRACE.sub('', cleaned)
-        cleaned = self.PLACEHOLDER_DOLLAR.sub('', cleaned)
+        cleaned = Translator.PLACEHOLDER_PERCENT.sub('', text)
+        cleaned = Translator.PLACEHOLDER_BRACE.sub('', cleaned)
+        cleaned = Translator.PLACEHOLDER_DOLLAR.sub('', cleaned)
         cleaned = cleaned.replace('%', '')
-        
-        # 检查是否包含中文字符
-        if self.CHINESE_CHAR.search(cleaned):
+        if Translator.CHINESE_CHAR.search(cleaned):
             return True
-        # 检查是否不包含英文字母
-        return not self.ENGLISH_LETTER.search(cleaned)
+        return not Translator.ENGLISH_LETTER.search(cleaned)
+
+    def _is_valid_translation(self, text: Optional[str]) -> bool:
+        """验证翻译是否有效"""
+        if text is None:
+            return False
+        return self._is_valid_translation_cached(text)
     
     def _get_ordered_keys(self, content: str, file_format: str) -> List[str]:
         """获取有序键列表"""
@@ -151,10 +155,6 @@ class Translator:
                             translation = best_translation
                             source = "社区词典 [原文]"
                     else:
-                        # 回退到本地缓存机制
-                        from collections import Counter
-                        from packaging.version import parse as parse_version
-                        
                         candidates = community_dict_by_origin[english_value]
                         if candidates:
                             if len(candidates) == 1:
@@ -183,8 +183,8 @@ class Translator:
                                 translation = best_translation
                                 source = "社区词典 [原文]"
             
-            # 验证翻译有效性
-            if not self._is_valid_translation(translation):
+            # 验证翻译有效性（原文复制已在上方用同一判定，避免重复正则）
+            if source != "原文复制" and not self._is_valid_translation(translation):
                 translation = ""
                 source = "待翻译"
             

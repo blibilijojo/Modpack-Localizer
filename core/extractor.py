@@ -363,7 +363,7 @@ class Extractor:
         
         return user_dict_by_key, user_dict_by_origin, community_dict_by_key
     
-    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def extract_from_mods(self, mods_dir: Path, extraction_progress_callback=None, stop_event=None) -> ExtractionResult:
         """从Mods文件夹中提取语言数据"""
         logging.debug(f"正在扫描Mods文件夹: {mods_dir}")
         
@@ -376,8 +376,8 @@ class Extractor:
         jar_files = file_utils.find_files_in_dir(mods_dir, "*.jar") if mods_dir.exists() else []
         
         for i, jar_file in enumerate(jar_files):
-            if progress_update_callback:
-                progress_update_callback(i + 1, len(jar_files))
+            if extraction_progress_callback and jar_files:
+                extraction_progress_callback("scan_lang", i + 1, len(jar_files))
             
             try:
                 with zipfile.ZipFile(jar_file, 'r') as zf:
@@ -1030,12 +1030,12 @@ class Extractor:
             logging.error(f"从CurseForge获取模组信息失败: {e}")
             return {}
     
-    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, extraction_progress_callback=None, stop_event=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("语言数据聚合开始")
         
         # 从Mods中提取数据
-        result = self.extract_from_mods(mods_dir, progress_update_callback, stop_event)
+        result = self.extract_from_mods(mods_dir, extraction_progress_callback, stop_event)
         
         # 从第三方汉化包中提取数据
         result.pack_chinese = self.extract_from_packs(zip_paths, result.master_english)
@@ -1100,11 +1100,11 @@ class Extractor:
                     modrinth_hashes.append(modrinth_hash)
                     hash_to_jar[modrinth_hash] = jar_name
                 completed_counter[0] += 1
-                if progress_update_callback:
-                    progress_update_callback(completed_counter[0], total_jars)
+                if extraction_progress_callback:
+                    extraction_progress_callback("fingerprint", completed_counter[0], total_jars)
                 c = completed_counter[0]
-                if c % 25 == 0 or c == total_jars:
-                    logging.info(f"已处理 {c}/{total_jars} 个模组")
+                if c % 10 == 0 or c == total_jars:
+                    logging.info(f"模组指纹进度 {c}/{total_jars}")
 
             completed = [0]
 
@@ -1178,23 +1178,31 @@ class Extractor:
                     len(jars_to_process),
                     mod_scan_cache.cache_path(),
                 )
-            
-            # 先从CurseForge获取信息
+
+            def _repo_progress(cur: int, total: int) -> None:
+                if extraction_progress_callback and total > 0:
+                    extraction_progress_callback("repo_metadata", cur, total)
+
+            # 平台查询与「扫描语言 / 指纹」分两阶段展示，避免状态栏长时间显示「扫描 Mods」
+            if extraction_progress_callback:
+                _repo_progress(0, 1)
+
             curseforge_info = self._get_mod_info_from_curseforge(curseforge_hashes)
-            
-            # 找出CurseForge未匹配的模组，只对这些模组调用Modrinth
+
             unmatched_modrinth_hashes = []
             for jar_name, info in mod_info_by_jar.items():
                 if info['curseforge_hash'] not in curseforge_info and info['modrinth_hash']:
                     unmatched_modrinth_hashes.append(info['modrinth_hash'])
-            
-            # 只对未匹配的模组调用Modrinth
+
             modrinth_info = {}
             if unmatched_modrinth_hashes:
                 logging.info(f"CurseForge未匹配 {len(unmatched_modrinth_hashes)} 个模组，尝试从Modrinth获取...")
                 modrinth_info = self._get_mod_info_from_modrinth(unmatched_modrinth_hashes)
             else:
                 logging.info("所有模组已通过CurseForge匹配，无需调用Modrinth")
+
+            if extraction_progress_callback:
+                _repo_progress(1, 1)
             
             # 整合信息
             for jar_name, info in mod_info_by_jar.items():

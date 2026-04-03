@@ -42,10 +42,22 @@ class Orchestrator:
             if not mods_path.exists() or not mods_path.is_dir():
                 raise ValueError(f"配置的Mods目录不存在或不是目录: {mods_path}")
             
+            def extraction_progress(phase: str, cur: int, total: int):
+                if total <= 0:
+                    return
+                r = min(max(cur / total, 0.0), 1.0)
+                if phase == "scan_lang":
+                    self.update_progress(f"扫描语言文件… ({cur}/{total})", 10 + r * 28)
+                elif phase == "fingerprint":
+                    self.update_progress(f"计算模组指纹… ({cur}/{total})", 38 + r * 10)
+                elif phase == "repo_metadata":
+                    self.update_progress(f"查询模组平台信息… ({cur}/{total})", 48 + r * 2)
+
             # 创建工作流上下文
             context = self.workflow.create_context(
                 settings=self.settings,
-                progress_callback=lambda cur, total: self.update_progress(f"扫描Mods... ({cur}/{total})", 10 + (cur/total) * 40)
+                progress_callback=lambda msg, p: self.update_progress(msg, 50 + p // 2),
+                extraction_progress=extraction_progress,
             )
             # 传递停止事件（如果存在）
             if hasattr(self, 'stop_event'):

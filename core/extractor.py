@@ -10,10 +10,10 @@ import io
 import time
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 from functools import wraps
-from utils import file_utils, config_manager
+from utils import file_utils, config_manager, mod_scan_cache
 
 
 def api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0, backoff_factor=2.0):
@@ -112,75 +112,50 @@ def is_toml_content(content: str) -> bool:
     """检查内容是否为TOML格式"""
     return 'displayName' in content and ('=' in content or ':=' in content)
 
-def process_jar_worker(jar_path_str):
-    """处理单个JAR文件的工作函数（用于多进程）"""
-    from pathlib import Path
-    import zipfile
-    import json
-    import hashlib
-    import io
-    import re
-    
-    jar_file = Path(jar_path_str)
-    mod_name = ""
-    curseforge_hash = ""
-    modrinth_hash = ""
-    game_version = ""
-    
-    try:
-        # 一次性读取整个文件内容
-        with open(jar_file, 'rb') as f:
-            file_data = f.read()
-        
-        # 计算SHA1哈希（Modrinth）
-        sha1_hash = hashlib.sha1()
-        sha1_hash.update(file_data)
-        modrinth_hash = sha1_hash.hexdigest()
-        
-        # 计算MurmurHash2哈希（CurseForge）
-        filtered_data = bytes([b for b in file_data if b not in (9, 10, 13, 32)])
-        
-        length = len(filtered_data)
-        if length > 0:
-            seed = 1
-            m = 0x5BD1E995
-            r = 24
-            h = seed ^ length
-            
-            for i in range(0, length - (length % 4), 4):
-                k = filtered_data[i] | (filtered_data[i+1] << 8) | (filtered_data[i+2] << 16) | (filtered_data[i+3] << 24)
-                k = (k * m) & 0xFFFFFFFF
-                k = (k ^ (k >> r)) & 0xFFFFFFFF
-                k = (k * m) & 0xFFFFFFFF
-                h = (h * m) & 0xFFFFFFFF
-                h = (h ^ k) & 0xFFFFFFFF
-            
-            remaining = length % 4
-            if remaining > 0:
-                pos = length - remaining
-                if remaining == 3:
-                    h = (h ^ (filtered_data[pos + 2] << 16)) & 0xFFFFFFFF
-                if remaining >= 2:
-                    h = (h ^ (filtered_data[pos + 1] << 8)) & 0xFFFFFFFF
-                if remaining >= 1:
-                    h = (h ^ filtered_data[pos]) & 0xFFFFFFFF
-                    h = (h * m) & 0xFFFFFFFF
-            
-            h = (h ^ (h >> 13)) & 0xFFFFFFFF
+def _curseforge_fingerprint_from_jar_bytes(file_data: bytes) -> str:
+    """CurseForge 风格 MurmurHash2（与空白过滤规则与原先 process_jar_worker 一致）"""
+    filtered_data = bytes([b for b in file_data if b not in (9, 10, 13, 32)])
+    length = len(filtered_data)
+    if length == 0:
+        return "0"
+    seed = 1
+    m = 0x5BD1E995
+    r = 24
+    h = seed ^ length
+    for i in range(0, length - (length % 4), 4):
+        k = filtered_data[i] | (filtered_data[i+1] << 8) | (filtered_data[i+2] << 16) | (filtered_data[i+3] << 24)
+        k = (k * m) & 0xFFFFFFFF
+        k = (k ^ (k >> r)) & 0xFFFFFFFF
+        k = (k * m) & 0xFFFFFFFF
+        h = (h * m) & 0xFFFFFFFF
+        h = (h ^ k) & 0xFFFFFFFF
+    remaining = length % 4
+    if remaining > 0:
+        pos = length - remaining
+        if remaining == 3:
+            h = (h ^ (filtered_data[pos + 2] << 16)) & 0xFFFFFFFF
+        if remaining >= 2:
+            h = (h ^ (filtered_data[pos + 1] << 8)) & 0xFFFFFFFF
+        if remaining >= 1:
+            h = (h ^ filtered_data[pos]) & 0xFFFFFFFF
             h = (h * m) & 0xFFFFFFFF
-            h = (h ^ (h >> 15)) & 0xFFFFFFFF
-            curseforge_hash = str(h)
-        else:
-            curseforge_hash = "0"
-        
-        # 使用内存中的数据创建ZipFile对象
+    h = (h ^ (h >> 13)) & 0xFFFFFFFF
+    h = (h * m) & 0xFFFFFFFF
+    h = (h ^ (h >> 15)) & 0xFFFFFFFF
+    return str(h)
+
+
+def _extract_mod_display_meta_from_jar_bytes(jar_file: Path, file_data: bytes) -> tuple[str, str]:
+    """从 JAR 字节解析展示用 mod 名与 game_version（失败则回落为文件名）"""
+    mod_name = ""
+    game_version = ""
+    try:
         with zipfile.ZipFile(io.BytesIO(file_data), 'r') as zf:
-            # 尝试从mcmod.info提取
             if 'mcmod.info' in zf.namelist():
                 try:
                     with zf.open('mcmod.info') as f:
                         content = f.read().decode('utf-8-sig')
-                        try:
+                        if is_json_content(content):
                             data = json.loads(content)
                             if isinstance(data, list) and data:
                                 mod_info = data[0]
@@ -196,29 +171,23 @@ def process_jar_worker(jar_path_str):
                                         mod_name = mod_info['name']
                                     if 'mcversion' in mod_info:
                                         game_version = mod_info['mcversion']
-                        except json.JSONDecodeError:
-                            pass
                 except Exception:
                     pass
-            
-            # 尝试从fabric.mod.json提取
+
             if not mod_name and 'fabric.mod.json' in zf.namelist():
                 try:
                     with zf.open('fabric.mod.json') as f:
                         content = f.read().decode('utf-8-sig')
-                        try:
+                        if is_json_content(content):
                             data = json.loads(content)
                             if 'name' in data:
                                 mod_name = data['name']
                             if not game_version:
                                 if 'dependencies' in data and 'minecraft' in data['dependencies']:
                                     game_version = data['dependencies']['minecraft']
-                        except json.JSONDecodeError:
-                            pass
                 except Exception:
                     pass
-            
-            # 尝试从mods.toml提取
+
             if not mod_name and 'META-INF/mods.toml' in zf.namelist():
                 try:
                     with zf.open('META-INF/mods.toml') as f:
@@ -233,19 +202,41 @@ def process_jar_worker(jar_path_str):
                                         break
                 except Exception:
                     pass
-            
-            # 如果没有找到名称，使用文件名
+
             if not mod_name:
                 mod_name = jar_file.stem
                 for suffix in ['.jar', '.zip', '.litemod']:
                     if mod_name.endswith(suffix):
                         mod_name = mod_name[:-len(suffix)]
                 mod_name = mod_name.replace('.disabled', '').replace('.old', '')
-    
     except Exception:
         mod_name = jar_file.stem
-    
+    return mod_name, game_version
+
+
+def _jar_mod_fingerprints_and_meta(
+    jar_file: Path, file_data: bytes, modrinth_hash: Optional[str] = None
+) -> Tuple[str, str, str, str, str]:
+    """
+    单次读取后的完整分析。返回:
+    jar_name, mod_name, curseforge_hash, modrinth_hash, game_version
+    """
+    if modrinth_hash is None:
+        modrinth_hash = hashlib.sha1(file_data).hexdigest()
+    curseforge_hash = _curseforge_fingerprint_from_jar_bytes(file_data)
+    mod_name, game_version = _extract_mod_display_meta_from_jar_bytes(jar_file, file_data)
     return jar_file.name, mod_name, curseforge_hash, modrinth_hash, game_version
+
+
+def process_jar_worker(jar_path_str):
+    """处理单个 JAR（读盘一次）；供独立脚本或旧调用点使用。"""
+    jar_file = Path(jar_path_str)
+    try:
+        with open(jar_file, 'rb') as f:
+            file_data = f.read()
+        return _jar_mod_fingerprints_and_meta(jar_file, file_data)
+    except Exception:
+        return jar_file.name, jar_file.stem, "", "", ""
 
 class Extractor:
     """语言数据提取器"""
@@ -372,7 +363,7 @@ class Extractor:
         
         return user_dict_by_key, user_dict_by_origin, community_dict_by_key
     
-    def extract_from_mods(self, mods_dir: Path, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def extract_from_mods(self, mods_dir: Path, extraction_progress_callback=None, stop_event=None) -> ExtractionResult:
         """从Mods文件夹中提取语言数据"""
         logging.debug(f"正在扫描Mods文件夹: {mods_dir}")
         
@@ -385,8 +376,8 @@ class Extractor:
         jar_files = file_utils.find_files_in_dir(mods_dir, "*.jar") if mods_dir.exists() else []
         
         for i, jar_file in enumerate(jar_files):
-            if progress_update_callback:
-                progress_update_callback(i + 1, len(jar_files))
+            if extraction_progress_callback and jar_files:
+                extraction_progress_callback("scan_lang", i + 1, len(jar_files))
             
             try:
                 with zipfile.ZipFile(jar_file, 'r') as zf:
@@ -1039,12 +1030,12 @@ class Extractor:
             logging.error(f"从CurseForge获取模组信息失败: {e}")
             return {}
     
-    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, progress_update_callback=None, stop_event=None) -> ExtractionResult:
+    def run(self, mods_dir: Path, zip_paths: List[Path], community_dict_dir: str, extraction_progress_callback=None, stop_event=None) -> ExtractionResult:
         """执行完整的提取流程"""
         logging.info("语言数据聚合开始")
         
         # 从Mods中提取数据
-        result = self.extract_from_mods(mods_dir, progress_update_callback, stop_event)
+        result = self.extract_from_mods(mods_dir, extraction_progress_callback, stop_event)
         
         # 从第三方汉化包中提取数据
         result.pack_chinese = self.extract_from_packs(zip_paths, result.master_english)
@@ -1082,74 +1073,136 @@ class Extractor:
                 if jar_file.name in jars_with_language_files:
                     jars_to_process.append(jar_file)
             
-            # 使用多进程并行处理JAR文件（绕过GIL限制）
+            fingerprint_cache = mod_scan_cache.ModFingerprintDiskCache()
+            fingerprint_cache.load()
+            cache_hits = 0
+            cache_lock = threading.Lock()
+
+            def _register_jar_mod_info(
+                jar_path: Path,
+                jar_name: str,
+                mod_name: str,
+                curseforge_hash: str,
+                modrinth_hash: str,
+                game_version: str,
+                completed_counter: list,
+            ) -> None:
+                mod_info_by_jar[jar_name] = {
+                    'name': mod_name,
+                    'curseforge_hash': curseforge_hash,
+                    'modrinth_hash': modrinth_hash,
+                    'game_version': game_version
+                }
+                if curseforge_hash:
+                    curseforge_hashes.append(curseforge_hash)
+                    hash_to_jar[curseforge_hash] = jar_name
+                if modrinth_hash:
+                    modrinth_hashes.append(modrinth_hash)
+                    hash_to_jar[modrinth_hash] = jar_name
+                completed_counter[0] += 1
+                if extraction_progress_callback:
+                    extraction_progress_callback("fingerprint", completed_counter[0], total_jars)
+                c = completed_counter[0]
+                if c % 10 == 0 or c == total_jars:
+                    logging.info(f"模组指纹进度 {c}/{total_jars}")
+
+            completed = [0]
+
+            def _process_one_jar(jf: Path):
+                try:
+                    with open(jf, 'rb') as f:
+                        data = f.read()
+                except OSError as e:
+                    logging.warning("无法读取 JAR: %s — %s", jf, e)
+                    return None
+                modrinth_hash = hashlib.sha1(data).hexdigest()
+                with cache_lock:
+                    rec = fingerprint_cache.get(modrinth_hash)
+                if rec is not None:
+                    return (
+                        True,
+                        jf,
+                        jf.name,
+                        rec["mod_name"],
+                        rec["curseforge_hash"],
+                        rec["modrinth_hash"],
+                        rec.get("game_version", "") or "",
+                    )
+                jar_name, mod_name, curseforge_hash, mr, game_version = _jar_mod_fingerprints_and_meta(
+                    jf, data, modrinth_hash
+                )
+                with cache_lock:
+                    fingerprint_cache.put(modrinth_hash, {
+                        'mod_name': mod_name,
+                        'curseforge_hash': curseforge_hash,
+                        'modrinth_hash': mr,
+                        'game_version': game_version,
+                    })
+                return (False, jf, jar_name, mod_name, curseforge_hash, mr, game_version)
+
             import os
-            import multiprocessing as mp
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            
-            # 根据CPU核心数设置进程数
-            max_workers = min(os.cpu_count(), 8)  # 最多8个进程，避免资源竞争
-            logging.debug(f"使用多进程处理，进程数: {max_workers}")
-            
-            # 使用进程池处理
-            completed = 0
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # 提交所有任务
-                future_to_jar = {executor.submit(process_jar_worker, str(jf)): jf for jf in jars_to_process}
-                
-                # 收集结果
-                for future in as_completed(future_to_jar):
-                    # 检查是否需要停止
-                    if stop_event and stop_event.is_set():
-                        logging.info("收到停止信号，停止处理...")
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        raise KeyboardInterrupt("用户取消了操作")
-                    
-                    try:
-                        jar_name, mod_name, curseforge_hash, modrinth_hash, game_version = future.result()
-                        
-                        # 存储初步信息
-                        mod_info_by_jar[jar_name] = {
-                            'name': mod_name,
-                            'curseforge_hash': curseforge_hash,
-                            'modrinth_hash': modrinth_hash,
-                            'game_version': game_version
-                        }
-                        
-                        # 收集哈希值用于API查询
-                        if curseforge_hash:
-                            curseforge_hashes.append(curseforge_hash)
-                            hash_to_jar[curseforge_hash] = jar_name
-                        if modrinth_hash:
-                            modrinth_hashes.append(modrinth_hash)
-                            hash_to_jar[modrinth_hash] = jar_name
-                        
-                        completed += 1
-                        if progress_update_callback:
-                            progress_update_callback(completed, total_jars)
-                        
-                        if completed % 25 == 0 or completed == total_jars:
-                            logging.info(f"已处理 {completed}/{total_jars} 个模组")
-                    
-                    except Exception as e:
-                        logging.error(f"处理JAR文件时发生错误: {e}")
-            
-            # 先从CurseForge获取信息
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            max_workers = min(32, len(jars_to_process), max(1, (os.cpu_count() or 1) * 4))
+            logging.debug(
+                "模组指纹：%d 个线程；键为整包 SHA1，命中则跳过 Murmur 与 JAR 内元数据解析",
+                max_workers,
+            )
+
+            try:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_jar = {executor.submit(_process_one_jar, jf): jf for jf in jars_to_process}
+                    for future in as_completed(future_to_jar):
+                        if stop_event and stop_event.is_set():
+                            logging.info("收到停止信号，停止处理...")
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            fingerprint_cache.save_if_dirty()
+                            raise KeyboardInterrupt("用户取消了操作")
+                        try:
+                            row = future.result()
+                            if row is None:
+                                continue
+                            hit, jf, jar_name, mod_name, cf_h, mr_h, gv = row
+                            if hit:
+                                cache_hits += 1
+                            _register_jar_mod_info(jf, jar_name, mod_name, cf_h, mr_h, gv, completed)
+                        except Exception as e:
+                            logging.error(f"处理JAR文件时发生错误: {e}")
+            finally:
+                fingerprint_cache.save_if_dirty()
+
+            if jars_to_process:
+                logging.info(
+                    "模组指纹缓存（SHA1）命中 %d / %d；未命中项已解析并写入 %s",
+                    cache_hits,
+                    len(jars_to_process),
+                    mod_scan_cache.cache_path(),
+                )
+
+            def _repo_progress(cur: int, total: int) -> None:
+                if extraction_progress_callback and total > 0:
+                    extraction_progress_callback("repo_metadata", cur, total)
+
+            # 平台查询与「扫描语言 / 指纹」分两阶段展示，避免状态栏长时间显示「扫描 Mods」
+            if extraction_progress_callback:
+                _repo_progress(0, 1)
+
             curseforge_info = self._get_mod_info_from_curseforge(curseforge_hashes)
-            
-            # 找出CurseForge未匹配的模组，只对这些模组调用Modrinth
+
             unmatched_modrinth_hashes = []
             for jar_name, info in mod_info_by_jar.items():
                 if info['curseforge_hash'] not in curseforge_info and info['modrinth_hash']:
                     unmatched_modrinth_hashes.append(info['modrinth_hash'])
-            
-            # 只对未匹配的模组调用Modrinth
+
             modrinth_info = {}
             if unmatched_modrinth_hashes:
                 logging.info(f"CurseForge未匹配 {len(unmatched_modrinth_hashes)} 个模组，尝试从Modrinth获取...")
                 modrinth_info = self._get_mod_info_from_modrinth(unmatched_modrinth_hashes)
             else:
                 logging.info("所有模组已通过CurseForge匹配，无需调用Modrinth")
+
+            if extraction_progress_callback:
+                _repo_progress(1, 1)
             
             # 整合信息
             for jar_name, info in mod_info_by_jar.items():

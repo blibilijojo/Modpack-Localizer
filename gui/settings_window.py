@@ -27,7 +27,7 @@ from gui.settings_components.advanced_settings import AdvancedSettings
 from gui.tab_pack_settings import TabPackSettings
 
 class SettingsWindow(ttk.Toplevel):
-    def __init__(self, parent, title="设置", workbench_instance=None):
+    def __init__(self, parent, title="设置", workbench_instance=None, main_window_instance=None):
         super().__init__(parent)
         self.parent = parent
         self.title(title)
@@ -35,6 +35,8 @@ class SettingsWindow(ttk.Toplevel):
         self.minsize(700, 600)
         self.config = config_manager.load_config()
         self.workbench_instance = workbench_instance
+        self.main_window_instance = main_window_instance
+        self._last_mod_list_name_mode = self.config.get("mod_list_name_mode", "namespace")
         
         # 添加加载状态
         self.loading = False
@@ -114,11 +116,35 @@ class SettingsWindow(ttk.Toplevel):
             
             config_manager.save_config(self.config)
             
-            # 如果有 workbench 实例，通知它更新显示
-            if self.workbench_instance and hasattr(self.workbench_instance, 'update_all_namespace_displays'):
-                self.workbench_instance.update_all_namespace_displays()
+            # 仅当名称显示模式变更时，刷新所有已加载的 workbench
+            new_mode = self.config.get("mod_list_name_mode", "namespace")
+            if new_mode != self._last_mod_list_name_mode:
+                self._last_mod_list_name_mode = new_mode
+                self._notify_all_workbenches_namespace_displays()
         except Exception as e:
             ui_utils.show_error("保存失败", f"保存配置时发生错误：{str(e)}")
+
+    def _notify_all_workbenches_namespace_displays(self):
+        """刷新所有已加载的 TranslationWorkbench 列表名称显示。"""
+        candidates = []
+        seen_ids = set()
+
+        if self.workbench_instance and hasattr(self.workbench_instance, "update_all_namespace_displays"):
+            candidates.append(self.workbench_instance)
+
+        main = getattr(self, "main_window_instance", None)
+        if main and hasattr(main, "project_tabs"):
+            for tab in main.project_tabs.values():
+                wb = getattr(tab, "workbench_instance", None)
+                if wb and hasattr(wb, "update_all_namespace_displays"):
+                    candidates.append(wb)
+
+        for wb in candidates:
+            wb_id = id(wb)
+            if wb_id in seen_ids:
+                continue
+            seen_ids.add(wb_id)
+            wb.update_all_namespace_displays()
     
     def _collect_all_configs(self):
         """从所有设置组件收集配置"""

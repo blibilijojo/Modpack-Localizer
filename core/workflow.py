@@ -56,7 +56,7 @@ class Workflow:
                 mods_dir=mods_path,
                 zip_paths=[Path(p) for p in pack_paths if Path(p).exists()],
                 community_dict_dir=context.settings['community_dict_dir'],
-                progress_update_callback=context.progress_callback,
+                extraction_progress_callback=context.extraction_progress,
                 stop_event=getattr(context, 'stop_event', None)
             )
             
@@ -90,7 +90,7 @@ class Workflow:
             logging.debug("开始加载翻译词典...")
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
                 context.settings['community_dict_dir'],
-                lambda msg, progress: context.progress_callback(50 + progress // 2, 100) if context.progress_callback else None
+                lambda msg, progress: context.progress_callback(msg, 50 + progress // 2) if context.progress_callback else None
             )
             logging.debug(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
             
@@ -187,7 +187,8 @@ class Workflow:
         self, 
         settings: Dict,
         pack_settings: Optional[PackSettings] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        extraction_progress: Optional[Callable[[str, int, int], None]] = None
     ) -> WorkflowContext:
         """
         创建工作流上下文
@@ -195,5 +196,6 @@ class Workflow:
         return WorkflowContext(
             settings=settings,
             pack_settings=pack_settings,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            extraction_progress=extraction_progress
         )

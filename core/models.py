@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -64,4 +64,5 @@ class WorkflowContext:
     extraction_result: Optional[ExtractionResult] = None
     translation_result: Optional[TranslationResult] = None
     pack_settings: Optional[PackSettings] = None
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[Callable[..., Any]] = None
+    extraction_progress: Optional[Callable[[str, int, int], None]] = None

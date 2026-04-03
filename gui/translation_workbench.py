@@ -137,6 +137,7 @@ class TranslationWorkbench(ttk.Frame):
         self._populate_namespace_tree()
         self._update_ui_state(interactive=True, item_selected=False)
         self._set_dirty(False)
+        self.bind("<Map>", self._on_mapped, add="+")
 
     def get_state(self):
         return {
@@ -156,6 +157,13 @@ class TranslationWorkbench(ttk.Frame):
             if initial_pos > 50:
                 self.main_pane.sashpos(0, initial_pos)
         except tk.TclError:
+            pass
+
+    def _on_mapped(self, event=None):
+        """工作台映射到屏幕时，根据真实宽度修正分割条。"""
+        try:
+            self._set_initial_sash_position()
+        except Exception:
             pass
 
     def _create_widgets(self):

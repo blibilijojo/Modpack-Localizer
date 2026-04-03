@@ -23,7 +23,7 @@ from gui.theme_utils import set_title_bar_theme
 from gui.settings_window import SettingsWindow
 
 class ProjectTab:
-    def __init__(self, parent_notebook, root_window, main_window_instance):
+    def __init__(self, parent_notebook, root_window, main_window_instance, show_initial_welcome: bool = True):
         self.root = root_window
         self.main_window = main_window_instance
         self.frame = ttk.Frame(parent_notebook)
@@ -50,7 +50,10 @@ class ProjectTab:
         self.modpack_name_var = tk.StringVar()
 
         self._create_widgets()
-        self._show_welcome_view()
+        if show_initial_welcome:
+            self._show_welcome_view()
+        else:
+            self._show_loading_placeholder_view()
         self._toggle_log_pane()
     
     def add_background_thread(self, thread):
@@ -177,7 +180,7 @@ class ProjectTab:
         )
         self.log_message(f"项目 '{self.project_name}' 已从缓存中成功恢复。", "SUCCESS")
 
-    def restore_from_state(self, state_data: dict):
+    def restore_from_state(self, state_data: dict, show_lazy_view: bool = True):
         self.project_name = state_data.get("project_name", "已恢复的项目")
         self.project_type = state_data.get("project_type", "mod")
         self.project_info = state_data.get("project_info", {})
@@ -195,9 +198,10 @@ class ProjectTab:
         
         self._restored_state_data = state_data
         self._is_fully_loaded = False
-        
-        self._show_lazy_loaded_view(namespace_summary)
-        self.log_message(f"项目 '{self.project_name}' 已恢复（懒加载模式）。", "INFO")
+
+        if show_lazy_view:
+            self._show_lazy_loaded_view(namespace_summary)
+            self.log_message(f"项目 '{self.project_name}' 已恢复（懒加载模式）。", "INFO")
 
     def _show_lazy_loaded_view(self, namespace_summary: list):
         """显示懒加载视图，只显示namespace名称列表"""
@@ -310,9 +314,10 @@ class ProjectTab:
         self._clear_content_frame()
         self.workbench_instance = None
         self.main_window.update_menu_state()
-        self.project_name = "新项目"
-        if self.tab_id:
-            self.main_window.update_tab_title(self.tab_id, "新项目")
+        if not self.project_info:
+            self.project_name = "新项目"
+            if self.tab_id:
+                self.main_window.update_tab_title(self.tab_id, "新项目")
         
         container = ttk.Frame(self.content_frame)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -349,6 +354,17 @@ class ProjectTab:
         
         load_btn = ttk.Button(load_project_frame, text="加载项目文件 (.sav)", command=self._load_project, bootstyle="outline")
         load_btn.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _show_loading_placeholder_view(self):
+        """会话恢复阶段占位，避免闪过欢迎页。"""
+        self._clear_content_frame()
+        self.workbench_instance = None
+        self.main_window.update_menu_state()
+
+        container = ttk.Frame(self.content_frame)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        ttk.Label(container, text="正在准备加载项目…", font="-size 14 -weight bold").pack(anchor="center", pady=(0, 8))
+        ttk.Label(container, text="首次切换到该标签页时会自动恢复工作台。", bootstyle="secondary", justify="center").pack(anchor="center")
 
     def _show_setup_view(self):
         self._clear_content_frame()
@@ -1584,7 +1600,7 @@ class MainWindow:
             
             # 只根据索引文件创建所有标签页，不加载任何内容
             for tab_uuid, tab_name in index_data["tabs"].items():
-                new_tab = self._add_new_tab(select_tab=False)
+                new_tab = self._add_new_tab(select_tab=False, show_initial_welcome=False)
                 # 设置标签页名称
                 self.update_tab_title(new_tab.tab_id, tab_name)
                 # 保存标签页UUID，以便后续切换时加载
@@ -1596,10 +1612,41 @@ class MainWindow:
             if last_tab_id:
                 self.notebook.select(last_tab_id)
                 self.update_menu_state()
+            self._preload_other_tabs_background(skip_tab_id=last_tab_id)
             
             self._dispatch_log_to_active_tab(f"已创建 {tab_count} 个标签页，未加载任何标签页内容", "INFO")
         else:
             self._dispatch_log_to_active_tab("欢迎使用整合包汉化工坊！", "INFO")
+
+    def _preload_other_tabs_background(self, skip_tab_id=None, interval_ms: int = 250):
+        """启动后逐个预加载其他标签页，降低首次切换延迟。"""
+        tab_ids = [
+            tid for tid, tab in self.project_tabs.items()
+            if tid != skip_tab_id and tab.tab_uuid and not tab._is_fully_loaded
+        ]
+        if not tab_ids:
+            return
+
+        def load_next(i: int):
+            if i >= len(tab_ids):
+                return
+
+            tid = tab_ids[i]
+            tab = self.project_tabs.get(tid)
+            if tab and tab.tab_uuid and not tab._is_fully_loaded:
+                try:
+                    tab_state = session_manager.load_tab_state(tab.tab_uuid)
+                    if tab_state:
+                        tab.restore_from_state(tab_state, show_lazy_view=False)
+                        tab._lazy_load_workbench()
+                        if tab.workbench_instance and hasattr(tab.workbench_instance, "_set_initial_sash_position"):
+                            tab.workbench_instance.after_idle(tab.workbench_instance._set_initial_sash_position)
+                except Exception as e:
+                    logging.error(f"后台预加载标签页失败: {e}", exc_info=True)
+
+            self.root.after(interval_ms, lambda: load_next(i + 1))
+
+        self.root.after(500, lambda: load_next(0))
 
     def _create_menu(self):
         """创建Windows原生菜单栏"""
@@ -1698,11 +1745,16 @@ class MainWindow:
                 # 如果有 _restored_state_data，直接加载
                 if current_tab._restored_state_data:
                     current_tab._lazy_load_workbench()
+                    if current_tab.workbench_instance and hasattr(current_tab.workbench_instance, "_set_initial_sash_position"):
+                        current_tab.workbench_instance.after_idle(current_tab.workbench_instance._set_initial_sash_position)
                 # 如果没有 _restored_state_data 但有 tab_uuid，加载状态
                 elif current_tab.tab_uuid:
                     tab_state = session_manager.load_tab_state(current_tab.tab_uuid)
                     if tab_state:
-                        current_tab.restore_from_state(tab_state)
+                        current_tab.restore_from_state(tab_state, show_lazy_view=False)
+                        current_tab._lazy_load_workbench()
+                        if current_tab.workbench_instance and hasattr(current_tab.workbench_instance, "_set_initial_sash_position"):
+                            current_tab.workbench_instance.after_idle(current_tab.workbench_instance._set_initial_sash_position)
             
             # 检查当前标签页是否包含项目列表组件
             if hasattr(current_tab, 'content_frame'):
@@ -1906,11 +1958,16 @@ class MainWindow:
         if self.settings_window and self.settings_window.winfo_exists():
             # 如果窗口已存在，更新workbench_instance
             self.settings_window.workbench_instance = workbench_instance
+            self.settings_window.main_window_instance = self
             self.settings_window.lift()
             self.settings_window.focus_set()
             return
 
-        self.settings_window = SettingsWindow(self.root, workbench_instance=workbench_instance)
+        self.settings_window = SettingsWindow(
+            self.root,
+            workbench_instance=workbench_instance,
+            main_window_instance=self
+        )
         self.settings_window.transient(self.root)
 
     def _create_widgets(self):
@@ -1954,10 +2011,10 @@ class MainWindow:
         if clicked_tab_id in self.project_tabs:
             return
 
-    def _add_new_tab(self, select_tab=True):
+    def _add_new_tab(self, select_tab=True, show_initial_welcome: bool = True):
         self.tab_counter += 1
         
-        project_tab = ProjectTab(self.notebook, self.root, self)
+        project_tab = ProjectTab(self.notebook, self.root, self, show_initial_welcome=show_initial_welcome)
         
         insert_pos = len(self.notebook.tabs()) - 1
         self.notebook.insert(insert_pos, project_tab.frame, text="新项目")

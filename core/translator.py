@@ -156,32 +156,10 @@ class Translator:
                             source = "社区词典 [原文]"
                     else:
                         candidates = community_dict_by_origin[english_value]
-                        if candidates:
-                            if len(candidates) == 1:
-                                best_translation = candidates[0]["trans"]
-                            else:
-                                trans_counts = Counter(c["trans"] for c in candidates)
-                                max_freq = max(trans_counts.values())
-                                top_candidates = [c for c in candidates if trans_counts[c["trans"]] == max_freq]
-                                
-                                if len(top_candidates) == 1:
-                                    best_translation = top_candidates[0]["trans"]
-                                else:
-                                    def get_version_key(candidate):
-                                        try:
-                                            return parse_version(candidate["version"])
-                                        except Exception:
-                                            return parse_version("0.0.0")
-                                    
-                                    try:
-                                        sorted_by_version = sorted(top_candidates, key=get_version_key, reverse=True)
-                                        best_translation = sorted_by_version[0]["trans"]
-                                    except Exception:
-                                        best_translation = top_candidates[0]["trans"]
-                            
-                            if best_translation:
-                                translation = best_translation
-                                source = "社区词典 [原文]"
+                        best_translation = self._resolve_origin_name_conflict(candidates)
+                        if best_translation:
+                            translation = best_translation
+                            source = "社区词典 [原文]"
             
             # 验证翻译有效性（原文复制已在上方用同一判定，避免重复正则）
             if source != "原文复制" and not self._is_valid_translation(translation):

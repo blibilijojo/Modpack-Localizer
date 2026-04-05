@@ -37,6 +37,7 @@ class ProjectTab:
         self.loading_frame = None
         self.tab_uuid = None
         self._is_fully_loaded = False
+        self._is_loading = False  # 防止重复加载标志
         self._restored_state_data = None
         # 线程管理属性
         self.background_threads = []
@@ -129,8 +130,11 @@ class ProjectTab:
 
     def _lazy_load_workbench(self):
         """懒加载工作台数据"""
-        if self._is_fully_loaded or not self._restored_state_data:
+        if self._is_fully_loaded or self._is_loading or not self._restored_state_data:
             return
+        
+        # 设置加载标志，防止重复加载
+        self._is_loading = True
         
         state_data = self._restored_state_data
         self._restored_state_data = None
@@ -140,6 +144,7 @@ class ProjectTab:
         if not workbench_state:
             self.log_message("会话状态不完整，无法恢复工作台。", "ERROR")
             self._show_welcome_view()
+            self._is_loading = False  # 重置加载标志
             return
         
         current_settings = config_manager.load_config()
@@ -162,6 +167,7 @@ class ProjectTab:
             if not self.project_info:
                 self.log_message("项目信息丢失，无法恢复任务汉化流程。", "ERROR")
                 self._show_welcome_view()
+                self._is_loading = False  # 重置加载标志
                 return
 
             self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
@@ -179,6 +185,8 @@ class ProjectTab:
             finish_button_text=finish_text
         )
         self.log_message(f"项目 '{self.project_name}' 已从缓存中成功恢复。", "SUCCESS")
+        # 重置加载标志
+        self._is_loading = False
 
     def restore_from_state(self, state_data: dict, show_lazy_view: bool = True):
         self.project_name = state_data.get("project_name", "已恢复的项目")
@@ -1633,7 +1641,7 @@ class MainWindow:
 
             tid = tab_ids[i]
             tab = self.project_tabs.get(tid)
-            if tab and tab.tab_uuid and not tab._is_fully_loaded:
+            if tab and tab.tab_uuid and not tab._is_fully_loaded and not tab._is_loading:
                 try:
                     tab_state = session_manager.load_tab_state(tab.tab_uuid)
                     if tab_state:
@@ -1643,6 +1651,9 @@ class MainWindow:
                             tab.workbench_instance.after_idle(tab.workbench_instance._set_initial_sash_position)
                 except Exception as e:
                     logging.error(f"后台预加载标签页失败: {e}", exc_info=True)
+                    # 确保加载标志被重置
+                    if tab._is_loading:
+                        tab._is_loading = False
 
             self.root.after(interval_ms, lambda: load_next(i + 1))
 
@@ -1740,8 +1751,8 @@ class MainWindow:
         current_tab = self._get_current_tab()
         
         if current_tab:
-            # 检查是否需要加载标签页状态
-            if not current_tab.workbench_instance and not current_tab._is_fully_loaded:
+            # 检查是否需要加载标签页状态，防止重复加载
+            if not current_tab.workbench_instance and not current_tab._is_fully_loaded and not current_tab._is_loading:
                 # 如果有 _restored_state_data，直接加载
                 if current_tab._restored_state_data:
                     current_tab._lazy_load_workbench()

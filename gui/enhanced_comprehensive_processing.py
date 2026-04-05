@@ -611,7 +611,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self._update_batch_preview()
         
     def _calculate_total_batches(self):
-        """计算预计的批次数量"""
+        """计算预计的批次数量（与实际批次计算逻辑完全一致）"""
         # 获取选中的模组
         selected_modules = self.workbench.ns_tree.selection()
         if not selected_modules:
@@ -630,37 +630,53 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             except (tk.TclError, ValueError):
                 return self.settings.get('ai_batch_count', 10)
         
-        # 计算待处理的条目数量、总长度和单词数量
-        total_items = 0
-        total_chars = 0
-        total_words = 0
+        # 1. 首先进行去重处理（与实际批次计算完全一致）
+        # 根据模式筛选待处理条目，并对 en_text 去重
+        # 只保留每个 en_text 的第一个待翻译条目进行翻译
+        seen_en_texts = set()
+        deduplicated_items = []
+        all_item_mapping = []
         
         for ns in selected_modules:
             items = self.workbench.translation_data.get(ns, {}).get("items", [])
             for idx, item in enumerate(items):
                 en_text = item.get("en", "").strip()
                 zh_text = item.get("zh", "").strip()
-                
+                source = item.get("source", "")
+
                 if en_text:
                     if translation_mode == "basic" or translation_mode == "hybrid":
                         # 基础翻译模式和混合翻译模式：仅处理待翻译文本
-                        if not zh_text:
-                            total_items += 1
-                            total_chars += len(en_text)
-                            total_words += self._count_words(en_text)
+                        if not zh_text and en_text not in seen_en_texts:
+                            seen_en_texts.add(en_text)
+                            deduplicated_items.append((ns, idx, item))
                     elif translation_mode == "polish":
-                        # 翻译润色模式：仅处理已翻译文本
-                        if zh_text:
-                            combined_text = f"{en_text} -> {zh_text}"
-                            total_items += 1
-                            total_chars += len(combined_text)
-                            total_words += self._count_words(combined_text)
+                        # 翻译润色模式：仅处理已翻译文本，跳过"原文复制"来源
+                        if zh_text and source != "原文复制" and en_text not in seen_en_texts:
+                            seen_en_texts.add(en_text)
+                            deduplicated_items.append((ns, idx, item))
         
-        # 计算批次数量
-        if total_items == 0:
+        if not deduplicated_items:
             return 0
         
-        # 获取批处理值
+        # 2. 准备翻译数据（与实际批次计算一致）
+        all_translation_inputs = []
+        
+        for ns, idx, item in deduplicated_items:
+            en_text = item.get("en", "").strip()
+            zh_text = item.get("zh", "").strip()
+            
+            if translation_mode == "polish" and zh_text:
+                # 润色模式：传递英文原文和中文译文，格式为 "原文 -> 译文"
+                combined_text = f"{en_text} -> {zh_text}"
+                all_translation_inputs.append({"text": combined_text, "key": item.get("key", "")})
+            else:
+                # 其他模式：仅传递英文原文
+                all_translation_inputs.append({"text": en_text, "key": item.get("key", "")})
+            
+            all_item_mapping.append((ns, idx, item))
+        
+        # 3. 获取批次处理模式和值
         try:
             if batch_mode == "words":
                 batch_value = self.words_batch_var.get()
@@ -673,19 +689,48 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             if batch_mode == "words":
                 batch_value = self.settings.get('ai_batch_words', 2000)
             elif batch_mode == "items":
-                batch_value = self.settings.get('ai_batch_items', 200)
+                batch_value = self.settings.get('ai_batch_items', 10)
             else:
                 batch_value = self.settings.get('ai_batch_count', 10)
         
-        if batch_mode == "words":
-            # 基于单词数量：每批次单词数
-            return max(1, (total_words + batch_value - 1) // batch_value)
+        # 4. 批次划分逻辑（与实际批次计算完全一致）
+        module_isolation = self.module_isolation_var.get()
+        total_batches = 0
+        
+        if module_isolation:
+            # 模组隔离模式：按命名空间分别创建批次
+            ns_to_items = defaultdict(list)
+            for i, (ns, idx, item) in enumerate(all_item_mapping):
+                ns_to_items[ns].append(i)
+            
+            for ns, indices in ns_to_items.items():
+                ns_inputs = [all_translation_inputs[i] for i in indices]
+                
+                if batch_mode == "words":
+                    ns_words = sum(self._count_words(item["text"]) for item in ns_inputs)
+                    ns_batches_count = max(1, (ns_words + batch_value - 1) // batch_value)
+                    total_batches += ns_batches_count
+                elif batch_mode == "items":
+                    ns_items_count = len(ns_inputs)
+                    ns_batches_count = max(1, (ns_items_count + batch_value - 1) // batch_value)
+                    total_batches += ns_batches_count
+                else:
+                    ns_items_count = len(ns_inputs)
+                    ns_batches_count = batch_value
+                    total_batches += ns_batches_count
+        elif batch_mode == "words":
+            # 基于单词数量的批次划分
+            total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
+            total_batches = max(1, (total_words + batch_value - 1) // batch_value)
         elif batch_mode == "items":
-            # 基于条目数量：每批次条目数
-            return max(1, (total_items + batch_value - 1) // batch_value)
+            # 基于条目数量的批次划分
+            total_items = len(all_translation_inputs)
+            total_batches = max(1, (total_items + batch_value - 1) // batch_value)
         else:
-            # 基于批次数量：直接使用指定的批次数
-            return max(1, batch_value)
+            # 基于批次数量的批次划分
+            total_batches = batch_value
+        
+        return max(1, total_batches)
         
     def _update_batch_preview(self):
         """更新批次预览显示"""
@@ -1078,7 +1123,6 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             all_texts_to_translate = []
             all_translation_inputs = []
             all_item_mapping = []
-            all_group_contexts = []
 
             # 为所有待处理条目生成上下文
             group_context = self._generate_translation_context(deduplicated_items, translated_texts) if translation_mode == "hybrid" else ""
@@ -1098,7 +1142,6 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     all_translation_inputs.append({"text": en_text, "key": item.get("key", "")})
                 
                 all_item_mapping.append((ns, idx, item))
-                all_group_contexts.append(group_context)
             
             # 4. 执行AI翻译
             self.after(0, lambda: self.workbench.status_label.config(text="正在进行AI翻译..."))
@@ -1149,7 +1192,6 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 # 为每个命名空间分别创建批次
                 for ns, indices in ns_to_items.items():
                     ns_inputs = [all_translation_inputs[i] for i in indices]
-                    ns_contexts = [all_group_contexts[i] for i in indices]
 
                     if batch_mode == "words":
                         ns_words = sum(self._count_words(item["text"]) for item in ns_inputs)
@@ -1157,23 +1199,20 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         words_per_batch = max(1, (ns_words + ns_batches_count - 1) // ns_batches_count)
 
                         current_batch = []
-                        current_contexts = []
                         current_words = 0
 
-                        for payload, context in zip(ns_inputs, ns_contexts):
+                        for payload in ns_inputs:
                             text_words = self._count_words(payload["text"])
                             current_batch.append(payload)
-                            current_contexts.append(context)
                             current_words += text_words
 
                             if len(current_batch) < len(ns_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(ns_inputs[len(current_batch)]["text"]) - words_per_batch)):
-                                ns_batches_list.append((current_batch.copy(), current_contexts.copy()))
+                                ns_batches_list.append((current_batch.copy(), group_context))
                                 current_batch.clear()
-                                current_contexts.clear()
                                 current_words = 0
 
                         if current_batch:
-                            ns_batches_list.append((current_batch, current_contexts))
+                            ns_batches_list.append((current_batch, group_context))
                     elif batch_mode == "items":
                         ns_items_count = len(ns_inputs)
                         ns_batches_count = max(1, (ns_items_count + batch_value - 1) // batch_value)
@@ -1181,7 +1220,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_inputs[i:end_idx], ns_contexts[i:end_idx]))
+                            ns_batches_list.append((ns_inputs[i:end_idx], group_context))
                     else:
                         ns_items_count = len(ns_inputs)
                         ns_batches_count = batch_value
@@ -1189,43 +1228,40 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_inputs[i:end_idx], ns_contexts[i:end_idx]))
+                            ns_batches_list.append((ns_inputs[i:end_idx], group_context))
 
                 batches = ns_batches_list
                 batch_size = batch_value
             elif batch_mode == "words":
-                # 基于单词数量的批次划分：平均分配每批次单词数
+                # 基于单词数量的批次划分：使用标准的向上取整算法
                 total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
                 # 计算需要的批次数：向上取整(total_words / batch_value)
                 total_batches = max(1, (total_words + batch_value - 1) // batch_value)
-                # 计算每批次的平均单词数
-                words_per_batch = max(1, (total_words + total_batches - 1) // total_batches)
                 
                 batches = []
                 current_batch = []
-                current_contexts = []
                 current_words = 0
                 
-                for payload, context in zip(all_translation_inputs, all_group_contexts):
+                for payload in all_translation_inputs:
                     text_words = self._count_words(payload["text"])
-                    current_batch.append(payload)
-                    current_contexts.append(context)
-                    current_words += text_words
                     
-                    # 当当前批次的单词数接近平均单词数，且还有下一个条目时，考虑是否拆分
-                    if len(current_batch) < len(all_translation_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(all_translation_inputs[len(current_batch)]["text"]) - words_per_batch)):
-                        # 当前批次更接近平均单词数，创建新批次
-                        batches.append((current_batch.copy(), current_contexts.copy()))
+                    # 检查当前条目加入后是否会超过每批次单词数
+                    if current_words + text_words > batch_value and current_batch:
+                        # 当前批次已达到或超过每批次单词数，创建新批次
+                        batches.append((current_batch.copy(), group_context))
                         current_batch.clear()
-                        current_contexts.clear()
                         current_words = 0
+                    
+                    # 添加当前条目到批次
+                    current_batch.append(payload)
+                    current_words += text_words
                 
                 # 添加最后一个批次
                 if current_batch:
-                    batches.append((current_batch, current_contexts))
+                    batches.append((current_batch, group_context))
                 
-                # 记录批处理大小（平均每批次单词数）
-                batch_size = words_per_batch
+                # 记录批处理大小（每批次单词数）
+                batch_size = batch_value
             elif batch_mode == "items":
                 # 基于条目数量的批次划分：平均分配每批次条目数
                 total_items = len(all_translation_inputs)
@@ -1241,8 +1277,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
                     batch_texts = all_translation_inputs[start_idx:end_idx]
-                    batch_contexts = all_group_contexts[start_idx:end_idx]
-                    batches.append((batch_texts, batch_contexts))
+                    batches.append((batch_texts, group_context))
                     start_idx = end_idx
                     
                     # 如果已经处理完所有条目，退出循环
@@ -1264,8 +1299,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
                     batch_texts = all_translation_inputs[start_idx:end_idx]
-                    batch_contexts = all_group_contexts[start_idx:end_idx]
-                    batches.append((batch_texts, batch_contexts))
+                    batches.append((batch_texts, group_context))
                     start_idx = end_idx
                     
                     # 如果已经处理完所有条目，退出循环
@@ -1292,12 +1326,12 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 self.translator = translator
                 self.ai_executor = ai_executor
                 
-                for i, (batch, contexts) in enumerate(batches):
+                for i, (batch, context) in enumerate(batches):
                     # 检查取消标志
                     if not self.processing:
                         break
                     # 根据模式调整提示词
-                    batch_prompt = self._adjust_prompt_for_mode(config_manager.DEFAULT_PROMPT.strip(), translation_mode, contexts)
+                    batch_prompt = self._adjust_prompt_for_mode("", translation_mode, context)
                     future_map[ai_executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt))] = i
                 
                 for i, future in enumerate(as_completed(future_map), 1):
@@ -1348,7 +1382,20 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 return
             
             # 5. 合并翻译结果
-            translations = list(itertools.chain.from_iterable(filter(None, translations_nested)))
+            # 处理可能的 None 值，确保所有批次都被包含
+            processed_batches = []
+            for batch in translations_nested:
+                if batch is not None:
+                    processed_batches.extend(batch)
+                else:
+                    # 如果批次为 None，使用原文作为回退
+                    # 找到对应批次的原始文本
+                    batch_idx = translations_nested.index(batch)
+                    if batch_idx < len(batches):
+                        batch_texts, _ = batches[batch_idx]
+                        processed_batches.extend([text.get('text', '') if isinstance(text, dict) else text for text in batch_texts])
+            
+            translations = processed_batches
             
             if len(translations) != len(all_texts_to_translate):
                 raise ValueError(f"AI返回数量不匹配! 预期:{len(all_texts_to_translate)}, 实际:{len(translations)}")
@@ -1587,39 +1634,65 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     
 
     
-    def _adjust_prompt_for_mode(self, base_prompt, mode, contexts):
+    def _adjust_prompt_for_mode(self, base_prompt, mode, context):
         """根据翻译模式调整提示词"""
-        mc_rules = """Minecraft 专用规范:
-0. 输入值可能是字符串，或 {"text":"原文","key":"资源键"}；若为对象，仅翻译 text，key 只用于语义判断。
-1. 严格保留格式与占位符（如 %s, %d, {0}, %1$s, \\n, §a），不得增删改顺序。
-2. 严格保留命名空间 ID 与资源键（如 minecraft:zombie、item.minecraft.apple）本体不翻译。
-3. 使用 Minecraft 语境：刷怪蛋、玩家死亡消息、环境音字幕、系统提示等采用游戏内自然表达。
-4. 字幕（Subtitles）：输出必须像字幕标签——短、名词化、无句号；若文本含 < 或 > 必须保留；不要擅自添加/移除任何颜色或样式代码（§e 等），只在原文已有时保留。
-5. 同一术语保持一致，避免直译腔与语义漂移。"""
-        if mode == "basic":
-            # 基础翻译模式：简洁直接的翻译要求
-            format_note = "(如 %s, §a, \n)"  # 单独定义包含转义字符的字符串
-            example = '{"0": "译文1", "1": "译文2"}'
-            adjusted_prompt = f"""你是一个只输出JSON的翻译AI。
-任务：将输入JSON对象中，每个数字键对应的英文字符串值翻译为简体中文。
-{mc_rules}
-核心指令:
-1. 仅对提供的英文文本进行直接翻译，不参考任何其他内容
-2. 保持原文的语气、风格和意图
-3. 严格保留所有格式代码 {format_note} 和特殊字符
-4. 翻译要准确、专业、自然，符合中文表达习惯
-5. 注意游戏相关术语的正确翻译
-最终要求:
-你的回复必须是、且只能是一个JSON对象, 例如 `{example}`。
-禁止在 `[` 和 `]` 或 `{{` 和 `}}` 的前后添加任何多余的文字或代码标记。"""
-        elif mode == "polish":
+        core_specs = """核心规范（必须严格遵守）： 
+1. 仅翻译文本，不改动 JSON 结构；输出键必须与输入数字键完全一致。 
+   1.1 输入值可能是字符串，或对象 {"text":"原文","key":"资源键"}；若是对象，仅翻译 text 字段，并将 key 作为语义上下文参考。 
+
+2. 严格保留格式与控制符： 
+   - 占位符：%s、%d、{0}、%1$s 等，保留顺序、数量、拼写，不得新增/删除/重排。 
+   - 换行符：\\n、<br> 等保留。 
+   - 样式代码：§ 代码（如 §0、§r）、& 代码（如 &0、&r）保留原位置。 
+   - 标签：HTML/颜色标签、XML 标签（< > 包围）保留。 
+   - 命令帮助：命令本身（如 /time）和字面量（如 set|add）保留原文；描述性参数名翻译。 
+
+3. 术语与专有名词统一： 
+   - 原版术语：使用已知的 Minecraft 标准译名。 
+   - 模组术语：遵循主模组译法；附属模组名称格式为"主模组：子模组"；多个 ItemGroup 用"丨"分隔。 
+   - 动植物/矿石：有正式译名优先；矿石保留"矿"字（如"黄铁矿矿石"）；同物异名择一统一。 
+   - 树木名： 
+     * 单字树名（如 Oak → 橡）：树苗/树叶 → "橡树"，原木/木板/木制品 → "橡木"。 
+     * 多字不以"木"结尾（如 Spruce → 云杉）：树苗/树叶/原木/木板 → "云杉"，木制品 → "云杉木"。 
+     * 以"木"结尾（如 Mahogany → 桃花心木）：所有形式保留"木"，不加"树"。 
+   - 人名/神话名：有正式译名优先，否则音译。 
+   - 商标名（Patreon、Discord）：未进入中国大陆的保留原文；可归化翻译。 
+   - 网络昵称保留原文。 
+
+4. 固定表达与场景翻译： 
+   - 可通过添加位置标识调换占位符顺序以适应中文语序，翻译后占位符与中文之间不加空格。例如： 
+     输入：`Removed effect %s from %s` → 输出：`已移除%2$s的%1$s效果` 
+   - 字幕（subtitles）：格式为"主体：声音"（如 Bee buzzes → 蜜蜂：嗡嗡），短促、名词化、无句号；保留原文中的箭头/方向符（<、>）。 
+   - 能量单位（FE、RF）、体积单位（MB）保留不译；全称需翻译（如 Forge Energy → Forge 能量）。 
+   - 游戏动作（Sneak、Interact）翻译，不译成具体按键名。 
+   - 键盘功能键（Shift、Ctrl）不译，首字母大写。 
+   - 鼠标操作（Right Click）译作"右击"或"右键点击"。 
+   - 刷怪蛋/实体：体现"X刷怪蛋"等游戏内叫法。 
+   - 玩家死亡消息：保持"被……""因……而死"等死亡播报语气。 
+   - 进度/提示/系统消息：简洁、可读，符合原版提示风格。 
+
+5. 标点与排版： 
+   - 使用中文全角标点（句号、逗号、冒号等）。夹用英文时仅完整英文语境使用英文标点。 
+   - 中文字符与英文字母、数字之间不加空格（Patchouli 手册除外）。 
+   - 数字与英文单位缩写之间按原文处理，不一致时可自行统一。 
+   - 国际单位需翻译（如 km → 千米）。 
+
+6. 难译项处理：可使用保留原文、直译、音译（可加类别词）、归化、解释/括注等方法，但必须与模组整体风格一致。禁止使用不适宜的烂梗。 
+
+7. 若文本已是中文、为空、或仅符号/ID/占位符，返回原文。 
+
+输出要求： 
+- 你的回复必须是且只能是一个 JSON 对象，例如 {"0":"译文1","1":"译文2"}。 
+- 禁止输出任何额外说明、代码块标记或前后缀文本。"""
+        
+        if mode == "polish":
             # 翻译润色模式：基于已有译文进行优化
-            format_note = "(如 %s, §a, \n)"  # 单独定义包含转义字符的字符串
-            example = '{"0": "润色后的译文1", "1": "润色后的译文2"}'
-            adjusted_prompt = f"""你是一个只输出JSON的翻译润色AI。
-任务：对输入JSON对象中每个数字键对应的文本进行处理，输入格式为"英文原文 -> 中文译文"，你需要基于英文原文和现有中文译文生成更优质的中文翻译。
-{mc_rules}
-核心指令:
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：对输入JSON对象中每个数字键对应的文本进行处理，输入格式为"英文原文 -> 中文译文"，你需要基于英文原文和现有中文译文生成更优质的中文翻译。 
+
+{core_specs}
+
+润色专属要求：
 1. 首先解析输入格式：英文原文 -> 中文译文
 2. 基于英文原文的准确含义，对现有中文译文进行优化
 3. 提高语言流畅度，使表达更符合中文习惯和游戏语境
@@ -1628,41 +1701,35 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 6. 增强表达的自然度和可读性
 7. 保持原文意思和语气不变
 8. 优化句子结构，提升整体质量
-9. 严格保留所有格式代码 {format_note} 和特殊字符
-10. 只返回优化后的中文译文，不要包含英文原文或其他格式
-最终要求:
-你的回复必须是、且只能是一个JSON对象, 例如 `{example}`。
-禁止在 `[` 和 `]` 或 `{{` 和 `}}` 的前后添加任何多余的文字或代码标记。"""
-        elif mode == "hybrid" and contexts:
+9. 只返回优化后的中文译文，不要包含英文原文或其他格式
+
+输入：{{input_data_json}}"""
+        elif mode == "hybrid" and context:
             # 混合翻译模式：结合上下文的翻译要求
-            from collections import Counter
-            context_counts = Counter(contexts)
-            most_common_context = context_counts.most_common(1)[0][0]
-            
-            format_note = "(如 %s, §a, \n)"  # 单独定义包含转义字符的字符串
-            example = '{"0": "译文1", "1": "译文2"}'
-            adjusted_prompt = f"""你是一个只输出JSON的智能翻译AI。
-任务：将输入JSON对象中每个数字键对应的英文字符串值翻译为简体中文，严格参考提供的上下文。
-{mc_rules}
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：将输入JSON对象中每个数字键对应的英文字符串值翻译为简体中文，严格参考提供的上下文。 
+
+{core_specs}
 
 翻译参考上下文：
-{most_common_context}
+{context}
 
-核心指令:
+混合翻译专属要求：
 1. 严格参考上述上下文进行翻译，确保新翻译与现有翻译风格一致
 2. 使用相同的专业术语和表达方式
 3. 相似文本的翻译保持高度一致性
 4. 新翻译与现有翻译自然融合
-5. 保持原文的语气、风格和意图
-6. 严格保留所有格式代码 {format_note} 和特殊字符
-7. 翻译要准确、专业、自然，符合中文表达习惯
-8. 注意上下文语境，避免孤立翻译
-最终要求:
-你的回复必须是、且只能是一个JSON对象, 例如 `{example}`。
-禁止在 `[` 和 `]` 或 `{{` 和 `}}` 的前后添加任何多余的文字或代码标记。"""
+5. 注意上下文语境，避免孤立翻译
+
+输入：{{input_data_json}}"""
         else:
-            # 默认使用原始提示词
-            adjusted_prompt = base_prompt
+            # 默认为基础翻译模式
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：将输入 JSON 对象中每个数字键对应的英文文本翻译为简体中文。 
+
+{core_specs}
+
+输入：{{input_data_json}}"""
         
         return adjusted_prompt
     

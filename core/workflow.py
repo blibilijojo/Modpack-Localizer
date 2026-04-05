@@ -101,7 +101,7 @@ class Workflow:
                 user_dictionary=user_dict,
                 community_dict_by_key=community_dict_by_key,
                 community_dict_by_origin=community_dict_by_origin,
-                use_origin_name_lookup=context.settings.get('use_origin_name_lookup', True),
+                settings=context.settings,
                 dictionary_manager=self.dictionary_manager
             )
             

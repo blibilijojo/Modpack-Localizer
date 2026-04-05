@@ -495,7 +495,7 @@ class Extractor:
                         if result_tuple[0] is None:
                             continue
                         
-                        namespace, file_format, _, extracted_data, _, _, _ = result_tuple
+                        namespace, file_format, _, extracted_data, _, _ = result_tuple
                         
                         # 过滤掉与英文相同的翻译
                         for key, zh_value in extracted_data.items():

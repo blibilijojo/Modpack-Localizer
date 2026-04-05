@@ -92,7 +92,7 @@ class Translator:
         community_dict_by_origin: Dict[str, List[Dict]],
         internal_chinese: Dict[str, LanguageEntry],
         pack_chinese_dict: Dict[str, str],
-        use_origin_name_lookup: bool,
+        settings: Dict,
         namespace_info: NamespaceInfo,
         dictionary_manager=None
     ) -> Dict[str, LanguageEntry]:
@@ -135,7 +135,7 @@ class Translator:
                 elif key in user_dict_by_key:
                     translation = user_dict_by_key[key]
                     source = "个人词典 [Key]"
-                elif use_origin_name_lookup and english_value in user_dict_by_origin:
+                elif english_value in user_dict_by_origin:
                     translation = user_dict_by_origin[english_value]
                     source = "个人词典 [原文]"
                 # 4. 第三方汉化包
@@ -143,11 +143,11 @@ class Translator:
                     translation = pack_chinese_dict[key]
                     source = "第三方汉化包"
                 # 5. 社区词典 [Key]
-                elif key in community_dict_by_key:
+                elif settings.get('use_community_dict_key', True) and key in community_dict_by_key:
                     translation = community_dict_by_key[key]
                     source = "社区词典 [Key]"
                 # 6. 社区词典 [原文]（使用全局缓存避免重复计算）
-                elif use_origin_name_lookup and english_value in community_dict_by_origin:
+                elif settings.get('use_community_dict_origin', True) and english_value in community_dict_by_origin:
                     if dictionary_manager:
                         # 使用词典管理器的全局缓存机制
                         best_translation = dictionary_manager.get_community_origin_translation(english_value)
@@ -204,7 +204,7 @@ class Translator:
         user_dictionary: Dict,
         community_dict_by_key: Dict[str, str],
         community_dict_by_origin: Dict[str, List[Dict]],
-        use_origin_name_lookup: bool,
+        settings: Dict,
         dictionary_manager=None
     ) -> TranslationResult:
         """执行翻译决策流程"""
@@ -233,7 +233,7 @@ class Translator:
                 community_dict_by_origin=community_dict_by_origin,
                 internal_chinese=internal_chinese,
                 pack_chinese_dict=extraction_result.pack_chinese,
-                use_origin_name_lookup=use_origin_name_lookup,
+                settings=settings,
                 namespace_info=namespace_info,
                 dictionary_manager=dictionary_manager
             )

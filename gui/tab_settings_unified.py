@@ -110,10 +110,23 @@ class UnifiedSettingsTab(ttk.Frame):
         matching_frame.pack(fill="x", pady=(0, 10))
         matching_frame.columnconfigure(0, weight=1)
 
-        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
-        origin_check = ttk.Checkbutton(matching_frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
-        origin_check.pack(anchor="w", pady=5, padx=5)
-        custom_widgets.ToolTip(origin_check, "推荐开启。\n当key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+        # 社区词典匹配设置
+        community_dict_frame = ttk.LabelFrame(matching_frame, text="社区词典匹配")
+        community_dict_frame.pack(fill="x", pady=5, padx=5, ipady=5, ipadx=5)
+        
+        self.use_community_dict_key_var = tk.BooleanVar(value=self.config.get("use_community_dict_key", True))
+        community_key_check = ttk.Checkbutton(community_dict_frame, text="启用社区词典 Key 匹配", variable=self.use_community_dict_key_var, bootstyle="primary")
+        community_key_check.pack(anchor="w", pady=3, padx=5)
+        custom_widgets.ToolTip(community_key_check, "使用社区词典中的 Key 进行匹配。\nKey 匹配准确性高，但覆盖范围可能有限。")
+        
+        self.use_community_dict_origin_var = tk.BooleanVar(value=self.config.get("use_community_dict_origin", True))
+        community_origin_check = ttk.Checkbutton(community_dict_frame, text="启用社区词典原文匹配", variable=self.use_community_dict_origin_var, bootstyle="primary")
+        community_origin_check.pack(anchor="w", pady=3, padx=5)
+        custom_widgets.ToolTip(community_origin_check, "使用社区词典中的原文进行匹配。\n原文匹配覆盖范围广，但可能在极少数情况下导致误翻。")
+        
+        # 绑定事件
+        self.use_community_dict_key_var.trace_add("write", lambda *args: self._save_all_settings())
+        self.use_community_dict_origin_var.trace_add("write", lambda *args: self._save_all_settings())
         
         # 模组任务列表名称显示模式
         name_mode_frame = tk_ttk.LabelFrame(frame, text="模组任务列表名称显示模式", padding="10")
@@ -650,7 +663,8 @@ class UnifiedSettingsTab(ttk.Frame):
         config["community_dict_dir"] = self.community_dict_var.get()
         config["community_pack_paths"] = list(self.packs_listbox.get(0, tk.END))
         
-        config["use_origin_name_lookup"] = self.use_origin_name_lookup_var.get()
+        config["use_community_dict_key"] = getattr(self, "use_community_dict_key_var", tk.BooleanVar(value=True)).get()
+        config["use_community_dict_origin"] = getattr(self, "use_community_dict_origin_var", tk.BooleanVar(value=True)).get()
         config["pack_as_zip"] = self.pack_as_zip_var.get()
         config["log_level"] = self.log_level_var.get()
         config["mod_list_name_mode"] = self.mod_list_name_mode_var.get()
@@ -678,7 +692,10 @@ class UnifiedSettingsTab(ttk.Frame):
         # 更新UI控件的值
         self.output_dir_var.set(self.config.get("output_dir", ""))
         self.community_dict_var.set(self.config.get("community_dict_dir", ""))
-        self.use_origin_name_lookup_var.set(self.config.get("use_origin_name_lookup", True))
+        if hasattr(self, "use_community_dict_key_var"):
+            self.use_community_dict_key_var.set(self.config.get("use_community_dict_key", True))
+        if hasattr(self, "use_community_dict_origin_var"):
+            self.use_community_dict_origin_var.set(self.config.get("use_community_dict_origin", True))
         self.pack_as_zip_var.set(self.config.get("pack_as_zip", False))
         self.log_level_var.set(self.config.get("log_level", "INFO"))
         self.mod_list_name_mode_var.set(self.config.get("mod_list_name_mode", "namespace"))

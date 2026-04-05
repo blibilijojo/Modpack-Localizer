@@ -21,8 +21,9 @@ class GeneralSettings:
         self.output_dir_var = tk.StringVar(value=self.config.get("output_dir", ""))
         self.pack_as_zip_var = tk.BooleanVar(value=self.config.get("pack_as_zip", False))
         
-        # 翻译匹配设置
-        self.use_origin_name_lookup_var = tk.BooleanVar(value=self.config.get("use_origin_name_lookup", True))
+        # 社区词典匹配设置
+        self.use_community_dict_key_var = tk.BooleanVar(value=self.config.get("use_community_dict_key", True))
+        self.use_community_dict_origin_var = tk.BooleanVar(value=self.config.get("use_community_dict_origin", True))
         
         # 列表名称显示模式
         self.mod_list_name_mode_var = tk.StringVar(value=self.config.get("mod_list_name_mode", "namespace"))
@@ -34,7 +35,8 @@ class GeneralSettings:
         # 绑定变量变化事件
         self.output_dir_var.trace_add("write", lambda *args: self.save_callback())
         self.pack_as_zip_var.trace_add("write", lambda *args: self.save_callback())
-        self.use_origin_name_lookup_var.trace_add("write", lambda *args: self.save_callback())
+        self.use_community_dict_key_var.trace_add("write", lambda *args: self.save_callback())
+        self.use_community_dict_origin_var.trace_add("write", lambda *args: self.save_callback())
         self.mod_list_name_mode_var.trace_add("write", lambda *args: self.save_callback())
     
     def _create_widgets(self):
@@ -67,9 +69,17 @@ class GeneralSettings:
         frame.pack(fill="x", pady=(0, 10), padx=5)
         frame.columnconfigure(0, weight=1)
         
-        origin_check = ttk.Checkbutton(frame, text="启用原文匹配", variable=self.use_origin_name_lookup_var, bootstyle="primary")
-        origin_check.pack(anchor="w", pady=5, padx=5)
-        custom_widgets.ToolTip(origin_check, "推荐开启。\n当Key查找失败时，尝试使用英文原文进行二次查找。\n能极大提升词典利用率，但可能在极少数情况下导致误翻。")
+        # 社区词典匹配设置
+        community_frame = ttk.LabelFrame(frame, text="社区词典匹配")
+        community_frame.pack(fill="x", pady=5, padx=5, ipady=5, ipadx=5)
+        
+        community_key_check = ttk.Checkbutton(community_frame, text="启用社区词典 Key 匹配", variable=self.use_community_dict_key_var, bootstyle="primary")
+        community_key_check.pack(anchor="w", pady=3, padx=5)
+        custom_widgets.ToolTip(community_key_check, "使用社区词典中的 Key 进行匹配。\nKey 匹配准确性高，但覆盖范围可能有限。")
+        
+        community_origin_check = ttk.Checkbutton(community_frame, text="启用社区词典原文匹配", variable=self.use_community_dict_origin_var, bootstyle="primary")
+        community_origin_check.pack(anchor="w", pady=3, padx=5)
+        custom_widgets.ToolTip(community_origin_check, "使用社区词典中的原文进行匹配。\n原文匹配覆盖范围广，但可能在极少数情况下导致误翻。")
     
     def _create_list_display_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="列表显示", padding="10")
@@ -131,6 +141,7 @@ class GeneralSettings:
         return {
             "output_dir": self.output_dir_var.get(),
             "pack_as_zip": self.pack_as_zip_var.get(),
-            "use_origin_name_lookup": self.use_origin_name_lookup_var.get(),
+            "use_community_dict_key": self.use_community_dict_key_var.get(),
+            "use_community_dict_origin": self.use_community_dict_origin_var.get(),
             "mod_list_name_mode": self.mod_list_name_mode_var.get()
         }

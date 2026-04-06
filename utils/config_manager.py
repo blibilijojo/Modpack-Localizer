@@ -252,9 +252,9 @@ def save_config(config_data: dict):
             builtin_key = get_builtin_curseforge_key()
             current_key = config_to_save.get('curseforge_api_key', '').strip()
             
-            # 只要有内置密钥，并且当前配置中的密钥非空，就清空它
-            # 这样可以确保内置密钥永远不会被写入配置文件
-            if builtin_key and current_key:
+            # 只有当当前密钥与内置密钥相同时才清空
+            # 这样可以确保内置密钥永远不会被写入配置文件，同时保留用户的自定义密钥
+            if builtin_key and current_key == builtin_key:
                 config_to_save['curseforge_api_key'] = ''
                 logging.debug("已阻止内置 CurseForge API 密钥写入配置文件")
         except ImportError:

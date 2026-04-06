@@ -84,15 +84,17 @@ class Workflow:
             # 验证提取结果是否存在
             if not context.extraction_result:
                 raise ValueError("提取结果不存在，请先执行数据提取阶段")
-            logging.debug(f"提取结果验证通过，包含 {len(context.extraction_result.master_english)} 个命名空间")
+            logging.info(f"提取结果验证通过，包含 {len(context.extraction_result.master_english)} 个命名空间")
             
             # 加载词典
-            logging.debug("开始加载翻译词典...")
+            logging.info("开始加载翻译词典...")
+            if context.progress_callback:
+                context.progress_callback("正在加载用户词典...", 52)
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
                 context.settings['community_dict_dir'],
                 lambda msg, progress: context.progress_callback(msg, 50 + progress // 2) if context.progress_callback else None
             )
-            logging.debug(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
+            logging.info(f"词典加载完成: 用户词典条目数={len(user_dict.get('by_key', {}))+len(user_dict.get('by_origin_name', {}))}, 社区词典Key条目数={len(community_dict_by_key)}, 社区词典原文条目数={len(community_dict_by_origin)}")
             
             # 执行翻译决策
             logging.debug(f"开始执行翻译决策，处理 {len(context.extraction_result.master_english)} 个命名空间")

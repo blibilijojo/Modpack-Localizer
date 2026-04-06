@@ -1179,16 +1179,15 @@ class Extractor:
                     mod_scan_cache.cache_path(),
                 )
 
-            def _repo_progress(cur: int, total: int) -> None:
-                if extraction_progress_callback and total > 0:
-                    extraction_progress_callback("repo_metadata", cur, total)
-
             # 平台查询与「扫描语言 / 指纹」分两阶段展示，避免状态栏长时间显示「扫描 Mods」
             if extraction_progress_callback:
-                _repo_progress(0, 1)
+                # 开始查询CurseForge
+                extraction_progress_callback("repo_metadata", 0, 2)
 
+            # 处理CurseForge查询
             curseforge_info = self._get_mod_info_from_curseforge(curseforge_hashes)
 
+            # 处理Modrinth查询
             unmatched_modrinth_hashes = []
             for jar_name, info in mod_info_by_jar.items():
                 if info['curseforge_hash'] not in curseforge_info and info['modrinth_hash']:
@@ -1196,13 +1195,18 @@ class Extractor:
 
             modrinth_info = {}
             if unmatched_modrinth_hashes:
+                if extraction_progress_callback:
+                    # 开始查询Modrinth
+                    extraction_progress_callback("repo_metadata", 1, 2)
+                
                 logging.info(f"CurseForge未匹配 {len(unmatched_modrinth_hashes)} 个模组，尝试从Modrinth获取...")
                 modrinth_info = self._get_mod_info_from_modrinth(unmatched_modrinth_hashes)
             else:
                 logging.info("所有模组已通过CurseForge匹配，无需调用Modrinth")
 
+            # 完成查询
             if extraction_progress_callback:
-                _repo_progress(1, 1)
+                extraction_progress_callback("repo_metadata", 2, 2)
             
             # 整合信息
             for jar_name, info in mod_info_by_jar.items():

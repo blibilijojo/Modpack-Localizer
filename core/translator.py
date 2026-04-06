@@ -5,6 +5,7 @@ from packaging.version import parse as parse_version
 import re
 import json
 from typing import Dict, List, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .models import (
     LanguageEntry, TranslationResult, NamespaceInfo,
@@ -55,7 +56,7 @@ class Translator:
             return top_candidates[0]["trans"]
     
     @staticmethod
-    @lru_cache(maxsize=65536)
+    @lru_cache(maxsize=131072)
     def _is_valid_translation_cached(text: str) -> bool:
         """验证翻译是否有效（有界缓存，重复英文/译文可共用结果）"""
         if not text or not text.strip():
@@ -102,6 +103,17 @@ class Translator:
         # 优化：直接使用 english_entries 的键，避免复杂的排序逻辑
         ordered_keys = list(english_entries.keys())
         
+        # 预计算设置值，避免在循环中重复获取
+        use_community_dict_key = settings.get('use_community_dict_key', True)
+        use_community_dict_origin = settings.get('use_community_dict_origin', True)
+        
+        # 预计算常用词典的存在性，避免在循环中重复检查
+        has_user_dict_key = bool(user_dict_by_key)
+        has_user_dict_origin = bool(user_dict_by_origin)
+        has_community_dict_key = bool(community_dict_by_key)
+        has_community_dict_origin = bool(community_dict_by_origin)
+        has_pack_chinese_dict = bool(pack_chinese_dict)
+        
         for key in ordered_keys:
             english_entry = english_entries.get(key)
             if not english_entry:
@@ -132,22 +144,22 @@ class Translator:
                     translation = internal_chinese[key].zh
                     source = "模组自带"
                 # 3. 个人词典（Key 优先）
-                elif key in user_dict_by_key:
+                elif has_user_dict_key and key in user_dict_by_key:
                     translation = user_dict_by_key[key]
                     source = "个人词典 [Key]"
-                elif english_value in user_dict_by_origin:
+                elif has_user_dict_origin and english_value in user_dict_by_origin:
                     translation = user_dict_by_origin[english_value]
                     source = "个人词典 [原文]"
                 # 4. 第三方汉化包
-                elif key in pack_chinese_dict:
+                elif has_pack_chinese_dict and key in pack_chinese_dict:
                     translation = pack_chinese_dict[key]
                     source = "第三方汉化包"
                 # 5. 社区词典 [Key]
-                elif settings.get('use_community_dict_key', True) and key in community_dict_by_key:
+                elif use_community_dict_key and has_community_dict_key and key in community_dict_by_key:
                     translation = community_dict_by_key[key]
                     source = "社区词典 [Key]"
                 # 6. 社区词典 [原文]（使用全局缓存避免重复计算）
-                elif settings.get('use_community_dict_origin', True) and english_value in community_dict_by_origin:
+                elif use_community_dict_origin and has_community_dict_origin and english_value in community_dict_by_origin:
                     if dictionary_manager:
                         # 使用词典管理器的全局缓存机制
                         best_translation = dictionary_manager.get_community_origin_translation(english_value)
@@ -195,33 +207,75 @@ class Translator:
         user_dict_by_key = user_dictionary.get('by_key', {})
         user_dict_by_origin = user_dictionary.get('by_origin_name', {})
         
-        logging.info(f"使用串行方式处理 {len(extraction_result.master_english)} 个命名空间")
+        namespaces = list(extraction_result.master_english.items())
+        namespace_count = len(namespaces)
         
-        for namespace, english_entries in extraction_result.master_english.items():
-            namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
-            internal_chinese = extraction_result.internal_chinese.get(namespace, {})
+        if namespace_count <= 3:
+            # 命名空间数量较少时使用串行处理
+            logging.info(f"使用串行方式处理 {namespace_count} 个命名空间")
+            for namespace, english_entries in namespaces:
+                namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
+                internal_chinese = extraction_result.internal_chinese.get(namespace, {})
+                
+                # 处理命名空间翻译
+                ns_result = self._process_namespace(
+                    namespace=namespace,
+                    english_entries=english_entries,
+                    user_dict_by_key=user_dict_by_key,
+                    user_dict_by_origin=user_dict_by_origin,
+                    community_dict_by_key=community_dict_by_key,
+                    community_dict_by_origin=community_dict_by_origin,
+                    internal_chinese=internal_chinese,
+                    pack_chinese_dict=extraction_result.pack_chinese,
+                    settings=settings,
+                    namespace_info=namespace_info,
+                    dictionary_manager=dictionary_manager
+                )
+                
+                workbench_data[namespace] = ns_result
+                
+                # 更新来源统计
+                for entry in ns_result.values():
+                    source = entry.source or "待翻译"
+                    source_counts[source] = source_counts.get(source, 0) + 1
+        else:
+            # 命名空间数量较多时使用并行处理
+            logging.info(f"使用并行方式处理 {namespace_count} 个命名空间")
             
-            # 处理命名空间翻译
-            ns_result = self._process_namespace(
-                namespace=namespace,
-                english_entries=english_entries,
-                user_dict_by_key=user_dict_by_key,
-                user_dict_by_origin=user_dict_by_origin,
-                community_dict_by_key=community_dict_by_key,
-                community_dict_by_origin=community_dict_by_origin,
-                internal_chinese=internal_chinese,
-                pack_chinese_dict=extraction_result.pack_chinese,
-                settings=settings,
-                namespace_info=namespace_info,
-                dictionary_manager=dictionary_manager
-            )
+            # 计算最佳线程数
+            max_workers = min(8, namespace_count)  # 限制最大线程数为8
             
-            workbench_data[namespace] = ns_result
+            def process_namespace_task(namespace, english_entries):
+                namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
+                internal_chinese = extraction_result.internal_chinese.get(namespace, {})
+                
+                return namespace, self._process_namespace(
+                    namespace=namespace,
+                    english_entries=english_entries,
+                    user_dict_by_key=user_dict_by_key,
+                    user_dict_by_origin=user_dict_by_origin,
+                    community_dict_by_key=community_dict_by_key,
+                    community_dict_by_origin=community_dict_by_origin,
+                    internal_chinese=internal_chinese,
+                    pack_chinese_dict=extraction_result.pack_chinese,
+                    settings=settings,
+                    namespace_info=namespace_info,
+                    dictionary_manager=dictionary_manager
+                )
             
-            # 更新来源统计
-            for entry in ns_result.values():
-                source = entry.source or "待翻译"
-                source_counts[source] = source_counts.get(source, 0) + 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 提交所有任务
+                futures = [executor.submit(process_namespace_task, namespace, english_entries) for namespace, english_entries in namespaces]
+                
+                # 处理完成的任务
+                for future in as_completed(futures):
+                    namespace, ns_result = future.result()
+                    workbench_data[namespace] = ns_result
+                    
+                    # 更新来源统计
+                    for entry in ns_result.values():
+                        source = entry.source or "待翻译"
+                        source_counts[source] = source_counts.get(source, 0) + 1
         
         # 计算总条目数
         result.total_entries = sum(len(entries) for entries in workbench_data.values())

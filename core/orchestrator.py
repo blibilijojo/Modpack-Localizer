@@ -51,7 +51,13 @@ class Orchestrator:
                 elif phase == "fingerprint":
                     self.update_progress(f"计算模组指纹… ({cur}/{total})", 38 + r * 10)
                 elif phase == "repo_metadata":
-                    self.update_progress(f"查询模组平台信息… ({cur}/{total})", 48 + r * 2)
+                    # 根据当前进度显示不同的平台查询状态
+                    if cur == 0:
+                        self.update_progress("正在查询CurseForge平台...", 48)
+                    elif cur == 1:
+                        self.update_progress("正在查询Modrinth平台...", 49)
+                    else:
+                        self.update_progress("平台查询完成", 50)
 
             # 创建工作流上下文
             context = self.workflow.create_context(
@@ -159,6 +165,9 @@ class Orchestrator:
             
             if not translation_result.workbench_data:
                 raise Exception("翻译决策未生成任何数据。可能是因为模组中的语言文件格式不正确或无法解析。")
+            
+            # 翻译决策阶段完成，更新进度到100%
+            self.update_progress("翻译决策完成", 100)
             
             # 转换为旧格式的workbench_data
             workbench_data = {}

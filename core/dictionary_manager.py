@@ -11,8 +11,9 @@ class DictionaryManager:
         self.user_dict = None
         self.community_dict_by_key = None
         self.community_dict_by_origin = None
-        self._cache = {}
-        self._community_origin_cache = {}
+        self._cache = {}  # 存储词典加载结果的缓存
+        self._community_origin_cache = {}  # 存储社区词典原文翻译的缓存
+        self._user_dict_cache = {}  # 存储用户词典查询结果的缓存
     
     def load_user_dictionary(self):
         """加载用户词典"""
@@ -147,6 +148,7 @@ class DictionaryManager:
         """清除缓存"""
         self._cache.clear()
         self._community_origin_cache.clear()
+        self._user_dict_cache.clear()
         logging.debug("词典缓存已清除")
     
     def search_dictionary(self, query, search_type='both'):

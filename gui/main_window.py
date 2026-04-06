@@ -39,6 +39,8 @@ class ProjectTab:
         self._is_fully_loaded = False
         self._is_loading = False  # 防止重复加载标志
         self._restored_state_data = None
+        # 用于跟踪是否已经执行过流程完成的UI重置，避免重复执行
+        self._workflow_completed = False
         # 线程管理属性
         self.background_threads = []
         self.stop_event = threading.Event()
@@ -510,15 +512,22 @@ class ProjectTab:
             self.progress_bar.config(bootstyle="info-striped")
             if percentage >= 0: self.progress_var.set(percentage)
 
-            if percentage == 100: 
-                # 仅当翻译处理完成时才重置UI，资源包生成使用99%
-                self._reset_ui_after_workflow("success")
-            elif percentage == 99:
-                # 资源包生成成功，重置UI，移除加载界面，保持工作台可见
-                self._reset_ui_after_workflow("success")
-                self.status_var.set("资源包生成成功！您可以继续修改或再次生成。")
-                self.progress_bar.config(bootstyle="success")
-            elif percentage < 0:
+            # 只有当流程尚未完成且达到相应进度时，才执行UI重置
+            if not self._workflow_completed:
+                # 过滤词典加载相关的消息，避免在词典加载过程中触发流程完成
+                if percentage == 100 and not ("加载词典" in message or "加载社区词典" in message or "正在加载用户词典" in message):
+                    # 仅当翻译处理完成时才重置UI，资源包生成使用99%
+                    self._reset_ui_after_workflow("success")
+                    self._workflow_completed = True
+                elif percentage == 99:
+                    # 资源包生成成功，重置UI，移除加载界面，保持工作台可见
+                    self._reset_ui_after_workflow("success")
+                    self.status_var.set("资源包生成成功！您可以继续修改或再次生成。")
+                    self.progress_bar.config(bootstyle="success")
+                    self._workflow_completed = True
+            if percentage < 0:
+                # 错误或取消时，重置完成标志
+                self._workflow_completed = False
                 status_map = {-1: "error", -2: "cancelled", -10: "continue"}
                 final_status = status_map.get(percentage, "error")
                 if final_status == "continue":
@@ -528,6 +537,9 @@ class ProjectTab:
                      self.root.after(100, self._continue_to_build_phase)
                 else:
                     self._reset_ui_after_workflow(final_status)
+                    # 在错误或取消的情况下，显示欢迎界面
+                    if final_status in ["error", "cancelled"] and not self.workbench_instance:
+                        self._show_welcome_view()
         try:
             if self.root.winfo_exists(): self.root.after(0, _update)
         except (RuntimeError, tk.TclError): pass
@@ -1488,7 +1500,9 @@ class ProjectTab:
         if self.workbench_instance:
             self.workbench_instance.pack(fill="both", expand=True)
         else:
-            self._show_welcome_view()
+            # 不显示欢迎界面，保持空白，等待工作台启动
+            # 只有在明确需要显示欢迎界面时才调用_show_welcome_view()
+            pass
 
     def _continue_to_build_phase(self):
         if not self.orchestrator:

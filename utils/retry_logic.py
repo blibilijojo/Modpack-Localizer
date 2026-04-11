@@ -2,8 +2,100 @@ import time
 import random
 import logging
 import itertools
+import requests
 from typing import Callable, Any, Type
 from functools import wraps
+
+
+def api_retry(max_retries=3, initial_delay=1.0, max_delay=30.0, backoff_factor=2.0):
+    """
+    针对 requests 的 HTTP 调用重试（超时、连接错误、429 与 5xx）。
+
+    Args:
+        max_retries: 最大重试次数
+        initial_delay: 初始延迟时间（秒）
+        max_delay: 最大延迟时间（秒）
+        backoff_factor: 退避因子
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.Timeout as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                        jitter = random.uniform(0, 0.5)
+                        sleep_time = delay + jitter
+                        logging.warning(
+                            f"API请求超时 ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1}): {e}"
+                        )
+                        logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                        time.sleep(sleep_time)
+                    else:
+                        logging.error(
+                            f"API请求超时，已达到最大重试次数 ({max_retries + 1}): {e}"
+                        )
+                except requests.exceptions.ConnectionError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                        jitter = random.uniform(0, 0.5)
+                        sleep_time = delay + jitter
+                        logging.warning(
+                            f"API连接错误 ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1}): {e}"
+                        )
+                        logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                        time.sleep(sleep_time)
+                    else:
+                        logging.error(
+                            f"API连接错误，已达到最大重试次数 ({max_retries + 1}): {e}"
+                        )
+                except requests.exceptions.HTTPError as e:
+                    last_exception = e
+                    status_code = e.response.status_code if hasattr(e, 'response') and e.response else None
+
+                    if status_code == 429:
+                        if attempt < max_retries:
+                            delay = min(initial_delay * (backoff_factor ** (attempt + 2)), max_delay)
+                            jitter = random.uniform(0, 1)
+                            sleep_time = delay + jitter
+                            logging.warning(
+                                f"API速率限制 (429) ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1})"
+                            )
+                            logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                            time.sleep(sleep_time)
+                        else:
+                            logging.error(f"API速率限制，已达到最大重试次数 ({max_retries + 1})")
+                    elif status_code in [500, 502, 503, 504]:
+                        if attempt < max_retries:
+                            delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                            jitter = random.uniform(0, 0.5)
+                            sleep_time = delay + jitter
+                            logging.warning(
+                                f"服务器错误 ({status_code}) ({func.__name__}, 尝试 {attempt + 1}/{max_retries + 1})"
+                            )
+                            logging.info(f"将在 {sleep_time:.2f} 秒后重试...")
+                            time.sleep(sleep_time)
+                        else:
+                            logging.error(f"服务器错误，已达到最大重试次数 ({max_retries + 1})")
+                    else:
+                        raise
+                except Exception as e:
+                    logging.error(f"API请求发生未预期错误 ({func.__name__}): {e}")
+                    raise
+
+            if last_exception:
+                raise last_exception
+
+        return wrapper
+    return decorator
+
+
 try:
     from openai import RateLimitError, APIError
     RETRY_EXCEPTIONS = (RateLimitError, APIError, ValueError) 

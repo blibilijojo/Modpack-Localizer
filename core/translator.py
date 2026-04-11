@@ -82,112 +82,74 @@ class Translator:
         elif file_format == 'lang':
             return [m.group(1) for m in self.LANG_KEY_VALUE.finditer(content)]
         return []
-    
-    def _process_namespace(
-        self, 
-        namespace: str, 
-        english_entries: Dict[str, LanguageEntry],
+
+    def _decide_translation_for_key(
+        self,
+        key: str,
+        english_value: str,
+        *,
         user_dict_by_key: Dict[str, str],
         user_dict_by_origin: Dict[str, str],
         community_dict_by_key: Dict[str, str],
         community_dict_by_origin: Dict[str, List[Dict]],
         internal_chinese: Dict[str, LanguageEntry],
         pack_chinese_dict: Dict[str, str],
-        settings: Dict,
-        namespace_info: NamespaceInfo,
-        dictionary_manager=None
-    ) -> Dict[str, LanguageEntry]:
-        """处理单个命名空间的翻译"""
-        ns_result = {}
-        
-        # 优化：直接使用 english_entries 的键，避免复杂的排序逻辑
-        ordered_keys = list(english_entries.keys())
-        
-        # 预计算设置值，避免在循环中重复获取
-        use_community_dict_key = settings.get('use_community_dict_key', True)
-        use_community_dict_origin = settings.get('use_community_dict_origin', True)
-        
-        # 预计算常用词典的存在性，避免在循环中重复检查
-        has_user_dict_key = bool(user_dict_by_key)
-        has_user_dict_origin = bool(user_dict_by_origin)
-        has_community_dict_key = bool(community_dict_by_key)
-        has_community_dict_origin = bool(community_dict_by_origin)
-        has_pack_chinese_dict = bool(pack_chinese_dict)
-        
-        for key in ordered_keys:
-            english_entry = english_entries.get(key)
-            if not english_entry:
-                continue
-            
-            english_value = english_entry.en
-            translation = None
-            source = None
-            
-            if key.startswith('_comment'):
-                # 处理带序号的 _comment 键
-                if key in internal_chinese:
-                    translation = internal_chinese[key].zh
-                    source = "模组自带"
-                else:
-                    # 如果没有对应的中文，保持为空
-                    translation = ""
-                    source = "待翻译"
+        use_community_dict_key: bool,
+        use_community_dict_origin: bool,
+        has_user_dict_key: bool,
+        has_user_dict_origin: bool,
+        has_community_dict_key: bool,
+        has_community_dict_origin: bool,
+        has_pack_chinese_dict: bool,
+        dictionary_manager,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        按固定优先级决定译文与来源（不做「待翻译」有效性归一化）。
+        返回 (translation, source)，source 为 None 表示未命中任何规则（调用方按待翻译处理）。
+        """
+        if key.startswith('_comment'):
+            if key in internal_chinese:
+                return internal_chinese[key].zh, "模组自带"
+            return "", "待翻译"
+
+        if self._is_valid_translation(english_value):
+            return english_value, "原文复制"
+        if key in internal_chinese:
+            return internal_chinese[key].zh, "模组自带"
+        if has_user_dict_key and key in user_dict_by_key:
+            return user_dict_by_key[key], "个人词典 [Key]"
+        if has_user_dict_origin and english_value in user_dict_by_origin:
+            return user_dict_by_origin[english_value], "个人词典 [原文]"
+        if has_pack_chinese_dict and key in pack_chinese_dict:
+            return pack_chinese_dict[key], "第三方汉化包"
+        if use_community_dict_key and has_community_dict_key and key in community_dict_by_key:
+            return community_dict_by_key[key], "社区词典 [Key]"
+        if use_community_dict_origin and has_community_dict_origin and english_value in community_dict_by_origin:
+            if dictionary_manager:
+                best_translation = dictionary_manager.get_community_origin_translation(english_value)
+                if best_translation:
+                    return best_translation, "社区词典 [原文]"
             else:
-                # 按照优先级顺序：原文复制 → 模组自带 → 个人词典 → 第三方汉化包 → 社区词典
-                
-                # 1. 非英文内容直接保留（原文复制）
-                if self._is_valid_translation(english_value):
-                    translation = english_value
-                    source = "原文复制"
-                # 2. 模组自带中文
-                elif key in internal_chinese:
-                    translation = internal_chinese[key].zh
-                    source = "模组自带"
-                # 3. 个人词典（Key 优先）
-                elif has_user_dict_key and key in user_dict_by_key:
-                    translation = user_dict_by_key[key]
-                    source = "个人词典 [Key]"
-                elif has_user_dict_origin and english_value in user_dict_by_origin:
-                    translation = user_dict_by_origin[english_value]
-                    source = "个人词典 [原文]"
-                # 4. 第三方汉化包
-                elif has_pack_chinese_dict and key in pack_chinese_dict:
-                    translation = pack_chinese_dict[key]
-                    source = "第三方汉化包"
-                # 5. 社区词典 [Key]
-                elif use_community_dict_key and has_community_dict_key and key in community_dict_by_key:
-                    translation = community_dict_by_key[key]
-                    source = "社区词典 [Key]"
-                # 6. 社区词典 [原文]（使用全局缓存避免重复计算）
-                elif use_community_dict_origin and has_community_dict_origin and english_value in community_dict_by_origin:
-                    if dictionary_manager:
-                        # 使用词典管理器的全局缓存机制
-                        best_translation = dictionary_manager.get_community_origin_translation(english_value)
-                        if best_translation:
-                            translation = best_translation
-                            source = "社区词典 [原文]"
-                    else:
-                        candidates = community_dict_by_origin[english_value]
-                        best_translation = self._resolve_origin_name_conflict(candidates)
-                        if best_translation:
-                            translation = best_translation
-                            source = "社区词典 [原文]"
-            
-            # 验证翻译有效性（原文复制已在上方用同一判定，避免重复正则）
-            if source != "原文复制" and not self._is_valid_translation(translation):
-                translation = ""
-                source = "待翻译"
-            
-            ns_result[key] = LanguageEntry(
-                key=key,
-                en=english_value,
-                zh=translation,
-                source=source,
-                namespace=namespace
-            )
-        
-        return ns_result
-    
+                candidates = community_dict_by_origin[english_value]
+                best_translation = self._resolve_origin_name_conflict(candidates)
+                if best_translation:
+                    return best_translation, "社区词典 [原文]"
+
+        return None, None
+
+    def _normalize_translation_result(
+        self, translation: Optional[str], source: Optional[str]
+    ) -> tuple[str, str]:
+        """非「原文复制」的译文若无效则归为待翻译。"""
+        if source == "原文复制":
+            return translation or "", source
+        if source == "待翻译":
+            return translation or "", "待翻译"
+        if not self._is_valid_translation(translation):
+            return "", "待翻译"
+        # 保留 source 为 None（与原先沿用 workbench 条目时一致）
+        return translation or "", source
+
     def _batch_translate(self, entries: Dict[str, LanguageEntry], batch_size: int = 20) -> Dict[str, str]:
         """批量翻译条目"""
         # 这里需要集成 AI 翻译服务
@@ -232,69 +194,34 @@ class Translator:
                 continue
             
             english_value = english_entry.en
-            translation = None
-            source = None
-            
-            # 检查是否已有翻译
+            translation: Optional[str] = None
+            source: Optional[str] = None
+
             if key in existing_translations and not update_existing:
                 existing_entry = existing_translations[key]
-                translation = existing_entry.zh
-                source = existing_entry.source
+                translation, source = self._normalize_translation_result(
+                    existing_entry.zh, existing_entry.source
+                )
             else:
-                if key.startswith('_comment'):
-                    # 处理带序号的 _comment 键
-                    if key in internal_chinese:
-                        translation = internal_chinese[key].zh
-                        source = "模组自带"
-                    else:
-                        # 如果没有对应的中文，保持为空
-                        translation = ""
-                        source = "待翻译"
-                else:
-                    # 按照优先级顺序：原文复制 → 模组自带 → 个人词典 → 第三方汉化包 → 社区词典
-                    
-                    # 1. 非英文内容直接保留（原文复制）
-                    if self._is_valid_translation(english_value):
-                        translation = english_value
-                        source = "原文复制"
-                    # 2. 模组自带中文
-                    elif key in internal_chinese:
-                        translation = internal_chinese[key].zh
-                        source = "模组自带"
-                    # 3. 个人词典（Key 优先）
-                    elif has_user_dict_key and key in user_dict_by_key:
-                        translation = user_dict_by_key[key]
-                        source = "个人词典 [Key]"
-                    elif has_user_dict_origin and english_value in user_dict_by_origin:
-                        translation = user_dict_by_origin[english_value]
-                        source = "个人词典 [原文]"
-                    # 4. 第三方汉化包
-                    elif has_pack_chinese_dict and key in pack_chinese_dict:
-                        translation = pack_chinese_dict[key]
-                        source = "第三方汉化包"
-                    # 5. 社区词典 [Key]
-                    elif use_community_dict_key and has_community_dict_key and key in community_dict_by_key:
-                        translation = community_dict_by_key[key]
-                        source = "社区词典 [Key]"
-                    # 6. 社区词典 [原文]
-                    elif use_community_dict_origin and has_community_dict_origin and english_value in community_dict_by_origin:
-                        if dictionary_manager:
-                            # 使用词典管理器的全局缓存机制
-                            best_translation = dictionary_manager.get_community_origin_translation(english_value)
-                            if best_translation:
-                                translation = best_translation
-                                source = "社区词典 [原文]"
-                        else:
-                            candidates = community_dict_by_origin[english_value]
-                            best_translation = self._resolve_origin_name_conflict(candidates)
-                            if best_translation:
-                                translation = best_translation
-                                source = "社区词典 [原文]"
-            
-            # 验证翻译有效性
-            if source != "原文复制" and not self._is_valid_translation(translation):
-                translation = ""
-                source = "待翻译"
+                translation, source = self._decide_translation_for_key(
+                    key,
+                    english_value,
+                    user_dict_by_key=user_dict_by_key,
+                    user_dict_by_origin=user_dict_by_origin,
+                    community_dict_by_key=community_dict_by_key,
+                    community_dict_by_origin=community_dict_by_origin,
+                    internal_chinese=internal_chinese,
+                    pack_chinese_dict=pack_chinese_dict,
+                    use_community_dict_key=use_community_dict_key,
+                    use_community_dict_origin=use_community_dict_origin,
+                    has_user_dict_key=has_user_dict_key,
+                    has_user_dict_origin=has_user_dict_origin,
+                    has_community_dict_key=has_community_dict_key,
+                    has_community_dict_origin=has_community_dict_origin,
+                    has_pack_chinese_dict=has_pack_chinese_dict,
+                    dictionary_manager=dictionary_manager,
+                )
+                translation, source = self._normalize_translation_result(translation, source)
             
             ns_result[key] = LanguageEntry(
                 key=key,

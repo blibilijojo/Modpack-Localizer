@@ -1,7 +1,8 @@
 """
-持久化缓存：以整包 SHA1（与 Modrinth 一致）为键 → CurseForge 指纹及从 JAR 内解析的元数据。
+持久化缓存：根对象为「整包 SHA1 → {curseforge_hash}」，无 version 包裹。
 
-不依赖修改时间：同一 jar 重复下载、仅 mtime 不同仍可命中。
+对象键即 Modrinth 整包 SHA1，条目中不再重复写入 modrinth_hash。
+
 读盘后仍需算 SHA1 才能查表；命中时可跳过 Murmur 与 ZIP 元数据解析。
 
 与仅内存的 Extractor._mod_info_cache、会话 tab 缓存等无关。
@@ -16,7 +17,6 @@ from typing import Any, Dict, Optional
 
 from utils import config_manager
 
-MOD_FINGERPRINT_CACHE_VERSION = 2
 CACHE_FILENAME = "mod_fingerprint_cache.json"
 
 
@@ -29,9 +29,26 @@ def cache_key_sha1(modrinth_sha1_hex: str) -> str:
     return modrinth_sha1_hex.lower()
 
 
+def _storage_from_value(key: str, v: Any) -> Optional[Dict[str, str]]:
+    """从磁盘上的 value 解析为内存存储形态（仅 curseforge_hash）。"""
+    if not isinstance(v, dict):
+        return None
+    cf = v.get("curseforge_hash")
+    if not isinstance(cf, str) or not cf:
+        return None
+    return {"curseforge_hash": cf}
+
+
+def _disk_value_needs_compact(v: Any) -> bool:
+    """是否含除 curseforge_hash 以外的字段（旧冗余格式，需重写）。"""
+    if not isinstance(v, dict):
+        return False
+    return set(v.keys()) != {"curseforge_hash"}
+
+
 class ModFingerprintDiskCache:
     def __init__(self):
-        self._entries: Dict[str, Dict[str, Any]] = {}
+        self._entries: Dict[str, Dict[str, str]] = {}
         self._dirty = False
 
     def load(self) -> None:
@@ -44,43 +61,55 @@ class ModFingerprintDiskCache:
                 data = json.load(f)
             if not isinstance(data, dict):
                 raise ValueError("root must be object")
-            ver = data.get("version")
-            if ver != MOD_FINGERPRINT_CACHE_VERSION:
-                logging.info(
-                    "模组指纹缓存版本不匹配或缺失，已忽略旧文件: %s (version=%s)",
-                    path,
-                    ver,
-                )
-                self._entries = {}
-                return
-            raw = data.get("entries")
-            if not isinstance(raw, dict):
-                self._entries = {}
-                return
-            self._entries = {
-                cache_key_sha1(str(k)): dict(v)
-                for k, v in raw.items()
-                if isinstance(v, dict)
-            }
+
+            merged: Dict[str, Dict[str, str]] = {}
+            migrated = False
+
+            inner = data.get("entries")
+            legacy_wrapped = isinstance(inner, dict) and (
+                "version" in data or list(data.keys()) == ["entries"]
+            )
+            if legacy_wrapped:
+                for k, v in inner.items():
+                    st = _storage_from_value(str(k), v)
+                    if st:
+                        merged[cache_key_sha1(str(k))] = st
+                migrated = True
+                logging.info("已自旧版（version/entries 包裹）迁移模组指纹缓存为扁平格式: %s", path)
+            else:
+                for k, v in data.items():
+                    if k in ("version", "entries"):
+                        continue
+                    if _disk_value_needs_compact(v):
+                        migrated = True
+                    st = _storage_from_value(str(k), v)
+                    if st:
+                        merged[cache_key_sha1(str(k))] = st
+
+            self._entries = merged
+            if migrated:
+                self._dirty = True
         except Exception as e:
             logging.warning("读取模组指纹缓存失败，将重新建立: %s — %s", path, e)
             self._entries = {}
 
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
-        rec = self._entries.get(cache_key_sha1(key))
+    def get(self, key: str) -> Optional[Dict[str, str]]:
+        key_norm = cache_key_sha1(key)
+        rec = self._entries.get(key_norm)
         if not rec:
             return None
-        required = ("mod_name", "curseforge_hash", "modrinth_hash")
-        if not all(k in rec for k in required):
+        cf = rec.get("curseforge_hash")
+        if not isinstance(cf, str) or not cf:
             return None
-        return rec
+        return {
+            "curseforge_hash": cf,
+            "modrinth_hash": key_norm,
+        }
 
     def put(self, key: str, record: Dict[str, Any]) -> None:
-        self._entries[cache_key_sha1(key)] = {
-            "mod_name": record.get("mod_name", ""),
-            "curseforge_hash": record.get("curseforge_hash", ""),
-            "modrinth_hash": record.get("modrinth_hash", ""),
-            "game_version": record.get("game_version", "") or "",
+        key_norm = cache_key_sha1(key)
+        self._entries[key_norm] = {
+            "curseforge_hash": str(record.get("curseforge_hash", "")),
         }
         self._dirty = True
 
@@ -88,14 +117,10 @@ class ModFingerprintDiskCache:
         if not self._dirty:
             return
         path = cache_path()
-        payload = {
-            "version": MOD_FINGERPRINT_CACHE_VERSION,
-            "entries": self._entries,
-        }
         tmp = path.with_suffix(path.suffix + ".tmp")
         try:
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=0)
+                json.dump(self._entries, f, ensure_ascii=False, indent=0)
                 f.write("\n")
             os.replace(tmp, path)
             self._dirty = False

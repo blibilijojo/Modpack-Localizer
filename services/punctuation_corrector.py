@@ -109,10 +109,9 @@ class PunctuationCorrector:
         if not en_punctuations:
             return zh_line
         
-        # 检测并处理连续英文句号（省略号）
+        # 连续句点不参与行首/行尾单点标点对齐（省略号在 _convert_all 中转为 …）
         import re
         ellipsis_pattern = r'\.{2,}'
-        ellipsis_matches = re.findall(ellipsis_pattern, en_line)
         
         # 处理开头标点
         if en_line[0] in self.punctuation_map:
@@ -131,12 +130,7 @@ class PunctuationCorrector:
             if start_punct in en_line and end_punct in en_line:
                 zh_line = self.process_punctuation_pairs(zh_line, start_punct, end_punct)
         
-        # 处理省略号特殊情况 - 保持连续英文句号不变
-        for ellipsis in ellipsis_matches:
-            if ellipsis not in zh_line:
-                # 如果中文文本中没有相同的省略号，保持英文省略号不变
-                pass
-        
+        # 连续英文句点在 _convert_all_english_punctuation 中统一转为 …
         return zh_line
     
     def correct_punctuation(self, en_text, zh_text):
@@ -153,7 +147,7 @@ class PunctuationCorrector:
         corrected_lines = []
         for i, (en_line, zh_line) in enumerate(zip(en_lines, zh_lines)):
             corrected_line = self.process_single_line(en_line, zh_line)
-            # 最后将译文的所有英文符号转化为对应的中文符号，对省略号例外
+            # 最后将译文的所有英文符号转化为对应的中文符号；连续 . 转为 …
             corrected_line = self._convert_all_english_punctuation(corrected_line)
             corrected_lines.append(corrected_line)
         
@@ -168,16 +162,15 @@ class PunctuationCorrector:
     
     def _convert_all_english_punctuation(self, text):
         """
-        将文本中的所有英文标点符号转化为对应的中文标点符号，但保留省略号(...)和方括号([])
+        将文本中的英文标点转化为中文标点；连续三个及以上英文句点合并为省略号「…」；
+        方括号 [] 保留不改为【】。
         """
         if not text:
             return text
         
-        # 先处理省略号，将其临时替换为一个特殊标记
+        # 先处理省略号：整段连续 .（≥3）合并为一个占位符，最后再还原为 Unicode …
         import re
         ellipsis_pattern = r'\.{3,}'
-        ellipsis_matches = re.findall(ellipsis_pattern, text)
-        # 用特殊标记替换省略号
         temp_text = re.sub(ellipsis_pattern, '__ELLIPSIS__', text)
         
         # 处理方括号，临时替换为特殊标记
@@ -219,8 +212,8 @@ class PunctuationCorrector:
                     i += 1
             temp_text = result_text
         
-        # 将特殊标记替换回省略号和方括号
-        temp_text = temp_text.replace('__ELLIPSIS__', '...')
+        # 将特殊标记替换回省略号（U+2026）与方括号
+        temp_text = temp_text.replace('__ELLIPSIS__', '…')
         temp_text = temp_text.replace('__LEFT_BRACKET__', '[')
         temp_text = temp_text.replace('__RIGHT_BRACKET__', ']')
         

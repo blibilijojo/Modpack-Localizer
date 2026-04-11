@@ -5,6 +5,7 @@ import time
 import threading
 import queue
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from itertools import cycle
 from utils.error_logger import log_ai_error
@@ -33,13 +34,15 @@ class KeyManager:
                 del self.cooldown_keys[key]
                 self.available_keys.put(key)
                 logging.info(f"密钥 ...{key[-4:]} 已结束冷却，回归可用队列。")
-    def get_key(self) -> str:
+    def get_key(self, should_abort: Callable[[], bool] | None = None) -> str | None:
         while True:
             self._check_cooldowns()
             try:
                 key = self.available_keys.get(timeout=0.1)
                 return key
             except queue.Empty:
+                if should_abort and should_abort():
+                    return None
                 time.sleep(0.5)
     def release_key(self, key: str):
         self.available_keys.put(key)
@@ -50,7 +53,7 @@ class KeyManager:
             logging.warning(f"密钥 ...{key[-4:]} 调用失败，将被冷却 {cooldown_seconds} 秒。")
     
     # 异步方法
-    async def async_get_key(self) -> str:
+    async def async_get_key(self, should_abort: Callable[[], bool] | None = None) -> str | None:
         while True:
             self._check_cooldowns()
             try:
@@ -58,6 +61,8 @@ class KeyManager:
                 key = self.available_keys.get(block=False)
                 return key
             except queue.Empty:
+                if should_abort and should_abort():
+                    return None
                 # 队列空，等待一段时间后重试
                 await asyncio.sleep(0.5)
     
@@ -98,6 +103,8 @@ class AITranslator:
         self.cache_lock = threading.RLock()
         # 取消标志
         self._cancelled = False
+        self._active_stream_lock = threading.Lock()
+        self._active_streams: list = []
         
         # 记录初始化信息
         service_count = len(self.api_services)
@@ -110,7 +117,64 @@ class AITranslator:
         """
         if not self._cancelled:
             self._cancelled = True
+            self._close_active_streams()
             logging.info("翻译器已收到取消命令，将终止所有正在执行的翻译任务")
+
+    def _register_stream(self, stream) -> None:
+        with self._active_stream_lock:
+            self._active_streams.append(stream)
+
+    def _unregister_stream(self, stream) -> None:
+        with self._active_stream_lock:
+            try:
+                self._active_streams.remove(stream)
+            except ValueError:
+                pass
+
+    def _close_active_streams(self) -> None:
+        """从其他线程关闭进行中的流式响应，打断阻塞在读取上的 HTTP 连接。"""
+        with self._active_stream_lock:
+            streams = tuple(self._active_streams)
+            self._active_streams.clear()
+        for s in streams:
+            try:
+                s.close()
+            except Exception as e:
+                logging.debug(f"关闭进行中请求流: {e}")
+
+    def _consume_chat_completion_stream(self, client: openai.OpenAI, request_params: dict) -> str | None:
+        """
+        流式拉取补全内容，便于在 chunk 间隔检查取消；cancel() 会 close 流以尽快打断阻塞读。
+
+        Returns:
+            拼接后的助手文本；若用户取消则为 None。
+        """
+        params = dict(request_params)
+        params["stream"] = True
+        stream = client.chat.completions.create(**params)
+        self._register_stream(stream)
+        parts: list[str] = []
+        try:
+            try:
+                for chunk in stream:
+                    if self._cancelled:
+                        return None
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta is not None and delta.content:
+                        parts.append(delta.content)
+            except Exception:
+                if self._cancelled:
+                    return None
+                raise
+            return "".join(parts)
+        finally:
+            self._unregister_stream(stream)
+            try:
+                stream.close()
+            except Exception:
+                pass
     
     def reset_cancel(self):
         """
@@ -285,7 +349,10 @@ class AITranslator:
                 logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
                 return [None] * len(batch_inner)
             
-            api_key = self.key_manager.get_key()
+            api_key = self.key_manager.get_key(lambda: self._cancelled)
+            if api_key is None:
+                logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消（等待 API 密钥）")
+                return [None] * len(batch_inner)
             logging.debug(f"线程 {threading.get_ident()} (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1}/{max_attempts} 使用密钥 ...{api_key[-4:]}")
             
             # 检查取消标志
@@ -328,8 +395,7 @@ class AITranslator:
                         self.key_manager.release_key(api_key)
                         return [None] * len(batch_inner)
                     
-                    # 直接执行API调用，不使用超时机制
-                    response = client.chat.completions.create(**request_params)
+                    response_text = self._consume_chat_completion_stream(client, request_params)
                 except Exception as e:
                     # 检查取消标志
                     if self._cancelled:
@@ -354,8 +420,12 @@ class AITranslator:
                     logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
                     self.key_manager.release_key(api_key)
                     return [None] * len(batch_inner)
-                
-                response_text = response.choices[0].message.content
+
+                if response_text is None:
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，已中止流式请求")
+                    self.key_manager.release_key(api_key)
+                    return [None] * len(batch_inner)
+
                 untranslated_source_texts = [source_texts[text_indices[idx]] for idx in range(len(texts_to_translate))]
                 translated_texts = self._parse_response(response_text, untranslated_source_texts)
                 
@@ -393,6 +463,10 @@ class AITranslator:
                 # 检查取消标志
                 if self._cancelled:
                     logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                    try:
+                        self.key_manager.release_key(api_key)
+                    except Exception:
+                        pass
                     return [None] * len(batch_inner)
                 
                 attempt += 1
@@ -470,7 +544,9 @@ class AITranslator:
                 return original_batch
             
             # 阶段4：解析JSON并构建结果
-            return self._parse_json_and_build_result(json_str, original_batch, expected_length)
+            return self._parse_json_and_build_result(
+                json_str, original_batch, expected_length, full_ai_response=response_text
+            )
             
         except json.JSONDecodeError as e:
             logging.error(f"解析AI的JSON响应失败: {e}. 尝试解析的字符串是: '{processed_text}'")
@@ -583,7 +659,14 @@ class AITranslator:
         
         return processed_text[start_index:end_index]
     
-    def _parse_json_and_build_result(self, json_str: str, original_batch: list[str], expected_length: int) -> list[str]:
+    def _parse_json_and_build_result(
+        self,
+        json_str: str,
+        original_batch: list[str],
+        expected_length: int,
+        *,
+        full_ai_response: str | None = None,
+    ) -> list[str]:
         """
         解析JSON并构建翻译结果列表
         
@@ -591,19 +674,36 @@ class AITranslator:
             json_str: JSON字符串
             original_batch: 原始文本批次
             expected_length: 预期结果长度
-            
+            full_ai_response: 模型原始返回全文，用于异常时在控制台输出排查
+        
         Returns:
             翻译结果列表
         """
+        _full_logged = False
+
+        def _tail_once() -> str:
+            nonlocal _full_logged
+            if not full_ai_response or _full_logged:
+                return ""
+            _full_logged = True
+            return f"\n完整AI返回：\n{full_ai_response}"
+
         data = json.loads(json_str)
         
         if not isinstance(data, dict):
-            logging.warning(f"AI响应解析出的内容不是一个字典对象。内容: {data}")
+            logging.warning(
+                "AI响应解析出的内容不是一个字典对象。内容: %s%s", data, _tail_once()
+            )
             # 尝试直接返回原文作为回退方案
             return original_batch
         
         if len(data) != expected_length:
-            logging.warning(f"AI响应条目数量不匹配！预期: {expected_length}, 实际: {len(data)}。将使用原文回填。")
+            logging.warning(
+                "AI响应条目数量不匹配！预期: %s, 实际: %s。将使用原文回填。%s",
+                expected_length,
+                len(data),
+                _tail_once(),
+            )
             # 尝试返回尽可能多的翻译结果，其余使用原文
             reconstructed_list = list(original_batch)
             for key, value in data.items():
@@ -614,13 +714,20 @@ class AITranslator:
                             reconstructed_list[index] = value.replace('\n', '\\n')
                         else:
                             logging.warning(
-                                f"AI响应条目数量不匹配且键'{key}'为非字符串类型({type(value).__name__})，将重试批次。"
+                                "AI响应条目数量不匹配且键'%s'为非字符串类型(%s)，将重试批次。%s",
+                                key,
+                                type(value).__name__,
+                                _tail_once(),
                             )
                             raise AIResponseNonStringValueError(
                                 f"键 {key!r} 的翻译值为非字符串类型: {type(value).__name__}"
                             )
+                except AIResponseNonStringValueError:
+                    raise
                 except (ValueError, TypeError):
-                    pass
+                    logging.warning(
+                        "AI返回了无效的键'%s'，已忽略。%s", key, _tail_once()
+                    )
             return reconstructed_list
         
         reconstructed_list = [None] * expected_length
@@ -633,13 +740,18 @@ class AITranslator:
                         reconstructed_list[index] = value.replace('\n', '\\n')
                     else:
                         logging.warning(
-                            f"AI为键'{key}'返回了非字符串类型的值({type(value).__name__})，将重试本批次。"
+                            "AI为键'%s'返回了非字符串类型的值(%s)，将重试本批次。%s",
+                            key,
+                            type(value).__name__,
+                            _tail_once(),
                         )
                         raise AIResponseNonStringValueError(
                             f"键 {key!r} 的翻译值为非字符串类型: {type(value).__name__}"
                         )
+            except AIResponseNonStringValueError:
+                raise
             except (ValueError, TypeError):
-                logging.warning(f"AI返回了无效的键'{key}'，已忽略。")
+                logging.warning("AI返回了无效的键'%s'，已忽略。%s", key, _tail_once())
         
         # 检查是否有未填充的项
         for i in range(expected_length):
@@ -665,6 +777,10 @@ class AITranslator:
         else:
             batch_index_inner, batch_inner, model_name, prompt_template = batch_info
 
+        if self._cancelled:
+            logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+            return [None] * len(batch_inner)
+
         # 缓存检查
         cached_results = [None] * len(batch_inner)
         
@@ -675,6 +791,9 @@ class AITranslator:
         source_texts = [entry[0] for entry in normalized_entries]
 
         for idx, (_, _, cache_key) in enumerate(normalized_entries):
+            if self._cancelled:
+                logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                return [None] * len(batch_inner)
             # 从缓存中获取翻译结果
             cached_translation = self._get_cached_translation(cache_key)
             if cached_translation:
@@ -688,23 +807,41 @@ class AITranslator:
         if not texts_to_translate:
             logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需 API 调用")
             return cached_results
+
+        if self._cancelled:
+            logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+            return [None] * len(batch_inner)
         
         # 对未命中缓存的文本进行翻译
-        # 获取实际使用的模型名称
-        effective_model_name = model_name
-        # 这里需要从可用的service中获取模型信息
-        # 由于模型信息在重试循环中获取，这里先使用传入的model_name
         logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本，使用模型: {model_name}")
 
         attempt = 0
         max_attempts = 5  # 最大重试次数
         while attempt < max_attempts:
+            if self._cancelled:
+                logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                return [None] * len(batch_inner)
+            api_key = None
             try:
                 # 异步获取API密钥
-                api_key = await self.key_manager.async_get_key()
+                api_key = await self.key_manager.async_get_key(lambda: self._cancelled)
+                if api_key is None:
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消（等待 API 密钥）")
+                    return [None] * len(batch_inner)
                 logging.debug(f"异步线程 (批次 {batch_index_inner + 1}) 尝试 #{attempt + 1}/{max_attempts} 使用密钥 ...{api_key[-4:]}")
 
+                if self._cancelled:
+                    await self.key_manager.async_release_key(api_key)
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                    return [None] * len(batch_inner)
+
                 effective_model_name = model_name
+                service = self.key_to_service.get(api_key)
+                if service:
+                    service_model = service.get("model")
+                    if service_model and service_model != "请先获取模型":
+                        effective_model_name = service_model
+
                 client = self._get_client(api_key)
                 input_dict = dict(enumerate(texts_to_translate))
                 input_json = json.dumps(input_dict, ensure_ascii=False)
@@ -716,9 +853,26 @@ class AITranslator:
                     prompt_content = f"{prompt_template}\n\n输入: {input_json}"
                 request_params = {"model": effective_model_name, "messages": [{"role": "user", "content": prompt_content}]}
 
-                # 异步执行API调用
-                response = await asyncio.to_thread(client.chat.completions.create, **request_params)
-                response_text = response.choices[0].message.content
+                if self._cancelled:
+                    await self.key_manager.async_release_key(api_key)
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                    return [None] * len(batch_inner)
+
+                # 流式请求，与同步路径一致，便于 cancel() 关闭流以打断阻塞读
+                response_text = await asyncio.to_thread(
+                    self._consume_chat_completion_stream, client, request_params
+                )
+
+                if self._cancelled:
+                    await self.key_manager.async_release_key(api_key)
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                    return [None] * len(batch_inner)
+
+                if response_text is None:
+                    await self.key_manager.async_release_key(api_key)
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，已中止流式请求")
+                    return [None] * len(batch_inner)
+
                 untranslated_source_texts = [source_texts[text_indices[idx]] for idx in range(len(texts_to_translate))]
                 translated_texts = self._parse_response(response_text, untranslated_source_texts)
 
@@ -740,6 +894,15 @@ class AITranslator:
                     log_ai_error(prompt_content, response_text)
                     raise ValueError("AI响应解析或验证失败")
             except Exception as e:
+                if self._cancelled:
+                    logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
+                    if api_key is not None:
+                        try:
+                            await self.key_manager.async_release_key(api_key)
+                        except Exception:
+                            pass
+                    return [None] * len(batch_inner)
+
                 attempt += 1
                 error_str = str(e).lower()
                 cooldown_duration = 2.0 * (2 ** min(attempt, 8))
@@ -769,7 +932,8 @@ class AITranslator:
                     logging.warning(f"批次 {batch_index_inner + 1} 遭遇临时错误: {e}")
 
                 # 异步惩罚API密钥
-                await self.key_manager.async_penalize_key(api_key, cooldown_duration)
+                if api_key is not None:
+                    await self.key_manager.async_penalize_key(api_key, cooldown_duration)
 
                 # 检查是否达到最大重试次数
                 if attempt >= max_attempts:

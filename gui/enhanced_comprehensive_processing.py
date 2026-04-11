@@ -1045,12 +1045,19 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _refresh_ai_apply_completed_btn_visibility(self):
         if not hasattr(self, "apply_completed_ai_btn") or not self.apply_completed_ai_btn.winfo_exists():
             return
-        has_done = False
+        ctx = None
         with self._ai_apply_lock:
             ctx = self._ai_apply_context
-            if ctx:
-                has_done = any(x is not None for x in ctx["translations_nested"])
-        if has_done:
+        if not ctx:
+            self._hide_ai_apply_completed_btn()
+            return
+        nested = ctx["translations_nested"]
+        applied = ctx.get("applied_batch_indices", set())
+        total = len(nested)
+        has_applicable = any(
+            i not in applied and nested[i] is not None for i in range(total)
+        )
+        if has_applicable or getattr(self, "processing", False):
             self._show_ai_apply_completed_btn()
         else:
             self._hide_ai_apply_completed_btn()
@@ -1060,6 +1067,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         batches = ctx["batches"]
         nested = ctx["translations_nested"]
         mapping = ctx["all_item_mapping"]
+        already_applied = ctx.get("applied_batch_indices", set())
         partial_mapping = []
         partial_translations = []
         applied_batch_indices = []
@@ -1067,6 +1075,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         for i, (batch_texts, _) in enumerate(batches):
             n = len(batch_texts)
             chunk = nested[i]
+            if i in already_applied:
+                offset += n
+                continue
             if chunk is None:
                 offset += n
                 continue
@@ -1111,11 +1122,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         )
         with self._ai_apply_lock:
             if self._ai_apply_context is ctx:
-                nested = ctx["translations_nested"]
-                for bi in applied_batch_indices:
-                    nested[bi] = None
-                if all(x is None for x in nested):
-                    self._ai_apply_context = None
+                ctx.setdefault("applied_batch_indices", set()).update(applied_batch_indices)
         self._refresh_ai_apply_completed_btn_visibility()
         self.workbench.log_callback(
             f"已应用 {len(applied_batch_indices)} 个已完成批次的翻译结果。", "SUCCESS"
@@ -1430,8 +1437,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     "all_item_mapping": all_item_mapping,
                     "translation_mode": translation_mode,
                     "en_to_all_entries": en_to_all_entries,
+                    "applied_batch_indices": set(),
                 }
-            self.after(0, self._show_ai_apply_completed_btn)
+            self.after(0, self._refresh_ai_apply_completed_btn_visibility)
             
             # 记录翻译设置
             mode_display = self.modes_reverse_values.get(translation_mode, translation_mode)

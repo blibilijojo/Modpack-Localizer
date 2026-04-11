@@ -188,25 +188,6 @@ class Translator:
         
         return ns_result
     
-    def _get_entries_to_translate(self, namespace: str, english_entries: Dict[str, LanguageEntry], existing_translations: Dict[str, LanguageEntry], update_existing: bool) -> Dict[str, LanguageEntry]:
-        """获取需要翻译的条目"""
-        entries_to_translate = {}
-        
-        for key, entry in english_entries.items():
-            if key.startswith('_comment'):
-                continue
-            
-            # 检查是否需要翻译
-            if update_existing:
-                # 更新模式：所有条目都需要检查
-                entries_to_translate[key] = entry
-            else:
-                # 新增模式：只翻译不存在的条目
-                if key not in existing_translations:
-                    entries_to_translate[key] = entry
-        
-        return entries_to_translate
-    
     def _batch_translate(self, entries: Dict[str, LanguageEntry], batch_size: int = 20) -> Dict[str, str]:
         """批量翻译条目"""
         # 这里需要集成 AI 翻译服务
@@ -230,17 +211,6 @@ class Translator:
         dictionary_manager=None
     ) -> Dict[str, LanguageEntry]:
         """处理单个命名空间的翻译（支持增量更新）"""
-        # 获取需要翻译的条目
-        entries_to_translate = self._get_entries_to_translate(
-            namespace, english_entries, existing_translations, update_existing
-        )
-        
-        # 如果有需要翻译的条目，进行批量翻译
-        if entries_to_translate:
-            logging.info(f"命名空间 {namespace} 有 {len(entries_to_translate)} 个条目需要翻译")
-            # 这里可以调用批量翻译方法
-            # translated_entries = self._batch_translate(entries_to_translate)
-        
         # 处理所有条目
         ns_result = {}
         ordered_keys = list(english_entries.keys())

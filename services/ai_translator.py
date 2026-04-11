@@ -110,7 +110,29 @@ class AITranslator:
         service_count = len(self.api_services)
         total_keys = len(all_keys)
         logging.info(f"翻译器已初始化。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒")
-    
+
+    def describe_effective_models(self, request_model: str | None) -> str:
+        """
+        与 translate_batch / translate_batch_async 中选用模型的规则一致：若某条 api_services
+        配置了 model 且非占位「请先获取模型」，则请求使用该值；否则使用传入的 request_model
+        （即界面「模型」字段）。用于日志展示实际会发往 API 的模型名。
+        """
+        req = (request_model or "").strip() or "（未在配置中指定模型）"
+        resolved: list[str] = []
+        for service in self.api_services:
+            sm = (service.get("model") or "").strip()
+            if sm and sm != "请先获取模型":
+                resolved.append(sm)
+            else:
+                resolved.append(req)
+        uniq: list[str] = []
+        for m in resolved:
+            if m not in uniq:
+                uniq.append(m)
+        if len(uniq) == 1:
+            return uniq[0]
+        return f"依服务而异: {', '.join(uniq)}（界面基准: {req}）"
+
     def cancel(self):
         """
         取消所有正在执行的翻译任务
@@ -338,8 +360,8 @@ class AITranslator:
             logging.info(f"批次 {batch_index_inner + 1}：所有文本均命中缓存，无需 API 调用")
             return cached_results
         
-        # 对未命中缓存的文本进行翻译
-        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本")
+        # 对未命中缓存的文本进行翻译（条数已在 GUI 侧 INFO 记录，此处仅 DEBUG 避免重复）
+        logging.debug(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本")
         
         attempt = 0
         max_attempts = 5  # 最大重试次数
@@ -539,7 +561,12 @@ class AITranslator:
             # 阶段3：提取JSON部分
             json_str = self._extract_json(processed_text)
             if not json_str:
-                logging.error(f"AI响应中找不到有效的JSON对象。响应: {processed_text}")
+                preview = processed_text[:800] + ("…" if len(processed_text) > 800 else "")
+                logging.error(
+                    "AI响应中找不到有效的JSON对象（常见原因：输出被 max_tokens 截断、或模型未输出完整 JSON）。"
+                    "响应预览: %s",
+                    preview,
+                )
                 # 尝试直接返回原文作为回退方案
                 return original_batch
             
@@ -626,37 +653,36 @@ class AITranslator:
     
     def _extract_json(self, processed_text: str) -> str:
         """
-        从响应文本中提取JSON部分
-        
-        Args:
-            processed_text: 预处理后的响应文本
-            
-        Returns:
-            提取的JSON字符串，如果没有找到则返回空字符串
+        从响应文本中提取第一个完整 JSON 对象字符串。
+
+        使用 json.JSONDecoder.raw_decode，按 JSON 语法识别字符串边界，避免简单花括号
+        计数在译文含 ``}``、``{`` 等字符时提前截断，导致误判为「找不到 JSON」。
         """
-        # 智能提取JSON部分，处理包含额外文本的情况
-        start_index = processed_text.find('{')
+        start_index = processed_text.find("{")
         if start_index == -1:
             return ""
-        
-        # 找到第一个{后的所有内容
+        decoder = json.JSONDecoder()
+        try:
+            _, end = decoder.raw_decode(processed_text, start_index)
+            return processed_text[start_index:end]
+        except json.JSONDecodeError:
+            pass
+
         json_candidate = processed_text[start_index:]
-        
-        # 计算括号匹配，找到完整的JSON对象
         brace_count = 0
         end_index = -1
         for i, char in enumerate(json_candidate):
-            if char == '{':
+            if char == "{":
                 brace_count += 1
-            elif char == '}':
+            elif char == "}":
                 brace_count -= 1
                 if brace_count == 0:
                     end_index = start_index + i + 1
                     break
-        
+
         if end_index == -1:
             return ""
-        
+
         return processed_text[start_index:end_index]
     
     def _parse_json_and_build_result(
@@ -812,8 +838,10 @@ class AITranslator:
             logging.info(f"批次 {batch_index_inner + 1}：翻译任务已取消，立即终止")
             return [None] * len(batch_inner)
         
-        # 对未命中缓存的文本进行翻译
-        logging.info(f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本，使用模型: {model_name}")
+        # 对未命中缓存的文本进行翻译（条数已在 GUI 侧 INFO 记录；模型名仅 DEBUG）
+        logging.debug(
+            f"批次 {batch_index_inner + 1}：需要翻译 {len(texts_to_translate)} 个文本，使用模型: {model_name}"
+        )
 
         attempt = 0
         max_attempts = 5  # 最大重试次数

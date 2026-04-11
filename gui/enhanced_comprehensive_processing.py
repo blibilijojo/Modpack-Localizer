@@ -1057,7 +1057,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         has_applicable = any(
             i not in applied and nested[i] is not None for i in range(total)
         )
-        if has_applicable or getattr(self, "processing", False):
+        if has_applicable:
             self._show_ai_apply_completed_btn()
         else:
             self._hide_ai_apply_completed_btn()
@@ -1172,10 +1172,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             # en_text -> list of (ns, idx, item) 用于记录所有相同原文的条目
             all_items = []
             all_texts = set()
-            translated_texts = defaultdict(list)  # 已翻译文本映射：英文原文 -> 中文译文
+            # 按命名空间收集已译文本，供混合模式按批次内模组合并参考语料
+            translated_texts_by_ns = None
+            if translation_mode == "hybrid":
+                translated_texts_by_ns = defaultdict(lambda: defaultdict(list))
             en_to_all_entries = defaultdict(list)  # 原文 -> 所有重复条目，用于翻译后同步
 
-            # 先收集所有已翻译文本，用于混合翻译模式，同时记录所有条目
+            # 先收集已翻译文本（混合模式按 ns 分桶），同时记录所有条目
             for ns in selected_modules:
                 # 检查取消标志
                 if not self.processing:
@@ -1194,8 +1197,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     if en_text:
                         all_texts.add(en_text)
                         en_to_all_entries[en_text].append((ns, idx, item))
-                        if zh_text:
-                            translated_texts[en_text].append(zh_text)
+                        if zh_text and translated_texts_by_ns is not None:
+                            translated_texts_by_ns[ns][en_text].append(zh_text)
 
             # 根据模式筛选待处理条目，并对 en_text 去重
             # 只保留每个 en_text 的第一个待翻译条目进行翻译
@@ -1242,8 +1245,42 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             all_translation_inputs = []
             all_item_mapping = []
 
-            # 为所有待处理条目生成上下文
-            group_context = self._generate_translation_context(deduplicated_items, translated_texts) if translation_mode == "hybrid" else ""
+            pending_en_set = frozenset(
+                (item.get("en") or "").strip()
+                for _, _, item in deduplicated_items
+                if (item.get("en") or "").strip()
+            )
+            merged_hybrid_cache = {}
+            if translation_mode == "hybrid":
+                from utils.hybrid_context_index import HybridContextIndex
+
+                def _batch_hybrid_context(batch_payloads):
+                    nss = frozenset(p.get("ns") for p in batch_payloads if p.get("ns"))
+                    if not nss:
+                        return ""
+                    if nss not in merged_hybrid_cache:
+                        merged: dict[str, list] = {}
+                        for ns in nss:
+                            sub = translated_texts_by_ns.get(ns) if translated_texts_by_ns else None
+                            if not sub:
+                                continue
+                            for en, zhs in sub.items():
+                                merged.setdefault(en, []).extend(zhs)
+                        merged_hybrid_cache[nss] = HybridContextIndex(merged)
+                    idx = merged_hybrid_cache[nss]
+                    ens = []
+                    for p in batch_payloads:
+                        t = (p.get("text") or "").strip()
+                        if " -> " in t:
+                            ens.append(t.split(" -> ", 1)[0].strip())
+                        else:
+                            ens.append(t)
+                    return idx.build_context(ens, pending_en_set)
+
+            else:
+
+                def _batch_hybrid_context(batch_payloads):
+                    return ""
 
             for ns, idx, item in deduplicated_items:
                 en_text = item.get("en", "").strip()
@@ -1253,11 +1290,13 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 润色模式：传递英文原文和中文译文，格式为 "原文 -> 译文"
                     combined_text = f"{en_text} -> {zh_text}"
                     all_texts_to_translate.append(combined_text)
-                    all_translation_inputs.append({"text": combined_text, "key": item.get("key", "")})
+                    all_translation_inputs.append(
+                        {"text": combined_text, "key": item.get("key", ""), "ns": ns}
+                    )
                 else:
                     # 其他模式：仅传递英文原文
                     all_texts_to_translate.append(en_text)
-                    all_translation_inputs.append({"text": en_text, "key": item.get("key", "")})
+                    all_translation_inputs.append({"text": en_text, "key": item.get("key", ""), "ns": ns})
                 
                 all_item_mapping.append((ns, idx, item))
             
@@ -1325,12 +1364,12 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                             current_words += text_words
 
                             if len(current_batch) < len(ns_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(ns_inputs[len(current_batch)]["text"]) - words_per_batch)):
-                                ns_batches_list.append((current_batch.copy(), group_context))
+                                ns_batches_list.append((current_batch.copy(), _batch_hybrid_context(current_batch)))
                                 current_batch.clear()
                                 current_words = 0
 
                         if current_batch:
-                            ns_batches_list.append((current_batch, group_context))
+                            ns_batches_list.append((current_batch, _batch_hybrid_context(current_batch)))
                     elif batch_mode == "items":
                         ns_items_count = len(ns_inputs)
                         ns_batches_count = max(1, (ns_items_count + batch_value - 1) // batch_value)
@@ -1338,7 +1377,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_inputs[i:end_idx], group_context))
+                            ns_batches_list.append((ns_inputs[i:end_idx], _batch_hybrid_context(ns_inputs[i:end_idx])))
                     else:
                         ns_items_count = len(ns_inputs)
                         ns_batches_count = batch_value
@@ -1346,7 +1385,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
 
                         for i in range(0, ns_items_count, items_per_batch):
                             end_idx = min(i + items_per_batch, ns_items_count)
-                            ns_batches_list.append((ns_inputs[i:end_idx], group_context))
+                            ns_batches_list.append((ns_inputs[i:end_idx], _batch_hybrid_context(ns_inputs[i:end_idx])))
 
                 batches = ns_batches_list
                 batch_size = batch_value
@@ -1366,7 +1405,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 检查当前条目加入后是否会超过每批次单词数
                     if current_words + text_words > batch_value and current_batch:
                         # 当前批次已达到或超过每批次单词数，创建新批次
-                        batches.append((current_batch.copy(), group_context))
+                        batches.append((current_batch.copy(), _batch_hybrid_context(current_batch)))
                         current_batch.clear()
                         current_words = 0
                     
@@ -1376,7 +1415,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 
                 # 添加最后一个批次
                 if current_batch:
-                    batches.append((current_batch, group_context))
+                    batches.append((current_batch, _batch_hybrid_context(current_batch)))
                 
                 # 记录批处理大小（每批次单词数）
                 batch_size = batch_value
@@ -1395,7 +1434,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
                     batch_texts = all_translation_inputs[start_idx:end_idx]
-                    batches.append((batch_texts, group_context))
+                    batches.append((batch_texts, _batch_hybrid_context(batch_texts)))
                     start_idx = end_idx
                     
                     # 如果已经处理完所有条目，退出循环
@@ -1417,7 +1456,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
                     end_idx = min(start_idx + items_per_batch, total_items)
                     batch_texts = all_translation_inputs[start_idx:end_idx]
-                    batches.append((batch_texts, group_context))
+                    batches.append((batch_texts, _batch_hybrid_context(batch_texts)))
                     start_idx = end_idx
                     
                     # 如果已经处理完所有条目，退出循环
@@ -1441,10 +1480,33 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 }
             self.after(0, self._refresh_ai_apply_completed_btn_visibility)
             
-            # 记录翻译设置
+            # 记录翻译设置（模型名仅在混合模式下列出，与 API 实际选用规则一致）
             mode_display = self.modes_reverse_values.get(translation_mode, translation_mode)
-            logging.info(f"AI翻译设置 - 模式: {mode_display}, 批处理大小: {batch_size}")
-            
+            if translation_mode == "hybrid":
+                model_display = translator.describe_effective_models(s.get("model"))
+                settings_msg = (
+                    f"AI翻译设置 - 模式: {mode_display}, 模型: {model_display}, 批处理大小: {batch_size}"
+                )
+            else:
+                settings_msg = f"AI翻译设置 - 模式: {mode_display}, 批处理大小: {batch_size}"
+            logging.info(settings_msg)
+            self.workbench.log_callback(settings_msg, "INFO")
+
+            for bi, (batch, ctx) in enumerate(batches, start=1):
+                n_items = len(batch)
+                batch_msg = f"批次 {bi}：需要翻译 {n_items} 个文本"
+                if translation_mode == "hybrid":
+                    nss = {str(p.get("ns")) for p in batch if p.get("ns")}
+                    if nss:
+                        batch_msg += f"，命名空间 {len(nss)} 个"
+                    if ctx:
+                        ctx_lines = len(ctx.splitlines())
+                        batch_msg += f"；混合参考 {ctx_lines} 行 / {len(ctx)} 字"
+                    else:
+                        batch_msg += "；无混合参考"
+                logging.info(batch_msg)
+                self.workbench.log_callback(batch_msg, "INFO")
+
             # 创建专用的AI翻译线程池
             from concurrent.futures import ThreadPoolExecutor
             ai_executor = ThreadPoolExecutor(max_workers=s.get('ai_max_threads', 4))
@@ -1488,6 +1550,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     batch_result = future.result()
                     with self._ai_apply_lock:
                         translations_nested[batch_idx] = batch_result
+                    
+                    self.after(0, self._refresh_ai_apply_completed_btn_visibility)
                     
                     # 更新状态
                     status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
@@ -1556,218 +1620,6 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 if hasattr(self, 'cancel_button') and self.cancel_button.winfo_exists():
                     self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
                 self.after(0, self._refresh_ai_apply_completed_btn_visibility)
-    
-    def _generate_translation_context(self, group, translated_texts):
-        """为翻译组生成上下文，确保翻译风格一致性"""
-        context_parts = []
-        stats = {
-            'total_contexts_generated': 0,
-            'group_contexts': 0,
-            'similar_contexts': 0,
-            'common_words_filtered': 0,
-            'unique_words_processed': 0
-        }
-        
-        # 收集该组中已翻译的文本作为参考
-        for ns, idx, item in group:
-            en_text = item.get("en", "").strip()
-            zh_text = item.get("zh", "").strip()
-            
-            if zh_text:
-                context_parts.append(f"{en_text} -> {zh_text}")
-                stats['group_contexts'] += 1
-        
-        # 生成当前批次待翻译文本的关键词集合
-        def generate_keywords_for_batch():
-            # 常用单词过滤列表（包含冠词、介词、系动词、助动词等高频基础词汇）
-            common_words = {
-                # 冠词
-                'the', 'a', 'an',
-                
-                # 系动词
-                'is', 'are', 'was', 'were', 'be', 'been', 'being',
-                
-                # 介词
-                'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'up', 'about',
-                'into', 'over', 'after', 'beneath', 'under', 'above', 'across', 'through',
-                'before', 'behind', 'between', 'around', 'near', 'off', 'out', 'down',
-                'along', 'among', 'against', 'amongst', 'during', 'except', 'following',
-                'like', 'minus', 'next', 'opposite', 'outside', 'plus', 'round', 'since',
-                'than', 'toward', 'towards', 'underneath', 'until', 'unto', 'upon', 'via',
-                
-                # 连接词
-                'as', 'but', 'and', 'or', 'nor', 'so', 'yet', 'if', 'because', 'since',
-                'when', 'while', 'where', 'who', 'which', 'that', 'what', 'how', 'why',
-                'whom', 'whose', 'whether', 'though', 'although', 'unless', 'until',
-                'whereas', 'while', 'whenever', 'wherever', 'whoever', 'whichever',
-                'whatever', 'however', 'moreover', 'furthermore', 'therefore', 'hence',
-                'thus', 'consequently', 'nevertheless', 'nonetheless', 'otherwise',
-                'instead', 'besides', 'though', 'although',
-                
-                # 代词
-                'these', 'those', 'this', 'that', 'my', 'your', 'his', 'her', 'its', 'our',
-                'their', 'we', 'you', 'they', 'he', 'she', 'it', 'i', 'me', 'us', 'them',
-                'mine', 'yours', 'his', 'hers', 'ours', 'theirs', 'myself', 'yourself',
-                'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves',
-                'one', 'ones', 'each', 'every', 'either', 'neither', 'both', 'all', 'some',
-                'any', 'none', 'much', 'many', 'few', 'little', 'several', 'enough',
-                'other', 'another',
-                
-                # 助动词和情态动词
-                'do', 'does', 'did', 'will', 'would', 'shall', 'should', 'can', 'could',
-                'may', 'might', 'must', 'have', 'has', 'had', 'not',
-                
-                # 限定词
-                'no', 'yes', 'all', 'both', 'each', 'every', 'few', 'many', 'more',
-                'most', 'some', 'such', 'any', 'little', 'much', 'enough', 'too',
-                'very', 'so', 'just', 'only', 'even', 'also',
-                
-                # 副词
-                'ever', 'never', 'now', 'then', 'here', 'there', 'up', 'down', 'in',
-                'out', 'away', 'still', 'again', 'further', 'once', 'always', 'usually',
-                'often', 'sometimes', 'rarely', 'seldom', 'never', 'already', 'yet',
-                'just', 'only', 'even', 'also', 'too', 'very', 'so', 'such', 'much',
-                'many', 'little', 'few', 'more', 'most', 'less', 'least', 'rather',
-                'quite', 'almost', 'nearly', 'hardly', 'scarcely', 'barely', 'just',
-                'exactly', 'precisely', 'definitely', 'certainly', 'absolutely',
-                'completely', 'totally', 'fully', 'partly', 'partially', 'mostly',
-                'mainly', 'chiefly', 'primarily', 'particularly', 'especially',
-                'specifically', 'exactly', 'directly', 'immediately', 'soon',
-                'quickly', 'slowly', 'carefully', 'easily', 'hard', 'well', 'badly',
-                'better', 'best', 'worse', 'worst',
-                
-                # 疑问词
-                'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
-                'whatever', 'whichever', 'whoever', 'whomever', 'wherever', 'whenever',
-                'however',
-                
-                # 其他常用词
-                'been', 'being', 'having', 'done', 'doing', 'going', 'get', 'got', 'getting',
-                'go', 'goes', 'went', 'gone', 'come', 'comes', 'came', 'coming', 'take',
-                'takes', 'took', 'taken', 'make', 'makes', 'made', 'making', 'give',
-                'gives', 'gave', 'given', 'use', 'uses', 'used', 'using', 'find',
-                'finds', 'found', 'look', 'looks', 'looked', 'looking', 'see', 'sees',
-                'saw', 'seen', 'watch', 'watches', 'watched', 'watching', 'read', 'reads',
-                'read', 'reading', 'write', 'writes', 'wrote', 'written', 'writing',
-                'speak', 'speaks', 'spoke', 'spoken', 'speaking', 'say', 'says', 'said',
-                'saying', 'tell', 'tells', 'told', 'telling', 'think', 'thinks', 'thought',
-                'thinking', 'know', 'knows', 'knew', 'known', 'knowing', 'understand',
-                'understands', 'understood', 'understanding', 'learn', 'learns', 'learned',
-                'learnt', 'learning', 'hear', 'hears', 'heard', 'hearing', 'listen',
-                'listens', 'listened', 'listening', 'feel', 'feels', 'felt', 'feeling',
-                'touch', 'touches', 'touched', 'touching', 'smell', 'smells', 'smelled',
-                'smelt', 'smelling', 'taste', 'tastes', 'tasted', 'tasting', 'start',
-                'starts', 'started', 'starting', 'stop', 'stops', 'stopped', 'stopping',
-                'begin', 'begins', 'began', 'begun', 'beginning', 'end', 'ends', 'ended',
-                'ending', 'continue', 'continues', 'continued', 'continuing', 'keep',
-                'keeps', 'kept', 'keeping', 'hold', 'holds', 'held', 'holding', 'carry',
-                'carries', 'carried', 'carrying', 'bring', 'brings', 'brought', 'bringing',
-                'take', 'takes', 'took', 'taken', 'taking', 'send', 'sends', 'sent',
-                'sending', 'receive', 'receives', 'received', 'receiving', 'give',
-                'gives', 'gave', 'given', 'giving', 'get', 'gets', 'got', 'gotten', 'getting',
-                'put', 'puts', 'put', 'putting', 'set', 'sets', 'set', 'setting', 'leave',
-                'leaves', 'left', 'leaving', 'stay', 'stays', 'stayed', 'staying', 'come',
-                'comes', 'came', 'coming', 'go', 'goes', 'went', 'gone', 'going', 'move',
-                'moves', 'moved', 'moving', 'walk', 'walks', 'walked', 'walking', 'run',
-                'runs', 'ran', 'running', 'jump', 'jumps', 'jumped', 'jumping', 'climb',
-                'climbs', 'climbed', 'climbing', 'swim', 'swims', 'swam', 'swum', 'swimming',
-                'fly', 'flies', 'flew', 'flown', 'flying', 'drive', 'drives', 'drove',
-                'driven', 'driving', 'ride', 'rides', 'rode', 'ridden', 'riding', 'travel',
-                'travels', 'traveled', 'travelled', 'traveling', 'travelling', 'arrive',
-                'arrives', 'arrived', 'arriving', 'reach', 'reaches', 'reached', 'reaching',
-                'leave', 'leaves', 'left', 'leaving', 'enter', 'enters', 'entered', 'entering',
-                'exit', 'exits', 'exited', 'exiting', 'open', 'opens', 'opened', 'opening',
-                'close', 'closes', 'closed', 'closing', 'turn', 'turns', 'turned', 'turning',
-                'on', 'off', 'up', 'down', 'in', 'out', 'over', 'under', 'around', 'through',
-                'across', 'between', 'among', 'along', 'behind', 'before', 'after', 'above',
-                'below', 'beneath', 'beside', 'next', 'near', 'far', 'away', 'here', 'there',
-                'now', 'then', 'soon', 'later', 'earlier', 'today', 'tomorrow', 'yesterday',
-                'morning', 'afternoon', 'evening', 'night', 'day', 'week', 'month', 'year',
-                'hour', 'minute', 'second', 'time', 'times', 'once', 'twice', 'again',
-                'more', 'most', 'less', 'least', 'better', 'best', 'worse', 'worst',
-                'good', 'bad', 'well', 'ill', 'nice', 'fine', 'great', 'small', 'big',
-                'large', 'little', 'much', 'many', 'few', 'several', 'some', 'any',
-                'all', 'both', 'each', 'every', 'either', 'neither', 'no', 'none',
-                'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-                'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
-                'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty', 'sixty',
-                'seventy', 'eighty', 'ninety', 'hundred', 'thousand', 'million', 'billion',
-                'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth',
-                'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth',
-                'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth',
-                'twentieth', 'thirtieth', 'fortieth', 'fiftieth', 'sixtieth', 'seventieth',
-                'eightieth', 'ninetieth', 'hundredth'
-            }
-            
-            # 提取当前批次待翻译文本
-            batch_texts = []
-            for ns, idx, item in group:
-                en_text = item.get("en", "").strip()
-                batch_texts.append(en_text)
-            
-            # 提取所有单词并去重
-            import re
-            all_words = set()
-            for text in batch_texts:
-                # 提取单词，转换为小写
-                words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
-                all_words.update(words)
-            
-            # 过滤常用单词
-            filtered_words = all_words - common_words
-            stats['common_words_filtered'] = len(all_words) - len(filtered_words)
-            stats['unique_words_processed'] = len(filtered_words)
-            
-            return filtered_words
-        
-        # 获取当前批次的关键词
-        batch_keywords = generate_keywords_for_batch()
-        
-        # 只有当存在关键词时才进行关联文本筛选
-        if batch_keywords:
-            # 查找关联的已翻译文本
-            seen_texts = set()
-            for ns, idx, item in group:
-                # 跳过已经处理过的文本
-                current_en = item.get("en", "").strip()
-                seen_texts.add(current_en)
-            
-            # 遍历所有已翻译文本，查找关联文本
-            import re
-            for en_text, zh_list in translated_texts.items():
-                if en_text in seen_texts:
-                    continue
-                
-                # 检查已翻译文本是否包含当前批次的任何关键词
-                en_text_lower = en_text.lower()
-                has_keyword = False
-                for keyword in batch_keywords:
-                    # 使用单词边界匹配，确保是完整单词
-                    if re.search(r'\b' + re.escape(keyword) + r'\b', en_text_lower):
-                        has_keyword = True
-                        break
-                
-                if has_keyword:
-                    # 添加关联文本作为参考
-                    for zh_text in zh_list:
-                        context_parts.append(f"关联文本参考: {en_text} -> {zh_text}")
-                        stats['similar_contexts'] += 1
-        
-        stats['total_contexts_generated'] = stats['group_contexts'] + stats['similar_contexts']
-
-        logging.info(
-            f"上下文统计 - 总上下文数: {stats['total_contexts_generated']} "
-            f"(分组上下文: {stats['group_contexts']}, "
-            f"相似上下文: {stats['similar_contexts']}), "
-            f"过滤常用词: {stats['common_words_filtered']}个, "
-            f"处理关键词: {stats['unique_words_processed']}个"
-        )
-        
-        if context_parts:
-            return "\n".join(context_parts)
-        return ""
-    
-
     
     def _adjust_prompt_for_mode(self, base_prompt, mode, context):
         """根据翻译模式调整提示词"""

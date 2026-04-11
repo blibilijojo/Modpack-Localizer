@@ -111,6 +111,7 @@ jobs:
           nuitka-version: main
           script-name: main.py
           mode: onefile
+          jobs: "-0"
           enable-plugins: tk-inter
           product-name: Modpack-Localizer-Pro
           product-version: ${{ steps.version.outputs.version }}

@@ -2,6 +2,8 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/blibilijojo/Modpack-Localizer)](https://github.com/blibilijojo/Modpack-Localizer/releases/latest)
 
+**软件及模组汉化交流 QQ 群：** `123742027`
+
 面向 **Minecraft 整合包 / 模组** 中文本地化场景的桌面工具：从 `mods` 或任务文件中抽取英文文本，按词典与规则做第一轮决策，在图形工作台中校对，并可调用 **兼容 OpenAI API** 的服务批量补译或润色，最后生成可直接使用的 **资源包**（目录或 zip）。
 
 当前界面版本号由 [`_version.py`](_version.py) 提供（例如 `2.7.0`）；通过 Git 标签触发发布构建时，工作流会覆写该文件以与标签一致。
@@ -159,11 +161,10 @@ Modpack-Localizer/
 
 ---
 
-## 相关链接与交流
+## 相关链接
 
 - **Issue**：<https://github.com/blibilijojo/Modpack-Localizer/issues>  
-- **仓库**：<https://github.com/blibilijojo/Modpack-Localizer>  
-- **软件及模组汉化交流 QQ 群**：`123742027`
+- **仓库**：<https://github.com/blibilijojo/Modpack-Localizer>
 
 ## 许可证
 

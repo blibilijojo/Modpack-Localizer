@@ -57,6 +57,10 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self._last_dragged_item = None
         self._processed_items = set()  # 跟踪本次拖拽中已处理的模组
         
+        # AI 翻译部分应用：线程与主线程共享的批次结果上下文
+        self._ai_apply_lock = threading.Lock()
+        self._ai_apply_context = None
+        
         # 初始化时显示默认选项面板
         self._on_operation_change()
         
@@ -381,8 +385,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-secondary", width=12)
         self.cancel_button.pack(side="right", padx=(10, 0))
         
+        self.apply_completed_ai_btn = ttk.Button(
+            button_container,
+            text="应用已完成",
+            command=self._on_apply_completed_ai_batches,
+            bootstyle="info-outline",
+            width=12,
+        )
+        
         self.start_button = ttk.Button(button_container, text="开始处理", command=self._on_start, bootstyle="success-outline", width=15)
-        self.start_button.pack(side="right", padx=5)
+        self.start_button.pack(side="right", padx=5, before=self.cancel_button)
         
         # 导入选项卡片（仅在导入操作时显示）
         self.import_options_frame = ttk.LabelFrame(self.operation_panel, text="导入选项")
@@ -963,6 +975,11 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         self.start_button.config(state="disabled")
         self.cancel_button.config(text="取消")
         
+        if operation != "ai_translate":
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
+            self._hide_ai_apply_completed_btn()
+        
         # 获取选中的模组
         selected_modules = self.workbench.ns_tree.selection()
         
@@ -1009,10 +1026,100 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self.workbench.mode_switch_btn.config(state="normal")
             # 记录取消完成
             self.workbench.log_callback("AI翻译任务已成功取消", "INFO")
+            self._refresh_ai_apply_completed_btn_visibility()
         else:
             # 因为现在是Frame组件，不需要destroy，只需要重置状态
             self.workbench.status_label.config(text="准备就绪")
             self.workbench.log_callback("准备就绪", "INFO")
+    
+    def _show_ai_apply_completed_btn(self):
+        if hasattr(self, "apply_completed_ai_btn") and self.apply_completed_ai_btn.winfo_exists():
+            if not self.apply_completed_ai_btn.winfo_ismapped():
+                self.apply_completed_ai_btn.pack(side="right", padx=5, before=self.cancel_button)
+    
+    def _hide_ai_apply_completed_btn(self):
+        if hasattr(self, "apply_completed_ai_btn") and self.apply_completed_ai_btn.winfo_exists():
+            if self.apply_completed_ai_btn.winfo_ismapped():
+                self.apply_completed_ai_btn.pack_forget()
+    
+    def _refresh_ai_apply_completed_btn_visibility(self):
+        if not hasattr(self, "apply_completed_ai_btn") or not self.apply_completed_ai_btn.winfo_exists():
+            return
+        has_done = False
+        with self._ai_apply_lock:
+            ctx = self._ai_apply_context
+            if ctx:
+                has_done = any(x is not None for x in ctx["translations_nested"])
+        if has_done:
+            self._show_ai_apply_completed_btn()
+        else:
+            self._hide_ai_apply_completed_btn()
+    
+    def _build_partial_ai_apply(self, ctx):
+        """从当前上下文收集所有已完成的批次，返回 (mapping, translations, applied_batch_indices)。"""
+        batches = ctx["batches"]
+        nested = ctx["translations_nested"]
+        mapping = ctx["all_item_mapping"]
+        partial_mapping = []
+        partial_translations = []
+        applied_batch_indices = []
+        offset = 0
+        for i, (batch_texts, _) in enumerate(batches):
+            n = len(batch_texts)
+            chunk = nested[i]
+            if chunk is None:
+                offset += n
+                continue
+            if len(chunk) != n:
+                logging.warning(
+                    "AI 批次 %s 返回条数与输入不一致（预期 %s，实际 %s），跳过该批次。",
+                    i + 1, n, len(chunk),
+                )
+                offset += n
+                continue
+            for j in range(n):
+                partial_mapping.append(mapping[offset + j])
+            partial_translations.extend(chunk)
+            applied_batch_indices.append(i)
+            offset += n
+        return partial_mapping, partial_translations, applied_batch_indices
+    
+    def _on_apply_completed_ai_batches(self):
+        """将当前已完成的 AI 翻译批次写入工作台；未完成的批次忽略。"""
+        with self._ai_apply_lock:
+            ctx = self._ai_apply_context
+            if not ctx:
+                built = None
+                translation_mode_snap = None
+                en_entries_snap = None
+            else:
+                built = self._build_partial_ai_apply(ctx)
+                translation_mode_snap = ctx["translation_mode"]
+                en_entries_snap = ctx["en_to_all_entries"]
+        if built is None:
+            messagebox.showinfo("提示", "当前没有可应用的 AI 翻译批次。", parent=self)
+            return
+        partial_mapping, partial_translations, applied_batch_indices = built
+        if not partial_translations:
+            messagebox.showinfo("提示", "当前没有已完成的翻译批次可应用。", parent=self)
+            return
+        self._update_translations(
+            partial_mapping,
+            partial_translations,
+            translation_mode_snap,
+            en_entries_snap,
+        )
+        with self._ai_apply_lock:
+            if self._ai_apply_context is ctx:
+                nested = ctx["translations_nested"]
+                for bi in applied_batch_indices:
+                    nested[bi] = None
+                if all(x is None for x in nested):
+                    self._ai_apply_context = None
+        self._refresh_ai_apply_completed_btn_visibility()
+        self.workbench.log_callback(
+            f"已应用 {len(applied_batch_indices)} 个已完成批次的翻译结果。", "SUCCESS"
+        )
     
     def _start_ai_translation(self, selected_modules):
         """开始AI翻译"""
@@ -1024,6 +1131,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             self.processing = False
             self.start_button.config(state="normal")
             self.cancel_button.config(text="取消")
+            self._hide_ai_apply_completed_btn()
             return
         
         self.workbench.status_label.config(text="正在准备AI翻译...")
@@ -1034,6 +1142,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
         
         # 更改取消按钮为红色
         self.cancel_button.config(bootstyle="danger")
+        self._hide_ai_apply_completed_btn()
         
         # 在工作线程中执行AI翻译
         threading.Thread(target=self._ai_translation_worker, args=(selected_modules,), daemon=True).start()
@@ -1041,6 +1150,8 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     def _ai_translation_worker(self, selected_modules):
         """AI翻译工作线程"""
         try:
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
             # 检查取消标志
             if not self.processing:
                 self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
@@ -1312,6 +1423,16 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             total_batches = len(batches)
             translations_nested = [None] * total_batches
             
+            with self._ai_apply_lock:
+                self._ai_apply_context = {
+                    "translations_nested": translations_nested,
+                    "batches": batches,
+                    "all_item_mapping": all_item_mapping,
+                    "translation_mode": translation_mode,
+                    "en_to_all_entries": en_to_all_entries,
+                }
+            self.after(0, self._show_ai_apply_completed_btn)
+            
             # 记录翻译设置
             mode_display = self.modes_reverse_values.get(translation_mode, translation_mode)
             logging.info(f"AI翻译设置 - 模式: {mode_display}, 批处理大小: {batch_size}")
@@ -1356,7 +1477,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                         break
                     
                     batch_idx = future_map[future]
-                    translations_nested[batch_idx] = future.result()
+                    batch_result = future.result()
+                    with self._ai_apply_lock:
+                        translations_nested[batch_idx] = batch_result
                     
                     # 更新状态
                     status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
@@ -1401,6 +1524,9 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                 raise ValueError(f"AI返回数量不匹配! 预期:{len(all_texts_to_translate)}, 实际:{len(translations)}")
             
             # 6. 更新翻译结果，同步到所有相同原文的条目
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
+            self.after(0, self._hide_ai_apply_completed_btn)
             self.after(0, lambda: self._update_translations(all_item_mapping, translations, translation_mode, en_to_all_entries))
             
         except Exception as e:
@@ -1421,6 +1547,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
                     self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
                 if hasattr(self, 'cancel_button') and self.cancel_button.winfo_exists():
                     self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
+                self.after(0, self._refresh_ai_apply_completed_btn_visibility)
     
     def _generate_translation_context(self, group, translated_texts):
         """为翻译组生成上下文，确保翻译风格一致性"""

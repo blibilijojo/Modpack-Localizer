@@ -9,6 +9,12 @@ from pathlib import Path
 from itertools import cycle
 from utils.error_logger import log_ai_error
 from datetime import datetime, timedelta
+
+
+class AIResponseNonStringValueError(ValueError):
+    """模型在 JSON 某键上返回了非字符串；交由 translate_batch 重试，而非原文回填。"""
+
+
 class KeyManager:
     def __init__(self, api_keys: list[str]):
         if not api_keys:
@@ -470,6 +476,8 @@ class AITranslator:
             logging.error(f"解析AI的JSON响应失败: {e}. 尝试解析的字符串是: '{processed_text}'")
             # 解析失败时返回原文
             return original_batch
+        except AIResponseNonStringValueError:
+            raise
         except Exception as e:
             logging.error(f"解析AI响应时发生未知错误: {e}")
             # 发生未知错误时返回原文
@@ -601,8 +609,16 @@ class AITranslator:
             for key, value in data.items():
                 try:
                     index = int(key)
-                    if 0 <= index < expected_length and isinstance(value, str):
-                        reconstructed_list[index] = value.replace('\n', '\\n')
+                    if 0 <= index < expected_length:
+                        if isinstance(value, str):
+                            reconstructed_list[index] = value.replace('\n', '\\n')
+                        else:
+                            logging.warning(
+                                f"AI响应条目数量不匹配且键'{key}'为非字符串类型({type(value).__name__})，将重试批次。"
+                            )
+                            raise AIResponseNonStringValueError(
+                                f"键 {key!r} 的翻译值为非字符串类型: {type(value).__name__}"
+                            )
                 except (ValueError, TypeError):
                     pass
             return reconstructed_list
@@ -616,9 +632,12 @@ class AITranslator:
                         # 将实际换行符转换为转义形式，确保在界面上正确显示
                         reconstructed_list[index] = value.replace('\n', '\\n')
                     else:
-                        logging.warning(f"AI为键'{key}'返回了非字符串类型的值，将使用原文回填。")
-                        # 对于非字符串值，使用原文
-                        reconstructed_list[index] = original_batch[index]
+                        logging.warning(
+                            f"AI为键'{key}'返回了非字符串类型的值({type(value).__name__})，将重试本批次。"
+                        )
+                        raise AIResponseNonStringValueError(
+                            f"键 {key!r} 的翻译值为非字符串类型: {type(value).__name__}"
+                        )
             except (ValueError, TypeError):
                 logging.warning(f"AI返回了无效的键'{key}'，已忽略。")
         

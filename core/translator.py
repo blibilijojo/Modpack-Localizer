@@ -4,7 +4,7 @@ from functools import lru_cache
 from packaging.version import parse as parse_version
 import re
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .models import (
@@ -188,6 +188,154 @@ class Translator:
         
         return ns_result
     
+    def _get_entries_to_translate(self, namespace: str, english_entries: Dict[str, LanguageEntry], existing_translations: Dict[str, LanguageEntry], update_existing: bool) -> Dict[str, LanguageEntry]:
+        """获取需要翻译的条目"""
+        entries_to_translate = {}
+        
+        for key, entry in english_entries.items():
+            if key.startswith('_comment'):
+                continue
+            
+            # 检查是否需要翻译
+            if update_existing:
+                # 更新模式：所有条目都需要检查
+                entries_to_translate[key] = entry
+            else:
+                # 新增模式：只翻译不存在的条目
+                if key not in existing_translations:
+                    entries_to_translate[key] = entry
+        
+        return entries_to_translate
+    
+    def _batch_translate(self, entries: Dict[str, LanguageEntry], batch_size: int = 20) -> Dict[str, str]:
+        """批量翻译条目"""
+        # 这里需要集成 AI 翻译服务
+        # 暂时返回空结果，实际实现需要调用翻译 API
+        return {}
+    
+    def _process_namespace_with_incremental(
+        self, 
+        namespace: str, 
+        english_entries: Dict[str, LanguageEntry],
+        existing_translations: Dict[str, LanguageEntry],
+        user_dict_by_key: Dict[str, str],
+        user_dict_by_origin: Dict[str, str],
+        community_dict_by_key: Dict[str, str],
+        community_dict_by_origin: Dict[str, List[Dict]],
+        internal_chinese: Dict[str, LanguageEntry],
+        pack_chinese_dict: Dict[str, str],
+        settings: Dict,
+        namespace_info: NamespaceInfo,
+        update_existing: bool,
+        dictionary_manager=None
+    ) -> Dict[str, LanguageEntry]:
+        """处理单个命名空间的翻译（支持增量更新）"""
+        # 获取需要翻译的条目
+        entries_to_translate = self._get_entries_to_translate(
+            namespace, english_entries, existing_translations, update_existing
+        )
+        
+        # 如果有需要翻译的条目，进行批量翻译
+        if entries_to_translate:
+            logging.info(f"命名空间 {namespace} 有 {len(entries_to_translate)} 个条目需要翻译")
+            # 这里可以调用批量翻译方法
+            # translated_entries = self._batch_translate(entries_to_translate)
+        
+        # 处理所有条目
+        ns_result = {}
+        ordered_keys = list(english_entries.keys())
+        
+        # 预计算设置值
+        use_community_dict_key = settings.get('use_community_dict_key', True)
+        use_community_dict_origin = settings.get('use_community_dict_origin', True)
+        
+        # 预计算常用词典的存在性
+        has_user_dict_key = bool(user_dict_by_key)
+        has_user_dict_origin = bool(user_dict_by_origin)
+        has_community_dict_key = bool(community_dict_by_key)
+        has_community_dict_origin = bool(community_dict_by_origin)
+        has_pack_chinese_dict = bool(pack_chinese_dict)
+        
+        for key in ordered_keys:
+            english_entry = english_entries.get(key)
+            if not english_entry:
+                continue
+            
+            english_value = english_entry.en
+            translation = None
+            source = None
+            
+            # 检查是否已有翻译
+            if key in existing_translations and not update_existing:
+                existing_entry = existing_translations[key]
+                translation = existing_entry.zh
+                source = existing_entry.source
+            else:
+                if key.startswith('_comment'):
+                    # 处理带序号的 _comment 键
+                    if key in internal_chinese:
+                        translation = internal_chinese[key].zh
+                        source = "模组自带"
+                    else:
+                        # 如果没有对应的中文，保持为空
+                        translation = ""
+                        source = "待翻译"
+                else:
+                    # 按照优先级顺序：原文复制 → 模组自带 → 个人词典 → 第三方汉化包 → 社区词典
+                    
+                    # 1. 非英文内容直接保留（原文复制）
+                    if self._is_valid_translation(english_value):
+                        translation = english_value
+                        source = "原文复制"
+                    # 2. 模组自带中文
+                    elif key in internal_chinese:
+                        translation = internal_chinese[key].zh
+                        source = "模组自带"
+                    # 3. 个人词典（Key 优先）
+                    elif has_user_dict_key and key in user_dict_by_key:
+                        translation = user_dict_by_key[key]
+                        source = "个人词典 [Key]"
+                    elif has_user_dict_origin and english_value in user_dict_by_origin:
+                        translation = user_dict_by_origin[english_value]
+                        source = "个人词典 [原文]"
+                    # 4. 第三方汉化包
+                    elif has_pack_chinese_dict and key in pack_chinese_dict:
+                        translation = pack_chinese_dict[key]
+                        source = "第三方汉化包"
+                    # 5. 社区词典 [Key]
+                    elif use_community_dict_key and has_community_dict_key and key in community_dict_by_key:
+                        translation = community_dict_by_key[key]
+                        source = "社区词典 [Key]"
+                    # 6. 社区词典 [原文]
+                    elif use_community_dict_origin and has_community_dict_origin and english_value in community_dict_by_origin:
+                        if dictionary_manager:
+                            # 使用词典管理器的全局缓存机制
+                            best_translation = dictionary_manager.get_community_origin_translation(english_value)
+                            if best_translation:
+                                translation = best_translation
+                                source = "社区词典 [原文]"
+                        else:
+                            candidates = community_dict_by_origin[english_value]
+                            best_translation = self._resolve_origin_name_conflict(candidates)
+                            if best_translation:
+                                translation = best_translation
+                                source = "社区词典 [原文]"
+            
+            # 验证翻译有效性
+            if source != "原文复制" and not self._is_valid_translation(translation):
+                translation = ""
+                source = "待翻译"
+            
+            ns_result[key] = LanguageEntry(
+                key=key,
+                en=english_value,
+                zh=translation,
+                source=source,
+                namespace=namespace
+            )
+        
+        return ns_result
+    
     def run(
         self, 
         extraction_result: ExtractionResult,
@@ -195,7 +343,9 @@ class Translator:
         community_dict_by_key: Dict[str, str],
         community_dict_by_origin: Dict[str, List[Dict]],
         settings: Dict,
-        dictionary_manager=None
+        dictionary_manager=None,
+        existing_translations: Optional[Dict[str, Dict[str, LanguageEntry]]] = None,
+        update_existing: bool = False
     ) -> TranslationResult:
         """执行翻译决策流程"""
         logging.info("--- 阶段 2: 执行翻译决策逻辑 ---")
@@ -216,21 +366,28 @@ class Translator:
             for namespace, english_entries in namespaces:
                 namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
                 internal_chinese = extraction_result.internal_chinese.get(namespace, {})
+                existing_ns_translations = existing_translations.get(namespace, {}) if existing_translations else {}
                 
                 # 处理命名空间翻译
-                ns_result = self._process_namespace(
-                    namespace=namespace,
-                    english_entries=english_entries,
-                    user_dict_by_key=user_dict_by_key,
-                    user_dict_by_origin=user_dict_by_origin,
-                    community_dict_by_key=community_dict_by_key,
-                    community_dict_by_origin=community_dict_by_origin,
-                    internal_chinese=internal_chinese,
-                    pack_chinese_dict=extraction_result.pack_chinese,
-                    settings=settings,
-                    namespace_info=namespace_info,
-                    dictionary_manager=dictionary_manager
-                )
+                if update_existing or not existing_ns_translations:
+                    ns_result = self._process_namespace_with_incremental(
+                        namespace=namespace,
+                        english_entries=english_entries,
+                        existing_translations=existing_ns_translations,
+                        user_dict_by_key=user_dict_by_key,
+                        user_dict_by_origin=user_dict_by_origin,
+                        community_dict_by_key=community_dict_by_key,
+                        community_dict_by_origin=community_dict_by_origin,
+                        internal_chinese=internal_chinese,
+                        pack_chinese_dict=extraction_result.pack_chinese,
+                        settings=settings,
+                        namespace_info=namespace_info,
+                        update_existing=update_existing,
+                        dictionary_manager=dictionary_manager
+                    )
+                else:
+                    # 不需要更新，直接使用现有翻译
+                    ns_result = existing_ns_translations
                 
                 workbench_data[namespace] = ns_result
                 
@@ -248,20 +405,27 @@ class Translator:
             def process_namespace_task(namespace, english_entries):
                 namespace_info = extraction_result.namespace_info.get(namespace, NamespaceInfo(name=namespace))
                 internal_chinese = extraction_result.internal_chinese.get(namespace, {})
+                existing_ns_translations = existing_translations.get(namespace, {}) if existing_translations else {}
                 
-                return namespace, self._process_namespace(
-                    namespace=namespace,
-                    english_entries=english_entries,
-                    user_dict_by_key=user_dict_by_key,
-                    user_dict_by_origin=user_dict_by_origin,
-                    community_dict_by_key=community_dict_by_key,
-                    community_dict_by_origin=community_dict_by_origin,
-                    internal_chinese=internal_chinese,
-                    pack_chinese_dict=extraction_result.pack_chinese,
-                    settings=settings,
-                    namespace_info=namespace_info,
-                    dictionary_manager=dictionary_manager
-                )
+                if update_existing or not existing_ns_translations:
+                    return namespace, self._process_namespace_with_incremental(
+                        namespace=namespace,
+                        english_entries=english_entries,
+                        existing_translations=existing_ns_translations,
+                        user_dict_by_key=user_dict_by_key,
+                        user_dict_by_origin=user_dict_by_origin,
+                        community_dict_by_key=community_dict_by_key,
+                        community_dict_by_origin=community_dict_by_origin,
+                        internal_chinese=internal_chinese,
+                        pack_chinese_dict=extraction_result.pack_chinese,
+                        settings=settings,
+                        namespace_info=namespace_info,
+                        update_existing=update_existing,
+                        dictionary_manager=dictionary_manager
+                    )
+                else:
+                    # 不需要更新，直接使用现有翻译
+                    return namespace, existing_ns_translations
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # 提交所有任务

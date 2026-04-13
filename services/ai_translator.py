@@ -6,10 +6,39 @@ import threading
 import queue
 import asyncio
 from collections.abc import Callable
+from collections import OrderedDict
 from pathlib import Path
 from itertools import cycle
 from utils.error_logger import log_ai_error
 from datetime import datetime, timedelta
+
+
+class LRUCache:
+    """LRU缓存实现"""
+    
+    def __init__(self, max_size: int = 10000):
+        self.max_size = max_size
+        self._cache = OrderedDict()
+    
+    def get(self, key):
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)
+        return self._cache[key]
+    
+    def put(self, key, value):
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self.max_size:
+                self._cache.popitem(last=False)
+        self._cache[key] = value
+    
+    def clear(self):
+        self._cache.clear()
+    
+    def __len__(self):
+        return len(self._cache)
 
 
 class AIResponseNonStringValueError(ValueError):
@@ -75,7 +104,7 @@ class KeyManager:
             self.cooldown_keys[key] = cooldown_end_time
             logging.warning(f"密钥 ...{key[-4:]} 调用失败，将被冷却 {cooldown_seconds} 秒。")
 class AITranslator:
-    def __init__(self, api_services: list[dict] = None, cache_ttl=3600):
+    def __init__(self, api_services: list[dict] = None, cache_ttl=3600, max_cache_size=10000):
         # 处理api_services参数
         self.api_services = api_services or []
         
@@ -95,8 +124,8 @@ class AITranslator:
         
         self.key_manager = KeyManager(all_keys)
         self.all_keys = all_keys
-        # 初始化翻译缓存，用于存储已翻译的文本
-        self.translation_cache = {}
+        # 初始化翻译缓存，使用LRU缓存
+        self.translation_cache = LRUCache(max_cache_size)
         # 缓存过期时间（秒）
         self.cache_ttl = cache_ttl
         # 缓存锁，确保线程安全
@@ -109,7 +138,7 @@ class AITranslator:
         # 记录初始化信息
         service_count = len(self.api_services)
         total_keys = len(all_keys)
-        logging.info(f"翻译器已初始化。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒")
+        logging.info(f"翻译器已初始化。服务数量: {service_count}, 密钥总数: {total_keys}, 缓存TTL: {cache_ttl}秒, 缓存最大条目: {max_cache_size}")
 
     def describe_effective_models(self, request_model: str | None) -> str:
         """
@@ -220,16 +249,25 @@ class AITranslator:
         """
         with self.cache_lock:
             current_time = time.time()
-            expired_keys = []
-            for key, (translation, timestamp) in self.translation_cache.items():
-                if current_time - timestamp > self.cache_ttl:
-                    expired_keys.append(key)
+            # 收集所有未过期的条目
+            valid_entries = []
+            keys_to_check = list(self.translation_cache._cache.keys())
             
-            for key in expired_keys:
-                del self.translation_cache[key]
+            for key in keys_to_check:
+                cached_value = self.translation_cache.get(key)
+                if cached_value is not None:
+                    translation, timestamp = cached_value
+                    if current_time - timestamp <= self.cache_ttl:
+                        valid_entries.append((key, (translation, timestamp)))
             
-            if expired_keys:
-                logging.debug(f"清理了 {len(expired_keys)} 个过期的缓存项")
+            # 重建缓存，只保留未过期的条目
+            self.translation_cache.clear()
+            for key, value in valid_entries:
+                self.translation_cache.put(key, value)
+            
+            expired_count = len(keys_to_check) - len(valid_entries)
+            if expired_count > 0:
+                logging.debug(f"清理了 {expired_count} 个过期的缓存项")
     
     def _get_cached_translation(self, text):
         """
@@ -242,16 +280,17 @@ class AITranslator:
             翻译结果，如果缓存中不存在或已过期则返回None
         """
         with self.cache_lock:
-            self._cleanup_cache()  # 先清理过期缓存
-            if text in self.translation_cache:
-                translation, timestamp = self.translation_cache[text]
+            cached_value = self.translation_cache.get(text)
+            if cached_value is not None:
+                translation, timestamp = cached_value
                 # 检查是否过期
                 if time.time() - timestamp <= self.cache_ttl:
-                    logging.debug(f"从缓存中获取翻译结果: {text}")
+                    logging.debug(f"从缓存中获取翻译结果")
                     return translation
                 else:
                     # 过期了，删除缓存项
-                    del self.translation_cache[text]
+                    # LRUCache会自动处理，但我们不做额外处理
+                    pass
             return None
     
     def _cache_translation(self, text, translation):
@@ -263,8 +302,8 @@ class AITranslator:
             translation: 翻译结果
         """
         with self.cache_lock:
-            self.translation_cache[text] = (translation, time.time())
-            logging.debug(f"缓存翻译结果: {text} → {translation}")
+            self.translation_cache.put(text, (translation, time.time()))
+            logging.debug(f"缓存翻译结果")
 
     def _normalize_batch_entry(self, entry):
         """

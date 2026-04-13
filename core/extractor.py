@@ -12,11 +12,16 @@ from typing import Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 from utils import file_utils, config_manager, mod_scan_cache
 from utils.retry_logic import api_retry
+from utils.lang_file_utils import (
+    extract_from_json_text,
+    extract_from_lang_text
+)
 
 from core.models import (
     LanguageEntry, NamespaceInfo, ExtractionResult,
     DictionaryEntry
 )
+
 
 def is_json_content(content: str) -> bool:
     """检查内容是否为JSON格式"""
@@ -26,9 +31,11 @@ def is_json_content(content: str) -> bool:
     except json.JSONDecodeError:
         return False
 
+
 def is_toml_content(content: str) -> bool:
     """检查内容是否为TOML格式"""
     return 'displayName' in content and ('=' in content or ':=' in content)
+
 
 def _curseforge_fingerprint_from_jar_bytes(file_data: bytes) -> str:
     """CurseForge 风格 MurmurHash2（与空白过滤规则与原先 process_jar_worker 一致）"""
@@ -156,57 +163,22 @@ def process_jar_worker(jar_path_str):
     except Exception:
         return jar_file.name, jar_file.stem, "", "", ""
 
+
 class Extractor:
     """语言数据提取器"""
     
     def __init__(self):
-        # 保持原有正则表达式规则不变
-        self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
-        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"([^"]+)":\s*"((?:\\.|[^\\"])*)"', re.DOTALL)
         # 模组信息缓存，键为文件路径，值为(mod_name, curseforge_hash, modrinth_hash, game_version)
         self._mod_info_cache = {}
         self._mod_info_cache_lock = threading.Lock()
     
     def _extract_from_text(self, content: str, file_format: str, file_path_for_log: str) -> Dict[str, str]:
         """从文本内容中提取语言数据"""
-        data = {}
-        comment_counter = 0
         if file_format == 'json':
-            # 始终使用正则表达式解析 JSON 文件
-            for match in self.JSON_KEY_VALUE_PATTERN.finditer(content):
-                key = match.group(1)
-                value = match.group(2)
-                # 处理 Unicode 转义序列（如\u963f），但保留\n等转义字符
-                import re
-                # 先将\n、\t等常见转义字符暂时替换为占位符
-                temp_value = value.replace('\\n', '__NEWLINE__')
-                temp_value = temp_value.replace('\\t', '__TAB__')
-                temp_value = temp_value.replace('\\r', '__CARRIAGE__')
-                # 处理 Unicode 转义序列
-                temp_value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), temp_value)
-                # 恢复占位符为原始转义字符
-                temp_value = temp_value.replace('__NEWLINE__', '\\n')
-                temp_value = temp_value.replace('__TAB__', '\\t')
-                temp_value = temp_value.replace('__CARRIAGE__', '\\r')
-                # 处理引号，将 \" 替换为 "
-                temp_value = temp_value.replace('\\"', '"')
-                # 处理 _comment 条目，为每个 _comment 添加序号
-                if key == '_comment':
-                    comment_counter += 1
-                    data[f'_comment_{comment_counter}'] = temp_value
-                else:
-                    data[key] = temp_value
+            return extract_from_json_text(content)
         elif file_format == 'lang':
-            for match in self.LANG_KV_PATTERN.finditer(content):
-                key = match.group(1)
-                value = match.group(2).strip()
-                # 处理 _comment 条目，为每个 _comment 添加序号
-                if key == '_comment':
-                    comment_counter += 1
-                    data[f'_comment_{comment_counter}'] = value
-                else:
-                    data[key] = value
-        return data
+            return extract_from_lang_text(content)
+        return {}
     
     def _get_namespace_from_path(self, path_str: str) -> str:
         """从文件路径中获取命名空间"""
@@ -440,8 +412,7 @@ class Extractor:
         return final_pack_chinese_dict
 
     def _extract_mod_info(self, jar_file: Path) -> tuple[str, str, str, str]:
-        """从JAR文件中提取Mod信息（优化版本）"""
-        # 检查缓存
+        """从JAR文件中提取Mod信息"""
         try:
             stat = jar_file.stat()
             cache_key = (str(jar_file), stat.st_mtime, stat.st_size)
@@ -451,155 +422,21 @@ class Extractor:
                     return self._mod_info_cache[cache_key]
         except Exception:
             cache_key = None
-        
-        mod_name = ""
-        curseforge_hash = ""
-        modrinth_hash = ""
-        game_version = ""
 
         try:
-            # 一次性读取整个文件内容
             with open(jar_file, 'rb') as f:
                 file_data = f.read()
             
-            # 计算SHA1哈希（Modrinth）
-            sha1_hash = hashlib.sha1()
-            sha1_hash.update(file_data)
-            modrinth_hash = sha1_hash.hexdigest()
+            jar_name, mod_name, curseforge_hash, modrinth_hash, game_version = _jar_mod_fingerprints_and_meta(jar_file, file_data)
             
-            # 计算MurmurHash2哈希（CurseForge）
-            # 过滤空白字符（制表符、换行符、回车符和空格）
-            filtered_data = bytes([b for b in file_data if b not in (9, 10, 13, 32)])
+            if game_version:
+                logging.info(f"从JAR文件提取到游戏版本: {game_version} (文件: {jar_file.name})")
             
-            length = len(filtered_data)
-            if length > 0:
-                seed = 1
-                m = 0x5BD1E995
-                r = 24
-                
-                h = seed ^ length
-                
-                # 处理4字节块
-                for i in range(0, length - (length % 4), 4):
-                    k = filtered_data[i] | (filtered_data[i+1] << 8) | (filtered_data[i+2] << 16) | (filtered_data[i+3] << 24)
-                    k = (k * m) & 0xFFFFFFFF
-                    k = (k ^ (k >> r)) & 0xFFFFFFFF
-                    k = (k * m) & 0xFFFFFFFF
-                    
-                    h = (h * m) & 0xFFFFFFFF
-                    h = (h ^ k) & 0xFFFFFFFF
-                
-                # 处理剩余字节
-                remaining = length % 4
-                if remaining > 0:
-                    pos = length - remaining
-                    if remaining == 3:
-                        h = (h ^ (filtered_data[pos + 2] << 16)) & 0xFFFFFFFF
-                    if remaining >= 2:
-                        h = (h ^ (filtered_data[pos + 1] << 8)) & 0xFFFFFFFF
-                    if remaining >= 1:
-                        h = (h ^ filtered_data[pos]) & 0xFFFFFFFF
-                        h = (h * m) & 0xFFFFFFFF
-                
-                h = (h ^ (h >> 13)) & 0xFFFFFFFF
-                h = (h * m) & 0xFFFFFFFF
-                h = (h ^ (h >> 15)) & 0xFFFFFFFF
-                
-                curseforge_hash = str(h)
-            else:
-                curseforge_hash = "0"
-
-            # 使用内存中的数据创建ZipFile对象
-            with zipfile.ZipFile(io.BytesIO(file_data), 'r') as zf:
-                # 尝试从mcmod.info提取
-                if 'mcmod.info' in zf.namelist():
-                    try:
-                        with zf.open('mcmod.info') as f:
-                            content = f.read().decode('utf-8-sig')
-                            if is_json_content(content):
-                                data = json.loads(content)
-                                if isinstance(data, list) and data:
-                                    mod_info = data[0]
-                                    if 'name' in mod_info:
-                                        mod_name = mod_info['name']
-                                    if 'mcversion' in mod_info:
-                                        game_version = mod_info['mcversion']
-                                elif isinstance(data, dict) and 'modList' in data:
-                                    mod_list = data['modList']
-                                    if isinstance(mod_list, list) and mod_list:
-                                        mod_info = mod_list[0]
-                                        if 'name' in mod_info:
-                                            mod_name = mod_info['name']
-                                        if 'mcversion' in mod_info:
-                                            game_version = mod_info['mcversion']
-                    except Exception as e:
-                        logging.debug(f"读取mcmod.info失败: {e}")
-
-                # 尝试从fabric.mod.json提取
-                if 'fabric.mod.json' in zf.namelist():
-                    try:
-                        with zf.open('fabric.mod.json') as f:
-                            content = f.read().decode('utf-8-sig')
-                            if is_json_content(content):
-                                data = json.loads(content)
-                                if not mod_name and 'name' in data:
-                                    mod_name = data['name']
-                                if not game_version:
-                                    if 'dependencies' in data and 'minecraft' in data['dependencies']:
-                                        game_version = data['dependencies']['minecraft']
-                                    elif 'contact' in data and 'minecraft' in data.get('contact', {}):
-                                        game_version = data['contact']['minecraft']
-                    except Exception as e:
-                        logging.debug(f"读取fabric.mod.json失败: {e}")
-
-                # 尝试从mods.toml提取
-                if 'META-INF/mods.toml' in zf.namelist():
-                    try:
-                        with zf.open('META-INF/mods.toml') as f:
-                            content = f.read().decode('utf-8-sig')
-                            lines = content.split('\n')
-                            in_dependencies = False
-                            for i, line in enumerate(lines):
-                                line_stripped = line.strip()
-                                if not mod_name and (line_stripped.startswith('displayName') or line_stripped.startswith('name')):
-                                    if '=' in line_stripped:
-                                        value = line_stripped.split('=', 1)[1].strip()
-                                        value = value.strip('"'"'"'')
-                                        mod_name = value
-                                if not game_version:
-                                    if '[[dependencies' in line:
-                                        in_dependencies = True
-                                    elif in_dependencies and 'minecraft' in line_stripped.lower() and '=' in line_stripped:
-                                        value = line_stripped.split('=', 1)[1].strip()
-                                        value = value.strip('"'"'"'')
-                                        if self._is_version_string(value):
-                                            game_version = value
-                                        elif value.startswith('>=') or value.startswith('>'):
-                                            match = re.search(r'(\d+\.\d+(?:\.\d+)?)', value)
-                                            if match:
-                                                game_version = match.group(1)
-                                    elif ']]' in line:
-                                        in_dependencies = False
-                    except Exception as e:
-                        logging.debug(f"读取mods.toml失败: {e}")
-
-                # 如果没有找到名称，使用文件名
-                if not mod_name:
-                    mod_name = jar_file.stem
-                    for suffix in ['.jar', '.zip', '.litemod']:
-                        if mod_name.endswith(suffix):
-                            mod_name = mod_name[:-len(suffix)]
-                    mod_name = mod_name.replace('.disabled', '').replace('.old', '')
-
+            result = (mod_name, curseforge_hash, modrinth_hash, game_version)
         except Exception as e:
             logging.error(f"提取Mod信息失败: {e}")
-            mod_name = jar_file.stem
-
-        if game_version:
-            logging.info(f"从JAR文件提取到游戏版本: {game_version} (文件: {jar_file.name})")
+            result = (jar_file.stem, "", "", "")
         
-        # 存储到缓存
-        result = (mod_name, curseforge_hash, modrinth_hash, game_version)
         if cache_key:
             with self._mod_info_cache_lock:
                 self._mod_info_cache[cache_key] = result

@@ -1,5 +1,4 @@
 import logging
-import re
 from pathlib import Path
 from typing import Dict, Optional
 import tempfile
@@ -8,6 +7,10 @@ import zipfile
 import os
 import json
 
+from utils.lang_file_utils import (
+    build_json_file_with_translations,
+    build_lang_file_with_translations
+)
 from .models import (
     TranslationResult, ExtractionResult, NamespaceInfo,
     PackSettings
@@ -17,142 +20,15 @@ class Builder:
     """资源包构建器"""
     
     def __init__(self):
-        # 保持原有正则表达式规则不变
-        self.JSON_KEY_VALUE_PATTERN = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', re.DOTALL)
-        self.LANG_KV_PATTERN = re.compile(r"^\s*([^#=\s]+)\s*=\s*(.*)", re.MULTILINE)
+        pass
     
     def _build_json_file(self, template_content: str, translations: Dict[str, str]) -> str:
-        """
-        基于正则表达式的JSON语言文件逆向生成
-        """
-        # 提取模板中的所有键值对信息
-        key_info = []
-        for match in self.JSON_KEY_VALUE_PATTERN.finditer(template_content):
-            key = match.group(1)
-            original_value = match.group(2)
-            start, end = match.span()
-            key_info.append({
-                'key': key,
-                'original_value': original_value,
-                'start': start,
-                'end': end,
-                'full_match': match.group(0)
-            })
-        
-        # 按出现顺序排序
-        key_info.sort(key=lambda x: x['start'])
-        
-        # 构建输出内容，保留原始格式
-        output = []
-        current_pos = 0
-        comment_counter = 0
-        
-        for info in key_info:
-            # 添加匹配前的内容
-            output.append(template_content[current_pos:info['start']])
-            
-            # 替换值
-            if info['key'] == '_comment':
-                # 对于 _comment 键，查找对应的带有计数器后缀的键
-                comment_counter += 1
-                translated_key = f'_comment_{comment_counter}'
-                if translated_key in translations:
-                    translated_value = translations[translated_key].replace('"', '\\"')
-                    # 保持原始键的格式，只替换值
-                    output.append(f'"{info["key"]}":"{translated_value}"')
-                else:
-                    # 保留原始值
-                    output.append(info['full_match'])
-            elif info['key'] in translations:
-                translated_value = translations[info['key']].replace('"', '\\"')
-                # 保持原始键的格式，只替换值
-                output.append(f'"{info["key"]}":"{translated_value}"')
-            else:
-                # 保留原始值
-                output.append(info['full_match'])
-            
-            current_pos = info['end']
-        
-        # 添加剩余内容
-        output.append(template_content[current_pos:])
-        
-        # 确保返回的字符串只使用\n换行符
-        result = ''.join(output)
-        return result.replace('\r\n', '\n').replace('\r', '\n')
+        """基于正则表达式的JSON语言文件逆向生成"""
+        return build_json_file_with_translations(template_content, translations)
     
     def _build_lang_file(self, template_content: str, translations: Dict[str, str]) -> str:
-        """
-        基于正则表达式的lang语言文件逆向生成
-        """
-        # 提取模板中的所有键值对信息
-        key_info = []
-        for match in self.LANG_KV_PATTERN.finditer(template_content):
-            key = match.group(1)
-            original_value = match.group(2)
-            start, end = match.span()
-            
-            # 获取行首空格
-            line_start = template_content.rfind('\n', 0, start)
-            if line_start == -1:
-                line_start = 0
-            else:
-                line_start += 1
-            
-            indent = template_content[line_start:start].split('\n')[-1]
-            
-            key_info.append({
-                'key': key,
-                'original_value': original_value,
-                'start': start,
-                'end': end,
-                'full_match': match.group(0),
-                'indent': indent
-            })
-        
-        # 按出现顺序排序
-        key_info.sort(key=lambda x: x['start'])
-        
-        # 构建输出内容，保留原始格式
-        output = []
-        current_pos = 0
-        comment_counter = 0
-        
-        for info in key_info:
-            # 添加匹配前的内容
-            output.append(template_content[current_pos:info['start']])
-            
-            # 替换值
-            if info['key'] == '_comment':
-                # 对于 _comment 键，查找对应的带有计数器后缀的键
-                comment_counter += 1
-                translated_key = f'_comment_{comment_counter}'
-                if translated_key in translations:
-                    translated_value = translations[translated_key]
-                    # 处理引号，将 " 替换为 \"
-                    translated_value = translated_value.replace('"', '\\"')
-                    # 保持原始缩进和键的格式，只替换值
-                    output.append(f'{info["indent"]}{info["key"]} = {translated_value}')
-                else:
-                    # 保留原始值
-                    output.append(info['full_match'])
-            elif info['key'] in translations:
-                translated_value = translations[info['key']]
-                # 处理引号，将 " 替换为 \"
-                translated_value = translated_value.replace('"', '\\"')
-                # 保持原始缩进和键的格式，只替换值
-                output.append(f'{info["indent"]}{info["key"]} = {translated_value}')
-            else:
-                # 保留原始值
-                output.append(info['full_match'])
-            
-            current_pos = info['end']
-        
-        # 添加剩余内容
-        output.append(template_content[current_pos:])
-        
-        # 确保返回的字符串只使用\n换行符
-        result = ''.join(output)
-        return result.replace('\r\n', '\n').replace('\r', '\n')
+        """基于正则表达式的lang语言文件逆向生成"""
+        return build_lang_file_with_translations(template_content, translations)
     
     def _build_json_file_robust(self, template_content: str, translations: Dict[str, str]) -> str:
         """

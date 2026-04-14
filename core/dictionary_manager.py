@@ -1,19 +1,50 @@
 import logging
 from pathlib import Path
 import sqlite3
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from typing import Any
 from utils import config_manager
+
+
+class LRUCache:
+    """LRU缓存实现"""
+    
+    def __init__(self, max_size: int = 10000):
+        self.max_size = max_size
+        self._cache = OrderedDict()
+        self._lock = None
+    
+    def get(self, key: Any) -> Any:
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)
+        return self._cache[key]
+    
+    def put(self, key: Any, value: Any) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self.max_size:
+                self._cache.popitem(last=False)
+        self._cache[key] = value
+    
+    def clear(self) -> None:
+        self._cache.clear()
+    
+    def __len__(self) -> int:
+        return len(self._cache)
+
 
 class DictionaryManager:
     """词典管理模块，集中处理词典加载和管理功能"""
     
-    def __init__(self):
+    def __init__(self, max_cache_size: int = 10000):
         self.user_dict = None
         self.community_dict_by_key = None
         self.community_dict_by_origin = None
         self._cache = {}  # 存储词典加载结果的缓存
-        self._community_origin_cache = {}  # 存储社区词典原文翻译的缓存
-        self._user_dict_cache = {}  # 存储用户词典查询结果的缓存
+        self._community_origin_cache = LRUCache(max_cache_size)
+        self._user_dict_cache = LRUCache(max_cache_size)
     
     def load_user_dictionary(self):
         """加载用户词典"""
@@ -104,8 +135,9 @@ class DictionaryManager:
     
     def get_community_origin_translation(self, origin_name):
         """获取社区词典原文翻译，使用缓存避免重复计算"""
-        if origin_name in self._community_origin_cache:
-            return self._community_origin_cache[origin_name]
+        cached = self._community_origin_cache.get(origin_name)
+        if cached is not None:
+            return cached
         
         if not self.community_dict_by_origin or origin_name not in self.community_dict_by_origin:
             return None
@@ -141,7 +173,7 @@ class DictionaryManager:
                 except Exception:
                     translation = top_candidates[0]["trans"]
         
-        self._community_origin_cache[origin_name] = translation
+        self._community_origin_cache.put(origin_name, translation)
         return translation
     
     def clear_cache(self):

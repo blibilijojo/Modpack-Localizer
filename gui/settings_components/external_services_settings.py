@@ -25,6 +25,9 @@ class ExternalServicesSettings:
         # 跨设备项目同步中继（Cloudflare Workers）
         self.relay_url_var = tk.StringVar()
         self.relay_status_var = tk.StringVar(value="")
+        # 同步时间设置
+        self.sync_download_interval_var = tk.StringVar(value="5")
+        self.sync_upload_interval_var = tk.StringVar(value="20")
         
         self._load_config()
         self._bind_events()
@@ -33,11 +36,15 @@ class ExternalServicesSettings:
         self.repo_var.trace_add("write", lambda *args: self._save_github_settings())
         self.token_var.trace_add("write", lambda *args: self._save_github_settings())
         self.relay_url_var.trace_add("write", lambda *args: self._save_relay_settings())
+        self.sync_download_interval_var.trace_add("write", lambda *args: self._save_relay_settings())
+        self.sync_upload_interval_var.trace_add("write", lambda *args: self._save_relay_settings())
     
     def _load_config(self):
         self.repo_var.set(self.config.get('github_repo', ''))
         self.token_var.set(self.config.get('github_token', ''))
         self.relay_url_var.set(self.config.get('project_sync_relay_url', ''))
+        self.sync_download_interval_var.set(str(self.config.get('sync_download_interval', 5)))
+        self.sync_upload_interval_var.set(str(self.config.get('sync_upload_interval', 20)))
     
     def _create_widgets(self):
         main_frame = ttk.Frame(self.parent)
@@ -116,6 +123,15 @@ class ExternalServicesSettings:
             justify="left",
         )
         self.relay_status_label.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
+        # 同步时间设置
+        ttk.Label(frame, text="下载同步间隔 (秒):").grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        download_entry = ttk.Entry(frame, textvariable=self.sync_download_interval_var, width=10)
+        download_entry.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+
+        ttk.Label(frame, text="上传同步间隔 (秒):").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        upload_entry = ttk.Entry(frame, textvariable=self.sync_upload_interval_var, width=10)
+        upload_entry.grid(row=4, column=1, sticky="w", padx=5, pady=5)
 
         try:
             from gui import custom_widgets
@@ -204,8 +220,17 @@ class ExternalServicesSettings:
         threading.Thread(target=task, daemon=True).start()
 
     def _save_relay_settings(self):
+        try:
+            download_interval = int(self.sync_download_interval_var.get().strip())
+            upload_interval = int(self.sync_upload_interval_var.get().strip())
+        except ValueError:
+            download_interval = 5
+            upload_interval = 20
+        
         relay_cfg = {
             "project_sync_relay_url": self.relay_url_var.get().strip(),
+            "sync_download_interval": download_interval,
+            "sync_upload_interval": upload_interval
         }
         self.config.update(relay_cfg)
         self.save_callback(relay_cfg)
@@ -219,8 +244,17 @@ class ExternalServicesSettings:
         self.save_callback(github_config)
     
     def get_config(self):
+        try:
+            download_interval = int(self.sync_download_interval_var.get().strip())
+            upload_interval = int(self.sync_upload_interval_var.get().strip())
+        except ValueError:
+            download_interval = 5
+            upload_interval = 20
+        
         return {
             'github_repo': self.repo_var.get().strip(),
             'github_token': self.token_var.get().strip(),
             'project_sync_relay_url': self.relay_url_var.get().strip(),
+            'sync_download_interval': download_interval,
+            'sync_upload_interval': upload_interval
         }

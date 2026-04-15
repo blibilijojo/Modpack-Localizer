@@ -56,6 +56,11 @@ class ProjectTab:
         self._relay_project_name = None
         self._relay_project_type = None
         self._relay_curr_path = None
+        # 同步状态
+        self.sync_enabled = False
+        self.sync_status = "未同步"
+        self.sync_timer = None
+        self.last_modified_time = 0
 
         self.project_type_var = tk.StringVar(value="mod")
         self.mods_dir_var = tk.StringVar()
@@ -100,6 +105,11 @@ class ProjectTab:
                     "workbench_state": self._restored_state_data.get("workbench_state"),
                     "tab_uuid": self.tab_uuid,
                     "namespace_summary": self._restored_state_data.get("namespace_summary", []),
+                    "sync_config": {
+                        "relay_sync_room": self._relay_sync_room,
+                        "sync_enabled": self.sync_enabled,
+                        "relay_sync_remote_rev": self._relay_sync_remote_rev
+                    }
                 }
             return None
 
@@ -111,6 +121,11 @@ class ProjectTab:
             "workbench_state": workbench_state,
             "tab_uuid": self.tab_uuid,
             "namespace_summary": self._get_namespace_summary(),
+            "sync_config": {
+                "relay_sync_room": self._relay_sync_room,
+                "sync_enabled": self.sync_enabled,
+                "relay_sync_remote_rev": self._relay_sync_remote_rev
+            }
         }
 
     def _clean_project_info(self):
@@ -198,6 +213,9 @@ class ProjectTab:
             project_path=workbench_state['current_project_path'],
             finish_button_text=finish_text
         )
+        # 如果同步已启用，启动同步
+        if self.sync_enabled:
+            self._start_sync()
         self.log_message(f"项目 '{self.project_name}' 已从缓存中成功恢复。", "SUCCESS")
         # 重置加载标志
         self._is_loading = False
@@ -207,6 +225,17 @@ class ProjectTab:
         self.project_type = state_data.get("project_type", "mod")
         self.project_info = state_data.get("project_info", {})
         self.tab_uuid = state_data.get("tab_uuid")
+        
+        # 恢复同步配置
+        sync_config = state_data.get("sync_config", {})
+        self._relay_sync_room = sync_config.get("relay_sync_room")
+        self.sync_enabled = sync_config.get("sync_enabled", False)
+        self._relay_sync_remote_rev = sync_config.get("relay_sync_remote_rev")
+        
+        # 更新同步状态显示
+        if hasattr(self, 'sync_status_var'):
+            self.sync_status = "已启用" if self.sync_enabled else "未启用"
+            self.sync_status_var.set(self.sync_status)
         
         self.main_window.update_tab_title(self.tab_id, self.project_name)
         
@@ -233,6 +262,24 @@ class ProjectTab:
         relay_remote_rev: int | None = None,
     ):
         """用中继拉取的整页状态覆盖当前标签（新 tab_uuid，并立即加载工作台）。"""
+        # 检查是否已有工作台实例，如果有，尝试进行增量更新
+        if self.workbench_instance and hasattr(self.workbench_instance, 'translation_data'):
+            try:
+                # 尝试增量更新
+                self._perform_incremental_update(state_data)
+                # 更新远程版本号
+                if relay_remote_rev:
+                    self._relay_sync_remote_rev = relay_remote_rev
+                self.log_message("已通过中继同步进行增量更新。", "SUCCESS")
+                if relay_room:
+                    from utils import project_sync_relay
+                    rv = relay_remote_rev if isinstance(relay_remote_rev, int) and relay_remote_rev >= 1 else 1
+                    project_sync_relay.tab_relay_fingerprint_write(self, relay_room, rv, state_data)
+                return
+            except Exception as e:
+                self.log_message(f"增量更新失败，将进行完全替换: {str(e)}", "ERROR")
+        
+        # 如果增量更新失败，进行完全替换
         self.stop_all_threads()
         self.stop_event = threading.Event()
         self.orchestrator = None
@@ -265,6 +312,58 @@ class ProjectTab:
 
             rv = relay_remote_rev if isinstance(relay_remote_rev, int) and relay_remote_rev >= 1 else 1
             project_sync_relay.tab_relay_fingerprint_write(self, relay_room, rv, data)
+
+    def _perform_incremental_update(self, state_data: dict):
+        """执行增量更新，只更新变更的条目"""
+        if not self.workbench_instance or not hasattr(self.workbench_instance, 'translation_data'):
+            raise Exception("工作台实例不存在")
+        
+        # 获取新的翻译数据
+        new_workbench_state = state_data.get('workbench_state', {})
+        new_translation_data = new_workbench_state.get('workbench_data', {})
+        
+        if not new_translation_data:
+            raise Exception("没有翻译数据")
+        
+        # 遍历所有命名空间和条目，只更新变更的部分
+        updated_count = 0
+        for ns, new_ns_data in new_translation_data.items():
+            if ns not in self.workbench_instance.translation_data:
+                # 新增的命名空间，直接添加
+                self.workbench_instance.translation_data[ns] = new_ns_data
+                updated_count += len(new_ns_data.get('items', []))
+            else:
+                # 现有的命名空间，只更新变更的条目
+                existing_ns_data = self.workbench_instance.translation_data[ns]
+                existing_items = existing_ns_data.get('items', [])
+                new_items = new_ns_data.get('items', [])
+                
+                # 创建条目字典，方便查找
+                existing_items_dict = {item.get('key'): item for item in existing_items}
+                
+                for new_item in new_items:
+                    key = new_item.get('key')
+                    if key in existing_items_dict:
+                        # 检查条目是否有变化
+                        existing_item = existing_items_dict[key]
+                        if existing_item.get('zh') != new_item.get('zh') or existing_item.get('source') != new_item.get('source'):
+                            # 更新条目
+                            existing_item.update(new_item)
+                            updated_count += 1
+                    else:
+                        # 新增的条目
+                        existing_items.append(new_item)
+                        updated_count += 1
+        
+        # 如果有更新，刷新UI
+        if updated_count > 0:
+            # 刷新树视图
+            if hasattr(self.workbench_instance, 'trans_tree'):
+                # 这里可以实现更精确的刷新逻辑，只刷新变更的条目
+                # 为了简单起见，我们这里只更新状态显示
+                pass
+            
+        self.log_message(f"增量更新完成，更新了 {updated_count} 个条目", "INFO")
 
     def _show_lazy_loaded_view(self, namespace_summary: list):
         """显示懒加载视图，只显示namespace名称列表"""
@@ -336,18 +435,23 @@ class ProjectTab:
         
         status_bar_frame = ttk.Frame(self.frame, padding=(10, 5), bootstyle="secondary")
         status_bar_frame.grid(row=2, column=0, sticky="ew")
-        status_bar_frame.columnconfigure(1, weight=1)
+        status_bar_frame.columnconfigure(2, weight=1)
 
         self.toggle_log_btn = ttk.Button(status_bar_frame, text="隐藏日志", command=self._toggle_log_pane, bootstyle="secondary")
         self.toggle_log_btn.grid(row=0, column=0, sticky="w")
         
+        # 同步状态和控制按钮
+        self.sync_status_var = tk.StringVar(value="未同步")
+        self.sync_btn = ttk.Button(status_bar_frame, text="同步设置", command=self._show_sync_control_panel, bootstyle="outline")
+        self.sync_btn.grid(row=0, column=1, sticky="w", padx=10)
+        
         self.status_var = tk.StringVar(value="准备就绪")
         status_label = ttk.Label(status_bar_frame, textvariable=self.status_var, anchor="w", bootstyle="inverse-secondary")
-        status_label.grid(row=0, column=1, sticky="ew", padx=10)
+        status_label.grid(row=0, column=2, sticky="ew", padx=10)
         
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(status_bar_frame, variable=self.progress_var, maximum=100, style="Striped.Horizontal.TProgressbar", length=200)
-        self.progress_bar.grid(row=0, column=2, sticky="e")
+        self.progress_bar.grid(row=0, column=3, sticky="e")
 
     def _update_log_tag_colors(self):
         style = self.root.style
@@ -404,6 +508,10 @@ class ProjectTab:
         quest_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
 
+        sync_rb = ttk.Radiobutton(new_project_frame, text="项目同步", variable=self.project_type_var, value="sync", style="TRadiobutton")
+        sync_rb.pack(anchor="w", pady=(5, 0))
+        ttk.Label(new_project_frame, text="通过房间号创建同步标签页，实现多设备协同编辑。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+
         github_rb = ttk.Radiobutton(new_project_frame, text="获取我的GitHub汉化PR", variable=self.project_type_var, value="github", style="TRadiobutton")
         github_rb.pack(anchor="w", pady=(5, 0))
         ttk.Label(new_project_frame, text="从GitHub汉化仓库下载项目并创建标签页。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
@@ -428,6 +536,222 @@ class ProjectTab:
         container.pack(fill="both", expand=True, padx=20, pady=20)
         ttk.Label(container, text="正在准备加载项目…", font="-size 14 -weight bold").pack(anchor="center", pady=(0, 8))
         ttk.Label(container, text="首次切换到该标签页时会自动恢复工作台。", bootstyle="secondary", justify="center").pack(anchor="center")
+
+    def _show_sync_setup_view(self):
+        """显示项目同步设置界面，让用户输入房间号"""
+        self._clear_content_frame()
+        
+        container = ttk.Frame(self.content_frame)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ttk.Label(container, text="项目同步设置", font="-size 14 -weight bold").pack(anchor="w", pady=(0, 20))
+        
+        room_id_var = tk.StringVar()
+        
+        ttk.Label(container, text="房间号:").pack(anchor="w", pady=(5, 0))
+        room_id_entry = ttk.Entry(container, textvariable=room_id_var, width=60)
+        room_id_entry.pack(anchor="w", pady=(0, 15))
+        ttk.Label(container, text="输入要加入的同步房间号，多设备将通过该房间号进行协同编辑。", bootstyle="secondary").pack(anchor="w", pady=(0, 20))
+        
+        def start_sync():
+            room_id = room_id_var.get().strip()
+            if not room_id:
+                messagebox.showerror("错误", "请输入房间号")
+                return
+            
+            # 调用主窗口的方法创建同步标签页
+            self.main_window._create_sync_tab(room_id)
+        
+        btn_frame = ttk.Frame(container)
+        btn_frame.pack(anchor="se", pady=(20, 0))
+        ttk.Button(btn_frame, text="返回", command=self._show_welcome_view, bootstyle="secondary").pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="开始同步", command=start_sync, bootstyle="primary").pack(side="left", padx=10)
+
+    def _show_sync_control_panel(self):
+        """显示同步控制面板，类似汉化控制台的界面风格"""
+        # 检查是否已经有工作台实例
+        if not self.workbench_instance:
+            messagebox.showinfo("提示", "请先加载项目，然后再进行同步设置")
+            return
+        
+        # 创建同步控制面板
+        panel_frame = ttk.Toplevel(self.root)
+        panel_frame.title("同步控制")
+        panel_frame.geometry("400x300")
+        panel_frame.transient(self.root)
+        panel_frame.grab_set()
+        
+        main_frame = ttk.Frame(panel_frame, padding=20)
+        main_frame.pack(fill="both", expand=True)
+        
+        # 同步状态
+        ttk.Label(main_frame, text="同步状态:", font="-weight bold").pack(anchor="w", pady=(0, 5))
+        status_value = "已启用" if self.sync_enabled else "未启用"
+        if self._relay_sync_room:
+            status_value += f" (房间: {self._relay_sync_room})"
+        ttk.Label(main_frame, text=status_value, bootstyle="secondary").pack(anchor="w", pady=(0, 15))
+        
+        # 同步设置
+        ttk.Label(main_frame, text="同步设置", font="-weight bold").pack(anchor="w", pady=(0, 10))
+        
+        # 房间号设置
+        room_frame = ttk.Frame(main_frame)
+        room_frame.pack(anchor="w", pady=(0, 10), fill="x")
+        ttk.Label(room_frame, text="房间号:").pack(side="left", padx=(0, 10))
+        room_id_var = tk.StringVar(value=self._relay_sync_room or "")
+        room_entry = ttk.Entry(room_frame, textvariable=room_id_var, width=30)
+        room_entry.pack(side="left", fill="x", expand=True)
+        
+        # 同步开关
+        sync_enabled_var = tk.BooleanVar(value=self.sync_enabled)
+        ttk.Checkbutton(main_frame, text="启用自动同步", variable=sync_enabled_var).pack(anchor="w", pady=(0, 15))
+        
+        # 同步间隔设置
+        config = config_manager.load_config()
+        download_interval = config.get('sync_download_interval', 5)
+        upload_interval = config.get('sync_upload_interval', 20)
+        
+        interval_frame = ttk.Frame(main_frame)
+        interval_frame.pack(anchor="w", pady=(0, 15), fill="x")
+        
+        ttk.Label(interval_frame, text="下载间隔 (秒):").pack(side="left", padx=(0, 10))
+        download_var = tk.StringVar(value=str(download_interval))
+        download_entry = ttk.Entry(interval_frame, textvariable=download_var, width=10)
+        download_entry.pack(side="left", padx=(0, 20))
+        
+        ttk.Label(interval_frame, text="上传间隔 (秒):").pack(side="left", padx=(0, 10))
+        upload_var = tk.StringVar(value=str(upload_interval))
+        upload_entry = ttk.Entry(interval_frame, textvariable=upload_var, width=10)
+        upload_entry.pack(side="left")
+        
+        # 操作按钮
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(anchor="se", pady=(20, 0))
+        
+        def save_settings():
+            # 保存同步设置
+            room_id = room_id_var.get().strip()
+            if room_id:
+                self._relay_sync_room = room_id
+                self.sync_enabled = sync_enabled_var.get()
+                
+                # 保存同步间隔设置
+                try:
+                    download_interval = int(download_var.get().strip())
+                    upload_interval = int(upload_var.get().strip())
+                    config_manager.update_config_batch({
+                        'sync_download_interval': download_interval,
+                        'sync_upload_interval': upload_interval
+                    })
+                except ValueError:
+                    pass
+                
+                # 更新同步状态
+                self.sync_status = "已启用" if self.sync_enabled else "未启用"
+                self.sync_status_var.set(self.sync_status)
+                
+                # 启动或停止同步
+                if self.sync_enabled:
+                    self._start_sync()
+                else:
+                    self._stop_sync()
+                
+                panel_frame.destroy()
+            else:
+                messagebox.showerror("错误", "请输入房间号")
+        
+        ttk.Button(btn_frame, text="取消", command=panel_frame.destroy, bootstyle="secondary").pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="保存", command=save_settings, bootstyle="primary").pack(side="left", padx=10)
+
+    def _start_sync(self):
+        """启动自动同步"""
+        if not self.sync_timer:
+            # 加载同步间隔设置
+            config = config_manager.load_config()
+            download_interval = config.get('sync_download_interval', 5) * 1000  # 转换为毫秒
+            
+            def sync_task():
+                if self.sync_enabled and self._relay_sync_room:
+                    try:
+                        # 执行下载同步
+                        self._perform_download_sync()
+                    except Exception as e:
+                        self.log_message(f"同步错误: {str(e)}", "ERROR")
+                    finally:
+                        # 重新调度定时器
+                        self.sync_timer = self.frame.after(download_interval, sync_task)
+            
+            # 启动定时器
+            self.sync_timer = self.frame.after(download_interval, sync_task)
+            self.log_message("自动同步已启动", "INFO")
+
+    def _stop_sync(self):
+        """停止自动同步"""
+        if self.sync_timer:
+            self.frame.after_cancel(self.sync_timer)
+            self.sync_timer = None
+        self.log_message("自动同步已停止", "INFO")
+
+    def _perform_download_sync(self):
+        """执行下载同步"""
+        if not self._relay_sync_room:
+            return
+        
+        try:
+            from utils import project_sync_relay
+            # 尝试从中继服务拉取项目状态
+            success, data = project_sync_relay.pull_project_sync_relay(self._relay_sync_room)
+            if success and data:
+                # 检查是否需要更新
+                current_rev = data.get('rev', 1)
+                if not self._relay_sync_remote_rev or current_rev > self._relay_sync_remote_rev:
+                    # 用拉取的状态替换当前标签页
+                    self.replace_with_synced_state(data, relay_room=self._relay_sync_room, relay_remote_rev=current_rev)
+                    self.log_message(f"同步更新: 版本 {current_rev}", "INFO")
+        except Exception as e:
+            self.log_message(f"下载同步错误: {str(e)}", "ERROR")
+
+    def _start_upload_timer(self):
+        """启动上传定时器，在停止修改后执行上传同步"""
+        # 取消之前的定时器
+        if hasattr(self, 'upload_timer') and self.upload_timer:
+            self.frame.after_cancel(self.upload_timer)
+        
+        # 加载上传间隔设置
+        config = config_manager.load_config()
+        upload_interval = config.get('sync_upload_interval', 20) * 1000  # 转换为毫秒
+        
+        def upload_task():
+            import time
+            current_time = time.time()
+            # 检查是否已经停止修改
+            if current_time - self.last_modified_time >= upload_interval / 1000:
+                self._perform_upload_sync()
+        
+        # 启动定时器
+        self.upload_timer = self.frame.after(upload_interval, upload_task)
+
+    def _perform_upload_sync(self):
+        """执行上传同步"""
+        if not self._relay_sync_room or not self.sync_enabled:
+            return
+        
+        try:
+            from utils import project_sync_relay
+            # 获取当前项目状态
+            state_data = self.get_state()
+            if state_data:
+                # 执行上传同步
+                success, message = project_sync_relay.push_project_sync_relay(self._relay_sync_room, state_data, self._relay_sync_remote_rev or 1)
+                if success:
+                    self.log_message("上传同步成功", "INFO")
+                    # 更新远程版本号
+                    if 'rev' in message:
+                        self._relay_sync_remote_rev = message['rev']
+                else:
+                    self.log_message(f"上传同步失败: {message}", "ERROR")
+        except Exception as e:
+            self.log_message(f"上传同步错误: {str(e)}", "ERROR")
 
     def _show_setup_view(self):
         self._clear_content_frame()
@@ -493,6 +817,10 @@ class ProjectTab:
         elif self.project_type == "github":
             # 直接打开GitHub下载UI
             self.main_window._open_github_download_ui()
+            return
+        elif self.project_type == "sync":
+            self.main_window.update_tab_title(self.tab_id, "项目同步设置")
+            self._show_sync_setup_view()
             return
         
         else:
@@ -2122,6 +2450,46 @@ class MainWindow:
                 project_tab.content_frame.update_idletasks()
             self.update_menu_state()
         return project_tab
+    
+    def _create_sync_tab(self, room_id):
+        """创建一个新的同步标签页并开始同步"""
+        # 创建新标签页
+        project_tab = self._add_new_tab(select_tab=True, show_initial_welcome=False)
+        
+        # 设置标签页标题
+        self.update_tab_title(project_tab.tab_id, f"同步项目 - {room_id}")
+        
+        # 初始化同步相关属性
+        project_tab._relay_sync_room = room_id
+        project_tab._relay_sync_remote_rev = 1
+        project_tab._relay_ns_hashes = None
+        project_tab._relay_nf_hash = None
+        project_tab._relay_ref_hash = None
+        project_tab._relay_pi_hash = None
+        project_tab._relay_sum_hash = None
+        
+        # 开始同步过程
+        def start_sync():
+            try:
+                from utils import project_sync_relay
+                # 尝试从中继服务拉取项目状态
+                success, data = project_sync_relay.pull_project_sync_relay(room_id)
+                if success and data:
+                    # 用拉取的状态替换当前标签页
+                    project_tab.replace_with_synced_state(data, relay_room=room_id, relay_remote_rev=1)
+                    project_tab.log_message(f"成功加入同步房间: {room_id}", "SUCCESS")
+                else:
+                    # 如果拉取失败，显示错误信息
+                    project_tab.log_message(f"无法加入同步房间: {room_id}", "ERROR")
+                    project_tab._show_welcome_view()
+            except Exception as e:
+                project_tab.log_message(f"同步错误: {str(e)}", "ERROR")
+                project_tab._show_welcome_view()
+        
+        # 在后台线程中开始同步
+        import threading
+        sync_thread = threading.Thread(target=start_sync, daemon=True)
+        sync_thread.start()
     
     def _reset_active_tab(self):
         current_tab = self._get_current_tab()

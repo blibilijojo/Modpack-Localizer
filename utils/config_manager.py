@@ -124,6 +124,8 @@ DEFAULT_CONFIG = {
     "project_sync_relay_url": "",
     "project_sync_room_id": "",
     "project_sync_pull_room_id": "",
+    "sync_download_interval": 5,
+    "sync_upload_interval": 20,
     "ai_batch_count": 10,
     "ai_batch_items": 200,
     "ai_batch_words": 2000,

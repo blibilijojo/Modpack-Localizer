@@ -1638,6 +1638,14 @@ class TranslationWorkbench(ttk.Frame):
             self.trans_tree.item(info['row_id'], values=(item['key'], item['en'], item['zh'], current_source), tags=(current_source,))
         
         self._update_namespace_summary(info['ns'])
+        
+        # 更新最后修改时间并启动上传定时器
+        if hasattr(self, 'main_window') and self.main_window:
+            current_tab = self.main_window._get_current_tab()
+            if current_tab and hasattr(current_tab, 'last_modified_time'):
+                import time
+                current_tab.last_modified_time = time.time()
+                current_tab._start_upload_timer()
 
     def _set_dirty(self, is_dirty: bool):
         self.is_dirty = is_dirty

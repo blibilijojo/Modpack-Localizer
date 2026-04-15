@@ -10,6 +10,7 @@ import webbrowser
 import os
 import re
 import sys
+import uuid
 
 from gui import ui_utils
 from gui.dialogs import PackPresetDialog, DownloadProgressDialog
@@ -44,6 +45,17 @@ class ProjectTab:
         # 线程管理属性
         self.background_threads = []
         self.stop_event = threading.Event()
+        # 中继同步：房间、远程 rev、命名空间内容哈希（用于增量上传）
+        self._relay_sync_room = None
+        self._relay_sync_remote_rev = None
+        self._relay_ns_hashes = None
+        self._relay_nf_hash = None
+        self._relay_ref_hash = None
+        self._relay_pi_hash = None
+        self._relay_sum_hash = None
+        self._relay_project_name = None
+        self._relay_project_type = None
+        self._relay_curr_path = None
 
         self.project_type_var = tk.StringVar(value="mod")
         self.mods_dir_var = tk.StringVar()
@@ -212,6 +224,47 @@ class ProjectTab:
         if show_lazy_view:
             self._show_lazy_loaded_view(namespace_summary)
             self.log_message(f"项目 '{self.project_name}' 已恢复（懒加载模式）。", "INFO")
+
+    def replace_with_synced_state(
+        self,
+        state_data: dict,
+        *,
+        relay_room: str | None = None,
+        relay_remote_rev: int | None = None,
+    ):
+        """用中继拉取的整页状态覆盖当前标签（新 tab_uuid，并立即加载工作台）。"""
+        self.stop_all_threads()
+        self.stop_event = threading.Event()
+        self.orchestrator = None
+        if hasattr(self, "quest_manager"):
+            self.quest_manager = None
+        if hasattr(self, "_run_quest_build_phase"):
+            self._run_quest_build_phase = None
+        self.background_threads.clear()
+        self.workbench_instance = None
+        self._workflow_completed = False
+        self._is_loading = False
+        self._is_fully_loaded = False
+        self._restored_state_data = None
+        self._clear_content_frame()
+
+        data = dict(state_data)
+        new_uuid = str(uuid.uuid4())
+        data["tab_uuid"] = new_uuid
+        self.tab_uuid = new_uuid
+
+        self.restore_from_state(data, show_lazy_view=False)
+        self._lazy_load_workbench()
+        if self.workbench_instance and hasattr(self.workbench_instance, "_set_initial_sash_position"):
+            self.workbench_instance.after_idle(self.workbench_instance._set_initial_sash_position)
+        self.main_window.update_menu_state()
+        self.main_window._save_current_session()
+        self.log_message("已通过中继同步替换当前标签页项目。", "SUCCESS")
+        if relay_room:
+            from utils import project_sync_relay
+
+            rv = relay_remote_rev if isinstance(relay_remote_rev, int) and relay_remote_rev >= 1 else 1
+            project_sync_relay.tab_relay_fingerprint_write(self, relay_room, rv, data)
 
     def _show_lazy_loaded_view(self, namespace_summary: list):
         """显示懒加载视图，只显示namespace名称列表"""
@@ -1731,6 +1784,8 @@ class MainWindow:
         from gui.user_dictionary_editor import UserDictionaryEditor
         # 在工具菜单中添加编辑个人词典选项
         self.tools_menu.add_command(label="管理个人词典", command=lambda: UserDictionaryEditor(self.root))
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label="标签页中继同步…", command=self._open_tab_sync_dialog)
         
         # 视图菜单已移除，功能已整合到底栏
 
@@ -1994,6 +2049,11 @@ class MainWindow:
             main_window_instance=self
         )
         self.settings_window.transient(self.root)
+
+    def _open_tab_sync_dialog(self):
+        from gui.tab_sync_dialog import TabSyncDialog
+
+        TabSyncDialog(self.root, self)
 
     def _create_widgets(self):
         self.notebook = ttk.Notebook(self.root, padding=(5, 5, 0, 0))

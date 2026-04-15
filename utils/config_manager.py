@@ -121,6 +121,7 @@ DEFAULT_CONFIG = {
     ],
     "github_repo": "",
     "github_token": "",
+    "project_sync_relay_url": "",
     "ai_batch_count": 10,
     "ai_batch_items": 200,
     "ai_batch_words": 2000,

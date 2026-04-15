@@ -1,7 +1,10 @@
+import logging
 import tkinter as tk
 from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk
 import threading
+
+logger = logging.getLogger(__name__)
 
 class ExternalServicesSettings:
     def __init__(self, parent, config, save_callback):
@@ -19,6 +22,9 @@ class ExternalServicesSettings:
         self.token_var = tk.StringVar()
         self.show_token_var = tk.BooleanVar(value=False)
         self.github_status_var = tk.StringVar(value="")
+        # 跨设备项目同步中继（Cloudflare Workers）
+        self.relay_url_var = tk.StringVar()
+        self.relay_status_var = tk.StringVar(value="")
         
         self._load_config()
         self._bind_events()
@@ -26,16 +32,19 @@ class ExternalServicesSettings:
     def _bind_events(self):
         self.repo_var.trace_add("write", lambda *args: self._save_github_settings())
         self.token_var.trace_add("write", lambda *args: self._save_github_settings())
+        self.relay_url_var.trace_add("write", lambda *args: self._save_relay_settings())
     
     def _load_config(self):
         self.repo_var.set(self.config.get('github_repo', ''))
         self.token_var.set(self.config.get('github_token', ''))
+        self.relay_url_var.set(self.config.get('project_sync_relay_url', ''))
     
     def _create_widgets(self):
         main_frame = ttk.Frame(self.parent)
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
         self._create_github_settings(main_frame)
+        self._create_project_sync_relay_settings(main_frame)
     
     def _create_github_settings(self, parent):
         frame = tk_ttk.LabelFrame(parent, text="GitHub 汉化仓库", padding="10")
@@ -70,6 +79,49 @@ class ExternalServicesSettings:
         
         self.github_status_label = ttk.Label(frame, textvariable=self.github_status_var, bootstyle="secondary")
         self.github_status_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
+
+    def _create_project_sync_relay_settings(self, parent):
+        frame = tk_ttk.LabelFrame(parent, text="跨设备项目同步（中继）", padding="10")
+        frame.pack(fill="x", pady=(0, 10), padx=5)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(
+            frame,
+            text="中继站点根地址:",
+        ).grid(row=0, column=0, sticky="nw", padx=5, pady=8)
+        hint = (
+            "填写你部署的 Cloudflare Workers 中继服务根 URL，"
+            "例如 https://relay.your-domain.com\n"
+            "后续「单标签项目」同步将使用该地址；当前版本仅检测连接。"
+        )
+        relay_entry = ttk.Entry(frame, textvariable=self.relay_url_var)
+        relay_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=8)
+        relay_entry.after_idle(relay_entry.selection_clear)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=1, column=0, columnspan=2, sticky="e", pady=5)
+        self.relay_test_btn = ttk.Button(
+            btn_frame,
+            text="检测中继连接",
+            command=self._test_relay_connection,
+            bootstyle="primary-outline",
+        )
+        self.relay_test_btn.pack(side="right", padx=5)
+
+        self.relay_status_label = ttk.Label(
+            frame,
+            textvariable=self.relay_status_var,
+            bootstyle="secondary",
+            wraplength=640,
+            justify="left",
+        )
+        self.relay_status_label.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
+        try:
+            from gui import custom_widgets
+            custom_widgets.ToolTip(relay_entry, hint)
+        except Exception:
+            pass
     
     def _toggle_token_visibility(self):
         if self.show_token_var.get():
@@ -119,6 +171,44 @@ class ExternalServicesSettings:
                 self.test_btn.config(state="normal")
         
         threading.Thread(target=test_task, daemon=True).start()
+
+    def _test_relay_connection(self):
+        raw = self.relay_url_var.get().strip()
+        if not raw:
+            self.relay_status_var.set("请先填写中继站点根地址")
+            return
+
+        self.relay_status_var.set("正在检测中继…")
+        self.relay_test_btn.config(state="disabled")
+
+        def task():
+            try:
+                from utils import project_sync_relay
+
+                logger.info(
+                    "[ExternalServices] 检测中继连接 raw_input=%r",
+                    (raw or "")[:400],
+                )
+                _ok, msg = project_sync_relay.probe_project_sync_relay(raw)
+                logger.info(
+                    "[ExternalServices] 中继检测结果 ok=%s msg=%s",
+                    _ok,
+                    (msg or "")[:500],
+                )
+                self.relay_status_var.set(msg)
+            except Exception as e:
+                self.relay_status_var.set(f"检测出错：{e}")
+            finally:
+                self.relay_test_btn.config(state="normal")
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _save_relay_settings(self):
+        relay_cfg = {
+            "project_sync_relay_url": self.relay_url_var.get().strip(),
+        }
+        self.config.update(relay_cfg)
+        self.save_callback(relay_cfg)
     
     def _save_github_settings(self):
         github_config = {
@@ -131,5 +221,6 @@ class ExternalServicesSettings:
     def get_config(self):
         return {
             'github_repo': self.repo_var.get().strip(),
-            'github_token': self.token_var.get().strip()
+            'github_token': self.token_var.get().strip(),
+            'project_sync_relay_url': self.relay_url_var.get().strip(),
         }

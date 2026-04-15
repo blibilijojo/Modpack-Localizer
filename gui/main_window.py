@@ -1784,8 +1784,7 @@ class MainWindow:
         from gui.user_dictionary_editor import UserDictionaryEditor
         # 在工具菜单中添加编辑个人词典选项
         self.tools_menu.add_command(label="管理个人词典", command=lambda: UserDictionaryEditor(self.root))
-        self.tools_menu.add_separator()
-        self.tools_menu.add_command(label="标签页中继同步…", command=self._open_tab_sync_dialog)
+
         
         # 视图菜单已移除，功能已整合到底栏
 

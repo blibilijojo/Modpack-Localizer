@@ -699,15 +699,21 @@ class ProjectTab:
         
         try:
             from utils import project_sync_relay
+            # 获取中继服务地址
+            config = config_manager.load_config()
+            relay_url = config.get('project_sync_relay_url', 'https://sync.modpack-localizer.org')
+            
             # 尝试从中继服务拉取项目状态
-            success, data = project_sync_relay.pull_project_sync_relay(self._relay_sync_room)
-            if success and data:
-                # 检查是否需要更新
-                current_rev = data.get('rev', 1)
-                if not self._relay_sync_remote_rev or current_rev > self._relay_sync_remote_rev:
-                    # 用拉取的状态替换当前标签页
-                    self.replace_with_synced_state(data, relay_room=self._relay_sync_room, relay_remote_rev=current_rev)
-                    self.log_message(f"同步更新: 版本 {current_rev}", "INFO")
+            success, data, message, remote_rev, unchanged = project_sync_relay.relay_fetch_tab_state(
+                relay_url, 
+                self._relay_sync_room,
+                since_rev=self._relay_sync_remote_rev
+            )
+            
+            if success and data and not unchanged:
+                # 用拉取的状态替换当前标签页
+                self.replace_with_synced_state(data, relay_room=self._relay_sync_room, relay_remote_rev=remote_rev)
+                self.log_message(f"同步更新: 版本 {remote_rev}", "INFO")
         except Exception as e:
             self.log_message(f"下载同步错误: {str(e)}", "ERROR")
 
@@ -738,16 +744,25 @@ class ProjectTab:
         
         try:
             from utils import project_sync_relay
+            # 获取中继服务地址
+            config = config_manager.load_config()
+            relay_url = config.get('project_sync_relay_url', 'https://sync.modpack-localizer.org')
+            
             # 获取当前项目状态
             state_data = self.get_state()
             if state_data:
                 # 执行上传同步
-                success, message = project_sync_relay.push_project_sync_relay(self._relay_sync_room, state_data, self._relay_sync_remote_rev or 1)
+                success, message, rev, mode = project_sync_relay.relay_publish_tab_state_smart(
+                    relay_url, 
+                    self._relay_sync_room, 
+                    self, 
+                    state_data
+                )
                 if success:
-                    self.log_message("上传同步成功", "INFO")
+                    self.log_message(f"上传同步成功: {message}", "INFO")
                     # 更新远程版本号
-                    if 'rev' in message:
-                        self._relay_sync_remote_rev = message['rev']
+                    if rev:
+                        self._relay_sync_remote_rev = rev
                 else:
                     self.log_message(f"上传同步失败: {message}", "ERROR")
         except Exception as e:
@@ -781,6 +796,12 @@ class ProjectTab:
             ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
             
+            # 同步设置
+            ttk.Label(container, text="同步房间ID:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
+            self.sync_room_var = tk.StringVar()
+            ttk.Entry(container, textvariable=self.sync_room_var, width=60).grid(row=3, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="生成房间ID", command=lambda: self.sync_room_var.set(self._generate_room_id())).grid(row=3, column=2, padx=5, pady=8)
+            
             start_command = self._setup_new_mod_project
         
         elif self.project_type == "modsearch":
@@ -796,6 +817,12 @@ class ProjectTab:
             ttk.Label(container, text="JAR 下载:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
             ttk.Entry(container, textvariable=self.jar_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.jar_dir_var)).grid(row=2, column=2, padx=5, pady=8)
+            
+            # 同步设置
+            ttk.Label(container, text="同步房间ID:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
+            self.sync_room_var = tk.StringVar()
+            ttk.Entry(container, textvariable=self.sync_room_var, width=60).grid(row=3, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="生成房间ID", command=lambda: self.sync_room_var.set(self._generate_room_id())).grid(row=3, column=2, padx=5, pady=8)
 
             start_command = self._setup_new_mod_search_project
         
@@ -812,6 +839,12 @@ class ProjectTab:
             ttk.Label(container, text="输出文件夹:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
             ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
             ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
+            
+            # 同步设置
+            ttk.Label(container, text="同步房间ID:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
+            self.sync_room_var = tk.StringVar()
+            ttk.Entry(container, textvariable=self.sync_room_var, width=60).grid(row=3, column=1, sticky="ew", padx=5, pady=8)
+            ttk.Button(container, text="生成房间ID", command=lambda: self.sync_room_var.set(self._generate_room_id())).grid(row=3, column=2, padx=5, pady=8)
             
             start_command = self._setup_new_quest_project
         elif self.project_type == "github":
@@ -935,6 +968,16 @@ class ProjectTab:
         self.project_type = "mod"
         self.project_name = Path(mods_dir).parent.name
         self.project_info = {"mods_dir": mods_dir, "output_dir": output_dir}
+        
+        # 保存同步房间ID
+        sync_room = self.sync_room_var.get().strip() if hasattr(self, 'sync_room_var') else None
+        if sync_room:
+            self._relay_sync_room = sync_room
+            self.sync_enabled = True
+            self.sync_status = "已启用"
+            if hasattr(self, 'sync_status_var'):
+                self.sync_status_var.set(self.sync_status)
+        
         self.main_window.update_tab_title(self.tab_id, self.project_name)
         
         config = config_manager.load_config()
@@ -967,6 +1010,16 @@ class ProjectTab:
         self.project_type = "quest"
         self.project_name = "任务汉化"
         self.project_info = {"instance_dir": instance_dir, "output_dir": output_dir}
+        
+        # 保存同步房间ID
+        sync_room = self.sync_room_var.get().strip() if hasattr(self, 'sync_room_var') else None
+        if sync_room:
+            self._relay_sync_room = sync_room
+            self.sync_enabled = True
+            self.sync_status = "已启用"
+            if hasattr(self, 'sync_status_var'):
+                self.sync_status_var.set(self.sync_status)
+        
         self.log_message("任务汉化项目已配置，开始提取文本...", "INFO")
         self.main_window.update_tab_title(self.tab_id, "任务汉化")
         
@@ -1004,6 +1057,16 @@ class ProjectTab:
         self.project_type = "modsearch"
         self.project_name = "模组搜索"
         self.project_info = {"output_dir": output_dir, "jar_dir": jar_dir}
+        
+        # 保存同步房间ID
+        sync_room = self.sync_room_var.get().strip() if hasattr(self, 'sync_room_var') else None
+        if sync_room:
+            self._relay_sync_room = sync_room
+            self.sync_enabled = True
+            self.sync_status = "已启用"
+            if hasattr(self, 'sync_status_var'):
+                self.sync_status_var.set(self.sync_status)
+        
         self.log_message("模组搜索项目已配置，开始搜索界面...", "INFO")
         self.main_window.update_tab_title(self.tab_id, "模组搜索")
 
@@ -1884,6 +1947,11 @@ class ProjectTab:
             # 不显示欢迎界面，保持空白，等待工作台启动
             # 只有在明确需要显示欢迎界面时才调用_show_welcome_view()
             pass
+    
+    def _generate_room_id(self):
+        """生成一个随机的房间ID"""
+        from utils import project_sync_relay
+        return project_sync_relay.suggest_room_id()
 
     def _continue_to_build_phase(self):
         if not self.orchestrator:

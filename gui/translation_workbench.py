@@ -1588,6 +1588,11 @@ class TranslationWorkbench(ttk.Frame):
         if self.zh_text_input.edit_modified():
             self._save_current_edit()
             self.zh_text_input.edit_modified(False)
+            # 触发上传定时器
+            if self.main_window and hasattr(self.main_window, '_get_current_tab'):
+                current_tab = self.main_window._get_current_tab()
+                if current_tab and hasattr(current_tab, '_start_upload_timer'):
+                    current_tab._start_upload_timer()
             
     def _save_current_edit(self, record_undo=True):
         if not self.current_selection_info:

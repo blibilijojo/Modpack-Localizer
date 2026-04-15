@@ -25,6 +25,8 @@ class TabSyncDialog(ttk.Toplevel):
 
         cfg = config_manager.load_config()
         relay = (cfg.get("project_sync_relay_url") or "").strip()
+        saved_room_id = (cfg.get("project_sync_room_id") or "").strip()
+        saved_pull_room_id = (cfg.get("project_sync_pull_room_id") or "").strip()
 
         outer = ttk.Frame(self, padding=14)
         outer.pack(fill="both", expand=True)
@@ -55,7 +57,9 @@ class TabSyncDialog(ttk.Toplevel):
         nb.add(pub, text=" 发布当前标签页 ")
         nb.add(pull, text=" 拉取到当前标签页 ")
 
-        self.room_var = tk.StringVar(value=project_sync_relay.suggest_room_id())
+        # 使用保存的房间号，否则生成新的
+        room_id = saved_room_id if saved_room_id else project_sync_relay.suggest_room_id()
+        self.room_var = tk.StringVar(value=room_id)
         ttk.Label(pub, text="房间号（另一台设备填相同号码即可拉取）:").pack(anchor="w")
         room_row = ttk.Frame(pub)
         room_row.pack(fill="x", pady=(4, 8))
@@ -79,7 +83,9 @@ class TabSyncDialog(ttk.Toplevel):
             anchor="w", fill="x", pady=(4, 0)
         )
 
-        self.pull_room_var = tk.StringVar(value="")
+        # 使用保存的拉取房间号，否则生成新的
+        pull_room_id = saved_pull_room_id if saved_pull_room_id else project_sync_relay.suggest_room_id()
+        self.pull_room_var = tk.StringVar(value=pull_room_id)
         ttk.Label(pull, text="要加入的房间号:").pack(anchor="w")
         ttk.Entry(pull, textvariable=self.pull_room_var).pack(fill="x", pady=(4, 8))
         self.pull_status = tk.StringVar(value="")
@@ -162,6 +168,8 @@ class TabSyncDialog(ttk.Toplevel):
             eff = rev if isinstance(rev, int) else getattr(tab, "_relay_sync_remote_rev", None)
             if isinstance(eff, int):
                 project_sync_relay.tab_relay_fingerprint_write(tab, room_id, eff, state)
+            # 保存房间号到配置文件
+            config_manager.update_config("project_sync_room_id", room_id)
             if mode == "noop":
                 messagebox.showinfo("同步", msg, parent=self)
             else:
@@ -239,6 +247,8 @@ class TabSyncDialog(ttk.Toplevel):
             rv = remote_rev if isinstance(remote_rev, int) and remote_rev >= 1 else 1
             _log.info("[标签同步] 应用拉取数据 房间=%s 版本=%s", room_id, rv)
             tab.replace_with_synced_state(data, relay_room=room_id, relay_remote_rev=rv)
+            # 保存拉取房间号到配置文件
+            config_manager.update_config("project_sync_pull_room_id", room_id)
             self.pull_status.set(msg)
             messagebox.showinfo("拉取完成", "已加载到当前标签页。", parent=self)
         except Exception as e:

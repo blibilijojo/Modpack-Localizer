@@ -1,0 +1,145 @@
+# .github/workflows/nuitka-windows-release.yml
+
+name: Nuitka Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements*.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set version from tag
+        id: version
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ($version -notmatch '^v?\d+\.\d+\.\d+') {
+            $version = "1.0.0"
+          }
+          # 移除 'v' 前缀
+          $version = $version -replace '^v', ''
+          Write-Output "version=$version" >> $env:GITHUB_OUTPUT
+          
+          # 自动生成 _version.py 文件
+          $versionContent = "__version__ = `"$version`""
+          $versionContent | Out-File -FilePath "_version.py" -Encoding utf8 -NoNewline
+          Write-Host "已生成 _version.py，版本号：$version"
+        shell: pwsh
+
+      - name: Generate builtin_secrets with API key
+        run: |
+          $apiKey = $env:CURSEFORGE_API_KEY
+          if ($apiKey) {
+            # 使用数组方式构建文件内容，避免 YAML 解析问题
+            $lines = @(
+              '"""',
+              '内置密钥管理模块',
+              '用于在打包时嵌入敏感密钥，并防止其被写入配置文件',
+              '',
+              '注意：此文件在构建时生成，密钥已硬编码到编译后的 exe 中',
+              '"""',
+              '',
+              '# 内置 CurseForge API 密钥（在构建时由 GitHub Secrets 注入）',
+              "BUILTIN_CURSEFORGE_API_KEY = '$apiKey'",
+              '',
+              '# 标记是否为内置密钥',
+              'IS_BUILTIN_CURSEFORGE_KEY = bool(BUILTIN_CURSEFORGE_API_KEY)',
+              '',
+              '',
+              'def get_builtin_curseforge_key() -> str:',
+              '    """获取内置的 CurseForge API 密钥"""',
+              '    return BUILTIN_CURSEFORGE_API_KEY',
+              '',
+              '',
+              'def is_builtin_curseforge_key_set() -> bool:',
+              '    """检查是否设置了内置 CurseForge API 密钥"""',
+              '    return IS_BUILTIN_CURSEFORGE_KEY',
+              '',
+              '',
+              'def is_protected_key(key: str, value: str) -> bool:',
+              '    """',
+              '    检查某个配置项是否为受保护的内置密钥',
+              '    ',
+              '    Args:',
+              '        key: 配置项的键',
+              '        value: 配置项的值',
+              '        ',
+              '    Returns:',
+              '        如果是受保护的内置密钥则返回 True',
+              '    """',
+              "    if key == 'curseforge_api_key' and IS_BUILTIN_CURSEFORGE_KEY:",
+              '        # 如果用户输入的值与内置密钥相同，则认为是受保护的',
+              "        if value.strip() == BUILTIN_CURSEFORGE_API_KEY:",
+              '            return True',
+              '    return False'
+            )
+            $content = $lines -join "`n"
+            # 写入文件，覆盖原有的 builtin_secrets.py
+            $content | Out-File -FilePath "utils\builtin_secrets.py" -Encoding utf8 -NoNewline
+            Write-Host "已生成包含 API 密钥的 builtin_secrets.py"
+          } else {
+            Write-Host "未设置 CURSEFORGE_API_KEY，将使用空的 builtin_secrets.py"
+          }
+        shell: pwsh
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+
+      - name: Build Windows Executable with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: onefile
+          jobs: "-0"
+          enable-plugins: tk-inter
+          product-name: Modpack-Localizer-Pro
+          product-version: ${{ steps.version.outputs.version }}
+          company-name: Modpack-Localizer
+          file-description: Modpack Localizer Application
+          copyright: Modpack-Localizer
+          windows-uac-admin: false
+          windows-disable-console: true
+          output-file: Modpack-Localizer-Pro.exe
+          include-package: |
+            gui
+            services
+            utils
+            core
+          include-data-files: |
+            requirements.txt=requirements.txt
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Modpack-Localizer-Pro-Windows
+          path: build/Modpack-Localizer-Pro.exe
+          include-hidden-files: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: build/Modpack-Localizer-Pro.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

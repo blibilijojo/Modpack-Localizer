@@ -1,0 +1,2023 @@
+from __future__ import annotations
+import tkinter as tk
+from tkinter import ttk as tk_ttk
+from tkinter import messagebox, simpledialog, filedialog
+import threading
+import logging
+import copy
+import itertools
+from collections import defaultdict
+import math
+import ttkbootstrap as ttk
+
+from utils import config_manager
+from services.ai_translator import AITranslator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from gui.custom_widgets import ToolTip
+
+
+class EnhancedComprehensiveProcessing(tk.Frame):
+    def __init__(self, parent, workbench_instance):
+        super().__init__(parent)
+        self.workbench = workbench_instance
+        
+        # 初始化变量
+        self.processing = False
+        self.settings = config_manager.load_config()
+        
+        # 配置变量
+        self.mixed_translation_var = tk.BooleanVar(value=self.settings.get('mixed_translation', False))
+        
+        # 添加变量追踪，实现自动保存
+        self.mixed_translation_var.trace_add("write", lambda *args: self._save_config())
+        
+        # 创建主容器
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True)
+        
+        # 右侧：配置和操作面板（不再需要主面板和模组管理面板）
+        self.operation_panel = ttk.LabelFrame(main_frame, text="操作配置")
+        self.operation_panel.pack(fill="both", expand=True)
+        
+
+        
+        # 初始化操作配置面板
+        self._init_operation_panel()
+        
+        # 绑定事件
+        self.operation_var.trace_add("write", self._on_operation_change)
+        
+        # 绑定事件 - 这些绑定会在进入翻译控制台模式时生效
+        # 选择事件用于更新开始按钮状态和批次预览
+        # 点击事件用于处理翻译控制台模式下的模组选择
+        # 长按拖拽事件用于处理模组的拖拽选择
+        
+        # 初始化长按拖拽相关变量
+        self._long_press_started = False
+        self._long_press_item = None
+        self._last_dragged_item = None
+        self._processed_items = set()  # 跟踪本次拖拽中已处理的模组
+        
+        # AI 翻译部分应用：线程与主线程共享的批次结果上下文
+        self._ai_apply_lock = threading.Lock()
+        self._ai_apply_context = None
+        
+        # 初始化时显示默认选项面板
+        self._on_operation_change()
+        
+        # 初始化时检查选中的模组，更新开始按钮状态和批次预览
+        self._check_module_selection()
+        self._update_batch_preview()
+        
+    def _init_operation_panel(self):
+        """初始化操作配置面板"""
+        # 使用更现代的卡片式设计
+        
+        # 操作类型选择卡片
+        operation_card = ttk.LabelFrame(self.operation_panel, text="操作类型")
+        operation_card.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # 添加内部容器来实现 padding 效果
+        operation_inner = ttk.Frame(operation_card)
+        operation_inner.pack(fill="x", padx=10, pady=(10, 15))
+        
+        # 操作类型映射
+        self.operations_values = {
+            "AI 翻译": "ai_translate",
+            "导出文本": "export",
+            "导入翻译": "import",
+            "标点修正": "punctuation_correct",
+            "去除空格": "remove_space"
+        }
+        self.operations_reverse_values = {
+            "ai_translate": "AI 翻译",
+            "export": "导出文本",
+            "import": "导入翻译",
+            "punctuation_correct": "标点修正",
+            "remove_space": "去除空格"
+        }
+        
+        self.operation_var = tk.StringVar(value=self.operations_reverse_values.get("ai_translate"))
+        
+        operations = [
+            "AI 翻译",
+            "导出文本",
+            "导入翻译",
+            "标点修正",
+            "去除空格"
+        ]
+        
+        # 使用更现代的Combobox样式
+        operation_combo_frame = ttk.Frame(operation_inner)
+        operation_combo_frame.pack(fill="x")
+        
+        ttk.Label(operation_combo_frame, text="选择操作类型：", font=("Microsoft YaHei UI", 10)).pack(anchor="w", pady=(0, 5), padx=10)
+        self.operation_combo = ttk.Combobox(operation_combo_frame, textvariable=self.operation_var, values=operations, state="readonly", bootstyle="primary")
+        
+        # 设置当前选中项的索引，确保组件正确显示选中状态
+        if self.operation_var.get() in operations:
+            self.operation_combo.current(operations.index(self.operation_var.get()))
+        self.operation_combo.pack(fill="x", pady=(0, 10), padx=10)
+        
+        # 添加事件绑定
+        self.operation_combo.bind('<<ComboboxSelected>>', lambda e: [self._on_operation_change(e), self._on_combobox_selected(e, self.operation_combo), self._update_operation_comment()])
+        self.operation_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, self.operation_combo))
+        self.operation_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.operation_combo))
+        
+        # 操作类型注释文本，使用更醒目的样式
+        self.operation_comment_var = tk.StringVar()
+        self._update_operation_comment()
+        self.operation_comment = ttk.Label(operation_inner, textvariable=self.operation_comment_var, 
+                                          font=("Microsoft YaHei UI", 9), foreground="#555555", 
+                                          wraplength=600, justify="left")
+        self.operation_comment.pack(anchor="w", pady=(5, 0))
+        
+        # AI 翻译选项卡片
+        self.ai_options_frame = ttk.LabelFrame(self.operation_panel, text="AI 翻译选项")
+        self.ai_options_frame.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # AI 翻译工作模式选择
+        mode_card = ttk.LabelFrame(self.ai_options_frame, text="翻译模式")
+        mode_card.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # 翻译模式映射
+        self.modes_values = {
+            "基础翻译模式": "basic",
+            "翻译润色模式": "polish",
+            "混合翻译模式": "hybrid"
+        }
+        self.modes_reverse_values = {
+            "basic": "基础翻译模式",
+            "polish": "翻译润色模式",
+            "hybrid": "混合翻译模式"
+        }
+        
+        # 获取当前设置的内部值，转换为显示值
+        current_mode = self.settings.get('translation_mode', 'hybrid')
+        self.translation_mode_var = tk.StringVar(value=self.modes_reverse_values.get(current_mode))
+        
+        modes = [
+            "基础翻译模式",
+            "翻译润色模式",
+            "混合翻译模式"
+        ]
+        
+        # 翻译模式选择区域（删除了"选择翻译模式："文本）
+        self.mode_combo = ttk.Combobox(mode_card, textvariable=self.translation_mode_var, values=modes, state="readonly", bootstyle="success")
+        
+        # 设置当前选中项的索引，确保组件正确显示选中状态
+        if self.translation_mode_var.get() in modes:
+            self.mode_combo.current(modes.index(self.translation_mode_var.get()))
+        self.mode_combo.pack(fill="x", pady=(5, 10), padx=10)
+        
+        # 添加事件绑定
+        self.mode_combo.bind('<<ComboboxSelected>>', lambda e: self._on_combobox_selected(e, self.mode_combo))
+        self.mode_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, self.mode_combo))
+        self.mode_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.mode_combo))
+        
+        # 添加模式切换注释，使用更现代的样式
+        self.mode_comment_var = tk.StringVar()
+        self._update_mode_comment()
+        self.mode_comment = ttk.Label(mode_card, textvariable=self.mode_comment_var, 
+                                     font=("Microsoft YaHei UI", 9), foreground="#555555",
+                                     wraplength=800, justify="left")
+        self.mode_comment.pack(anchor="w", pady=(5, 5), padx=10)
+        
+        # 绑定模式切换事件
+        self.translation_mode_var.trace_add("write", lambda *args: [self._save_config(), self._update_mode_comment(), self._update_batch_preview()])
+        
+        # 智能翻译算法卡片
+        algorithm_card = ttk.LabelFrame(self.ai_options_frame, text="翻译控制台设置")
+        algorithm_card.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # 优化布局：使用网格布局，充分利用宽度
+        algorithm_card.columnconfigure(0, weight=1)
+        algorithm_card.columnconfigure(1, weight=1)
+        algorithm_card.columnconfigure(2, weight=1)
+        algorithm_card.columnconfigure(3, weight=1)
+        
+        # 批次处理模式选择
+        batch_mode_frame = ttk.Frame(algorithm_card)
+        batch_mode_frame.grid(row=0, column=0, columnspan=1, sticky="w", padx=5, pady=5)
+        
+        ttk.Label(batch_mode_frame, text="批次处理模式: ", font=("Microsoft YaHei UI", 10), width=12).pack(side="left", padx=5)
+        
+        # 从设置中加载batch_processing_mode值，如果不存在或格式不正确则使用默认值
+        batch_processing_mode = self.settings.get('batch_processing_mode', 'words')
+        # 验证格式是否正确
+        if batch_processing_mode not in ['words', 'batch', 'items']:
+            batch_processing_mode = 'words'
+        self.batch_mode_var = tk.StringVar(value=batch_processing_mode)
+        
+        # 批次处理模式选项：单词、批次和条目
+        mode_options = [
+            "单词",
+            "批次",
+            "条目"
+        ]
+        # 映射显示值到内部值
+        self.mode_values = {
+            "单词": "words",
+            "批次": "batch",
+            "条目": "items"
+        }
+        self.mode_reverse_values = {v: k for k, v in self.mode_values.items()}
+        
+        # 创建显示值变量，用于绑定到Combobox
+        self.batch_mode_display_var = tk.StringVar()
+        # 设置初始显示值
+        self.batch_mode_display_var.set(self.mode_reverse_values[batch_processing_mode])
+        
+        mode_combo = ttk.Combobox(batch_mode_frame, textvariable=self.batch_mode_display_var, 
+                                 values=mode_options, state="readonly", bootstyle="success", width=8)
+        # 设置默认选择
+        mode_combo.current(mode_options.index(self.mode_reverse_values[batch_processing_mode]))
+        mode_combo.pack(side="left", padx=(0, 10))
+        
+        # 每批次数量设置
+        batch_value_frame = ttk.Frame(algorithm_card)
+        batch_value_frame.grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        
+        # 创建三个独立的变量，用于存储每种模式的数值
+        self.words_batch_var = tk.IntVar(value=self.settings.get('ai_batch_words', 2000))
+        self.items_batch_var = tk.IntVar(value=self.settings.get('ai_batch_items', 10))
+        self.batch_count_var = tk.IntVar(value=self.settings.get('ai_batch_count', 10))
+        
+        # 动态标签：根据批次处理模式显示不同的标签文本
+        if batch_processing_mode == "words":
+            label_text = "每批次单词数: "
+            current_var = self.words_batch_var
+        elif batch_processing_mode == "items":
+            label_text = "每批次条目数: "
+            current_var = self.items_batch_var
+        else:
+            label_text = "批次数: "
+            current_var = self.batch_count_var
+        
+        self.batch_value_label = ttk.Label(batch_value_frame, text=label_text, font=("Microsoft YaHei UI", 10), width=12)
+        self.batch_value_label.pack(side="left", padx=5)
+        
+        # 根据模式设置不同的数值范围
+        if batch_processing_mode == "batch":
+            spinbox_from = 1
+            spinbox_to = 100
+        else:
+            spinbox_from = 100
+            spinbox_to = 50000
+        
+        # 创建spinbox
+        value_spinbox = ttk.Spinbox(batch_value_frame, from_=spinbox_from, to=spinbox_to, 
+                                  textvariable=current_var, width=8, bootstyle="success")
+        value_spinbox.pack(side="left")
+        
+        # 保存当前的spinbox引用和当前模式
+        self.current_spinbox = value_spinbox
+        self.current_batch_var = current_var
+        
+        # 保存初始模式，用于模式切换时的比较
+        self._current_batch_mode = batch_processing_mode
+        
+        # 添加事件处理，切换批次处理模式时更新标签文本、数值范围和绑定的变量
+        def on_batch_mode_change(*args):
+            # 获取当前选择的新模式
+            new_batch_mode = self.batch_mode_var.get()
+            
+            # 保存当前spinbox的值到旧模式对应的变量
+            try:
+                current_value = value_spinbox.get()
+                current_value = int(current_value)
+                if self._current_batch_mode == "words":
+                    self.words_batch_var.set(current_value)
+                elif self._current_batch_mode == "items":
+                    self.items_batch_var.set(current_value)
+                else:
+                    self.batch_count_var.set(current_value)
+            except (ValueError, tk.TclError):
+                # 如果当前值无效，不保存
+                pass
+            
+            # 更新当前模式记录
+            self._current_batch_mode = new_batch_mode
+            
+            # 根据新模式更新UI
+            if new_batch_mode == "words":
+                self.batch_value_label.config(text="每批次单词数: ")
+                value_spinbox.config(from_=100, to=50000)
+                new_var = self.words_batch_var
+            elif new_batch_mode == "items":
+                self.batch_value_label.config(text="每批次条目数: ")
+                value_spinbox.config(from_=100, to=50000)
+                new_var = self.items_batch_var
+            else:
+                self.batch_value_label.config(text="批次数: ")
+                value_spinbox.config(from_=1, to=100)
+                new_var = self.batch_count_var
+            
+            # 切换spinbox绑定的变量
+            value_spinbox.configure(textvariable=new_var)
+            self.current_batch_var = new_var
+            
+            # 保存配置并更新批次预览和UI
+            self._save_config()
+            self._update_batch_preview()
+            self._update_batch_ui()
+        
+        # 添加下拉选择事件处理，解决文字选中问题
+        def on_combo_selected(e):
+            # 当选择变化时，直接从Combobox获取用户选择的显示值
+            display_value = e.widget.get()
+            # 转换为内部值
+            internal_value = self.mode_values.get(display_value, 'words')
+            # 只有当内部值真正变化时才触发更新
+            if internal_value != self.batch_mode_var.get():
+                self.batch_mode_var.set(internal_value)
+                on_batch_mode_change()
+            self._on_combobox_selected(e, mode_combo)
+        
+        mode_combo.bind('<<ComboboxSelected>>', on_combo_selected)
+        mode_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, mode_combo))
+        mode_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, mode_combo))
+        
+        # 绑定批次计算模式变化事件
+        self.batch_mode_var.trace_add("write", on_batch_mode_change)
+        
+        # 绑定数值变化事件
+        self.words_batch_var.trace_add("write", lambda *args: [self._save_config(), self._update_batch_preview()])
+        self.items_batch_var.trace_add("write", lambda *args: [self._save_config(), self._update_batch_preview()])
+        self.batch_count_var.trace_add("write", lambda *args: [self._save_config(), self._update_batch_preview()])
+        
+        # 批次预览：移到右侧
+        self.preview_frame = ttk.Frame(algorithm_card)
+        self.preview_frame.grid(row=0, column=3, sticky="e", padx=5, pady=5)
+
+        ttk.Label(self.preview_frame, text="预计批次:", font=("Microsoft YaHei UI", 10), foreground="#666666").pack(side="left", padx=(0, 5))
+
+        self.batch_preview_var = tk.StringVar(value="0")
+        batch_preview_label = ttk.Label(self.preview_frame, textvariable=self.batch_preview_var,
+                                       font=("Microsoft YaHei UI", 12, "bold"), foreground="#28a745")
+        batch_preview_label.pack(side="left")
+
+        # 模组隔离选项
+        isolation_frame = ttk.Frame(algorithm_card)
+        isolation_frame.grid(row=1, column=0, columnspan=4, sticky="w", padx=5, pady=(10, 10))
+
+        self.module_isolation_var = tk.BooleanVar(value=self.settings.get('module_isolation', False))
+        isolation_check = ttk.Checkbutton(
+            isolation_frame,
+            text="模组隔离（不同模组的语言文件不会放入同一批次）",
+            variable=self.module_isolation_var,
+            bootstyle="primary"
+        )
+        isolation_check.pack(side="left", padx=5)
+
+        self.module_isolation_var.trace_add("write", lambda *args: [self._save_config(), self._update_batch_preview()])
+        
+        # 初始化UI状态
+        self._update_batch_ui()
+        
+        # 按钮框架 - 设计更现代的按钮布局
+        self.button_frame = ttk.Frame(self.operation_panel)
+        self.button_frame.pack(fill="x", padx=15, pady=(10, 0))
+        
+        # 使用更现代的按钮样式和布局
+        button_container = ttk.Frame(self.button_frame)
+        button_container.pack(fill="x", anchor="e", padx=10, pady=(5, 0))
+        
+        self.cancel_button = ttk.Button(button_container, text="取消", command=self._on_cancel, bootstyle="outline-secondary", width=12)
+        self.cancel_button.pack(side="right", padx=(10, 0))
+        
+        self.apply_completed_ai_btn = ttk.Button(
+            button_container,
+            text="应用已完成",
+            command=self._on_apply_completed_ai_batches,
+            bootstyle="info-outline",
+            width=12,
+        )
+        
+        self.start_button = ttk.Button(button_container, text="开始处理", command=self._on_start, bootstyle="success-outline", width=15)
+        self.start_button.pack(side="right", padx=5, before=self.cancel_button)
+        
+        # 导入选项卡片（仅在导入操作时显示）
+        self.import_options_frame = ttk.LabelFrame(self.operation_panel, text="导入选项")
+        self.import_options_frame.pack(fill="x", padx=15, pady=(0, 15))
+        self.import_options_frame.pack_forget()
+        
+        # 导入来源映射
+        self.import_sources_values = {
+            "从文件导入": "file",
+            "从剪贴板导入": "clipboard"
+        }
+        self.import_sources_reverse_values = {
+            "file": "从文件导入",
+            "clipboard": "从剪贴板导入"
+        }
+        
+        self.import_source_var = tk.StringVar(value=self.import_sources_reverse_values.get("file"))
+        
+        import_sources = [
+            "从文件导入",
+            "从剪贴板导入"
+        ]
+        
+        # 导入来源选择区域
+        import_source_frame = ttk.Frame(self.import_options_frame)
+        import_source_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        ttk.Label(import_source_frame, text="选择导入来源: ", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 5), padx=5)
+        self.import_source_combo = ttk.Combobox(import_source_frame, textvariable=self.import_source_var, values=import_sources, state="readonly", bootstyle="info")
+        
+        # 设置当前选中项的索引，确保组件正确显示选中状态
+        if self.import_source_var.get() in import_sources:
+            self.import_source_combo.current(import_sources.index(self.import_source_var.get()))
+        self.import_source_combo.pack(fill="x", pady=(0, 10), padx=5)
+        
+        # 添加事件绑定
+        self.import_source_combo.bind('<<ComboboxSelected>>', lambda e: self._on_combobox_selected(e, self.import_source_combo))
+        self.import_source_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, self.import_source_combo))
+        self.import_source_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.import_source_combo))
+        
+        # 导出选项卡片（仅在导出操作时显示）
+        self.export_options_frame = ttk.LabelFrame(self.operation_panel, text="导出选项")
+        self.export_options_frame.pack(fill="x", padx=15, pady=(0, 15))
+        self.export_options_frame.pack_forget()
+        
+        # 导出范围选项
+        export_scope_card = ttk.LabelFrame(self.export_options_frame, text="导出范围")
+        export_scope_card.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # 导出范围映射
+        self.export_scopes_values = {
+            "全部文本": "all",
+            "仅待翻译": "pending",
+            "仅已翻译": "completed"
+        }
+        self.export_scopes_reverse_values = {
+            "all": "全部文本",
+            "pending": "仅待翻译",
+            "completed": "仅已翻译"
+        }
+        
+        self.export_scope_var = tk.StringVar(value=self.export_scopes_reverse_values.get("all"))
+        
+        export_scopes = [
+            "全部文本",
+            "仅待翻译",
+            "仅已翻译"
+        ]
+        
+        ttk.Label(export_scope_card, text="选择导出范围：", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 5), padx=10)
+        self.export_scope_combo = ttk.Combobox(export_scope_card, textvariable=self.export_scope_var, values=export_scopes, state="readonly", bootstyle="warning")
+        
+        # 设置当前选中项的索引，确保组件正确显示选中状态
+        if self.export_scope_var.get() in export_scopes:
+            self.export_scope_combo.current(export_scopes.index(self.export_scope_var.get()))
+        self.export_scope_combo.pack(fill="x", pady=(0, 10), padx=10)
+        
+        # 添加事件绑定
+        self.export_scope_combo.bind('<<ComboboxSelected>>', lambda e: self._on_combobox_selected(e, self.export_scope_combo))
+        self.export_scope_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, self.export_scope_combo))
+        self.export_scope_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.export_scope_combo))
+        
+        # 导出方式选项
+        export_method_card = ttk.LabelFrame(self.export_options_frame, text="导出方式")
+        export_method_card.pack(fill="x", padx=15, pady=(0, 10))
+        
+        self.export_method_var = tk.StringVar(value="导出到文件")
+        export_methods = [
+            "导出到文件",
+            "导出到剪贴板"
+        ]
+        self.export_method_values = {
+            "导出到文件": "file",
+            "导出到剪贴板": "clipboard"
+        }
+        self.export_method_reverse_values = {
+            "file": "导出到文件",
+            "clipboard": "导出到剪贴板"
+        }
+        
+        ttk.Label(export_method_card, text="选择导出方式: ", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 5), padx=10)
+        self.export_method_combo = ttk.Combobox(export_method_card, textvariable=self.export_method_var, values=export_methods, state="readonly", bootstyle="warning")
+        
+        # 设置当前选中项的索引，确保组件正确显示选中状态
+        if self.export_method_var.get() in export_methods:
+            self.export_method_combo.current(export_methods.index(self.export_method_var.get()))
+        self.export_method_combo.pack(fill="x", pady=(0, 10), padx=10)
+        
+        # 添加事件绑定
+        self.export_method_combo.bind('<<ComboboxSelected>>', lambda e: self._on_combobox_selected(e, self.export_method_combo))
+        self.export_method_combo.bind('<FocusOut>', lambda e: self._on_combobox_focus_out(e, self.export_method_combo))
+        self.export_method_combo.bind('<FocusIn>', lambda e: self._on_combobox_focus_in(e, self.export_method_combo))
+        
+        # 配置会自动保存，无需手动保存按钮
+    
+    def _count_words(self, text: str) -> int:
+        """计算文本的单词数量
+        
+        Args:
+            text: 要计算单词数量的文本
+            
+        Returns:
+            int: 文本的单词数量
+        """
+        if not text:
+            return 0
+        # 使用split()简单计算单词数量，消耗更低
+        return len(text.split())
+    
+    def _update_mode_comment(self):
+        """更新模式切换注释"""
+        mode = self.translation_mode_var.get()
+        if mode == "基础翻译模式":
+            self.mode_comment_var.set("仅对用户提供的待翻译文本进行直接翻译，不涉及任何已翻译内容的参考或润色处理")
+        elif mode == "翻译润色模式":
+            self.mode_comment_var.set("专门针对已完成翻译的文本进行质量优化，包括语言流畅度提升、专业术语统一等")
+        elif mode == "混合翻译模式":
+            self.mode_comment_var.set("在处理待翻译文本时，结合已翻译内容进行综合翻译，确保翻译风格一致性")
+        else:
+            self.mode_comment_var.set("")
+    
+    def _update_operation_comment(self):
+        """更新操作类型注释"""
+        operation = self.operation_var.get()
+        if operation == "AI 翻译":
+            self.operation_comment_var.set("使用 AI 对选中模组中的待翻译文本进行批量翻译，支持多种翻译模式")
+        elif operation == "导出文本":
+            self.operation_comment_var.set("将选中模组中的文本导出到文件或剪贴板，可选择导出范围和方式")
+        elif operation == "导入翻译":
+            self.operation_comment_var.set("从文件或剪贴板导入翻译结果，更新选中模组中的翻译内容")
+        elif operation == "标点修正":
+            self.operation_comment_var.set("自动检测和修正翻译文本中的标点符号，确保中英文标点的一致性和正确性")
+        elif operation == "去除空格":
+            self.operation_comment_var.set("移除翻译文本中多余的空格，清理中文标点符号前后的空格，保持文本整洁")
+        else:
+            self.operation_comment_var.set("")
+    
+
+    
+    def _on_operation_change(self, *args):
+        """操作类型变化事件处理"""
+        # 将显示值转换为内部值
+        operation_display = self.operation_var.get()
+        operation = self.operations_values.get(operation_display, "ai_translate")
+        
+        # 隐藏所有选项
+        self.ai_options_frame.pack_forget()
+        self.import_options_frame.pack_forget()
+        self.export_options_frame.pack_forget()
+        self.button_frame.pack_forget()
+        
+        # 根据操作类型显示相应选项
+        if operation == "ai_translate":
+            self.ai_options_frame.pack(fill="x", pady=(0, 15))
+            self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack(side="right", padx=(10, 0))
+        elif operation == "import":
+            self.import_options_frame.pack(fill="x", pady=(0, 15))
+            self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
+        elif operation == "export":
+            self.export_options_frame.pack(fill="x", pady=(0, 15))
+            self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
+        elif operation == "punctuation_correct" or operation == "remove_space":
+            # 标点修正和去除空格操作不需要特殊选项，只显示按钮
+            self.button_frame.pack(fill="x", anchor="e", pady=(0, 15))
+            self.cancel_button.pack_forget()
+        
+        self.update_idletasks()
+    
+    def _on_threshold_change(self, *args):
+        """阈值变化事件处理"""
+        # 字符串值已经在下拉框中显示，无需更新标签
+        # 但需要确保配置保存的是浮点数
+        pass
+    
+    def _on_combobox_focus_out(self, event, combobox):
+        """处理Combobox焦点移出事件，取消文字选中状态"""
+        # 取消文字选中状态
+        combobox.selection_clear()
+        # 确保光标位置在文本末尾
+        combobox.icursor(tk.END)
+    
+    def _on_combobox_selected(self, event, combobox):
+        """处理Combobox选项选中事件，立即取消文字选中状态"""
+        # 立即取消文字选中状态，不使用延迟
+        combobox.selection_clear()
+        combobox.icursor(tk.END)
+    
+    def _on_combobox_focus_in(self, event, combobox):
+        """处理Combobox焦点进入事件，取消文字选中状态"""
+        # 立即取消文字选中状态，不使用延迟
+        combobox.selection_clear()
+        combobox.icursor(tk.END)
+    
+    def _check_module_selection(self):
+        """检查选中的模组，并更新开始按钮的状态"""
+        selected_modules = self.workbench.ns_tree.selection()
+        if selected_modules:
+            self.start_button.config(state="normal")
+        else:
+            self.start_button.config(state="disabled")
+        
+        # 更新批次预览
+        self._update_batch_preview()
+        
+    def _deduplicate_items(self, selected_modules, translation_mode):
+        seen_en_texts = set()
+        deduplicated_items = []
+        for ns in selected_modules:
+            items = self.workbench.translation_data.get(ns, {}).get("items", [])
+            for idx, item in enumerate(items):
+                en_text = item.get("en", "").strip()
+                zh_text = item.get("zh", "").strip()
+                source = item.get("source", "")
+                if en_text:
+                    if translation_mode in ("basic", "hybrid"):
+                        if not zh_text and en_text not in seen_en_texts:
+                            seen_en_texts.add(en_text)
+                            deduplicated_items.append((ns, idx, item))
+                    elif translation_mode == "polish":
+                        if zh_text and source != "原文复制" and en_text not in seen_en_texts:
+                            seen_en_texts.add(en_text)
+                            deduplicated_items.append((ns, idx, item))
+        return deduplicated_items
+
+    def _prepare_translation_inputs(self, deduplicated_items, translation_mode):
+        all_translation_inputs = []
+        all_item_mapping = []
+        for ns, idx, item in deduplicated_items:
+            en_text = item.get("en", "").strip()
+            zh_text = item.get("zh", "").strip()
+            if translation_mode == "polish" and zh_text:
+                combined_text = f"{en_text} -> {zh_text}"
+                all_translation_inputs.append({"text": combined_text, "key": item.get("key", ""), "ns": ns})
+            else:
+                all_translation_inputs.append({"text": en_text, "key": item.get("key", ""), "ns": ns})
+            all_item_mapping.append((ns, idx, item))
+        return all_translation_inputs, all_item_mapping
+
+    def _get_batch_config(self):
+        batch_mode = self.batch_mode_var.get()
+        try:
+            if batch_mode == "words":
+                batch_value = self.words_batch_var.get()
+            elif batch_mode == "items":
+                batch_value = self.items_batch_var.get()
+            else:
+                batch_value = self.batch_count_var.get()
+        except (tk.TclError, ValueError):
+            if batch_mode == "words":
+                batch_value = self.settings.get('ai_batch_words', 2000)
+            elif batch_mode == "items":
+                batch_value = self.settings.get('ai_batch_items', 10)
+            else:
+                batch_value = self.settings.get('ai_batch_count', 10)
+        return batch_mode, batch_value
+
+    def _calculate_total_batches(self):
+        selected_modules = self.workbench.ns_tree.selection()
+        if not selected_modules:
+            return 0
+
+        translation_mode_display = self.translation_mode_var.get()
+        translation_mode = self.modes_values.get(translation_mode_display, "hybrid")
+        batch_mode, batch_value = self._get_batch_config()
+
+        if batch_mode == "batch":
+            try:
+                return self.batch_count_var.get()
+            except (tk.TclError, ValueError):
+                return self.settings.get('ai_batch_count', 10)
+
+        deduplicated_items = self._deduplicate_items(selected_modules, translation_mode)
+        if not deduplicated_items:
+            return 0
+
+        all_translation_inputs, _ = self._prepare_translation_inputs(deduplicated_items, translation_mode)
+        module_isolation = self.module_isolation_var.get()
+        total_batches = 0
+
+        if module_isolation:
+            ns_to_items = defaultdict(list)
+            for i, (ns, idx, item) in enumerate(all_translation_inputs):
+                ns_to_items[ns if isinstance(ns, str) else item.get("ns", "")].append(i)
+            for ns_key, indices in ns_to_items.items():
+                ns_inputs = [all_translation_inputs[i] for i in indices]
+                if batch_mode == "words":
+                    ns_words = sum(self._count_words(item["text"]) for item in ns_inputs)
+                    total_batches += max(1, (ns_words + batch_value - 1) // batch_value)
+                elif batch_mode == "items":
+                    total_batches += max(1, (len(ns_inputs) + batch_value - 1) // batch_value)
+                else:
+                    total_batches += batch_value
+        elif batch_mode == "words":
+            total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
+            total_batches = max(1, (total_words + batch_value - 1) // batch_value)
+        elif batch_mode == "items":
+            total_batches = max(1, (len(all_translation_inputs) + batch_value - 1) // batch_value)
+        else:
+            total_batches = batch_value
+
+        return max(1, total_batches)
+        
+    def _update_batch_preview(self):
+        """更新批次预览显示"""
+        total_batches = self._calculate_total_batches()
+        self.batch_preview_var.set(f"{total_batches}")
+    
+    def _on_module_click(self, event):
+        """处理模组点击事件，实现点击已选中模组取消选中的功能"""
+        # 只有在翻译控制台模式下才执行自定义点击逻辑
+        if self.workbench._current_mode != "comprehensive":
+            return
+            
+        # 获取点击的模组
+        region = self.workbench.ns_tree.identify_region(event.x, event.y)
+        if region == "cell" or region == "text":
+            # 获取当前点击的模组ID
+            clicked_item = self.workbench.ns_tree.identify_row(event.y)
+            if clicked_item:
+                # 获取所有选中的模组
+                all_selected = self.workbench.ns_tree.selection()
+                
+                # 临时解绑选择事件，避免递归调用
+                self.workbench.ns_tree.unbind("<<TreeviewSelect>>")
+                
+                try:
+                    if clicked_item in all_selected:
+                        # 如果点击的是已选中的模组，取消其选中状态
+                        self.workbench.ns_tree.selection_remove(clicked_item)
+                    else:
+                        # 如果点击的是未选中的模组，添加到选中列表
+                        self.workbench.ns_tree.selection_add(clicked_item)
+                finally:
+                    # 重新绑定选择事件
+                    self.workbench.ns_tree.bind("<<TreeviewSelect>>", self._on_module_selection_change)
+                
+                # 更新状态栏
+                selection = self.workbench.ns_tree.selection()
+                if selection:
+                    self.workbench.status_label.config(text=f"已选择 {len(selection)} 个项目")
+                else:
+                    self.workbench.status_label.config(text="未选择任何项目")
+                
+                # 更新开始按钮状态和批次预览
+                self._check_module_selection()
+                self._update_batch_preview()
+    
+    def _on_module_press(self, event):
+        """处理鼠标按下事件，立即开始长按操作"""
+        # 只有在翻译控制台模式下才执行长按操作
+        if self.workbench._current_mode != "comprehensive":
+            return
+            
+        region = self.workbench.ns_tree.identify_region(event.x, event.y)
+        if region == "cell" or region == "text":
+            # 获取当前点击的模组ID
+            clicked_item = self.workbench.ns_tree.identify_row(event.y)
+            if clicked_item:
+                # 清空已处理项目集合
+                self._processed_items.clear()
+                # 保存起始位置
+                self._long_press_item = clicked_item
+                # 将起始模组添加到已处理集合中
+                self._processed_items.add(clicked_item)
+                # 立即开始长按操作
+                self._long_press_started = True
+                self._last_dragged_item = self._long_press_item
+    
+    def _on_module_drag(self, event):
+        """处理鼠标拖拽事件，切换经过的模组选中状态"""
+        # 只有在翻译控制台模式下才执行拖拽操作
+        if self.workbench._current_mode != "comprehensive":
+            return
+            
+        if self._long_press_started:
+            region = self.workbench.ns_tree.identify_region(event.x, event.y)
+            if region == "cell" or region == "text":
+                # 获取当前拖拽到的模组ID
+                dragged_item = self.workbench.ns_tree.identify_row(event.y)
+                if dragged_item and dragged_item != self._last_dragged_item:
+                    # 获取所有模组的列表
+                    all_items = self.workbench.ns_tree.get_children()
+                    
+                    # 找到起始和结束模组的索引
+                    if self._last_dragged_item in all_items and dragged_item in all_items:
+                        start_idx = all_items.index(self._last_dragged_item)
+                        end_idx = all_items.index(dragged_item)
+                        
+                        # 确定处理范围（包括起始和结束模组）
+                        if start_idx < end_idx:
+                            # 向下拖拽
+                            range_start = start_idx + 1
+                            range_end = end_idx + 1
+                        else:
+                            # 向上拖拽
+                            range_start = end_idx
+                            range_end = start_idx
+                        
+                        # 处理范围内的所有模组
+                        for idx in range(range_start, range_end):
+                            item = all_items[idx]
+                            
+                            # 如果该模组已经在本次拖拽中处理过，跳过
+                            if item in self._processed_items:
+                                continue
+                            
+                            # 将模组添加到已处理集合
+                            self._processed_items.add(item)
+                            
+                            # 获取所有选中的模组
+                            all_selected = self.workbench.ns_tree.selection()
+                            
+                            # 临时解绑选择事件，避免递归调用
+                            self.workbench.ns_tree.unbind("<<TreeviewSelect>>")
+                            
+                            try:
+                                if item in all_selected:
+                                    # 如果是已选中的模组，取消其选中状态
+                                    self.workbench.ns_tree.selection_remove(item)
+                                else:
+                                    # 如果是未选中的模组，添加到选中列表
+                                    self.workbench.ns_tree.selection_add(item)
+                            finally:
+                                # 重新绑定选择事件
+                                self.workbench.ns_tree.bind("<<TreeviewSelect>>", self._on_module_selection_change)
+                    
+                    # 更新状态栏
+                    selection = self.workbench.ns_tree.selection()
+                    if selection:
+                        self.workbench.status_label.config(text=f"已选择 {len(selection)} 个项目")
+                    else:
+                        self.workbench.status_label.config(text="未选择任何项目")
+                    
+                    # 更新开始按钮状态
+                    self._check_module_selection()
+                    
+                    # 更新批次预览
+                    self._update_batch_preview()
+                    
+                    # 保存当前拖拽位置
+                    self._last_dragged_item = dragged_item
+    
+    def _on_module_release(self, event):
+        """处理鼠标释放事件，结束长按操作"""
+        # 重置长按状态
+        self._long_press_started = False
+        self._long_press_item = None
+        self._last_dragged_item = None
+    
+    def _on_module_selection_change(self, event=None):
+        """处理模组选择变化事件，更新开始按钮状态和批次预览"""
+        self._check_module_selection()
+        self._update_batch_preview()
+    
+    def _update_batch_ui(self):
+        """根据批次设置状态更新UI"""
+        # 从批次处理模式中提取信息
+        batch_mode = self.batch_mode_var.get()
+        
+        # 移除智能批处理设置相关UI，简化界面
+        if hasattr(self, 'smart_batching_frame'):
+            self.smart_batching_frame.pack_forget()
+        if hasattr(self, 'smart_batching_settings_frame'):
+            self.smart_batching_settings_frame.pack_forget()
+        if hasattr(self, 'traditional_batch_frame'):
+            self.traditional_batch_frame.pack_forget()
+        if hasattr(self, 'count_mode_frame'):
+            self.count_mode_frame.pack_forget()
+        if hasattr(self, 'value_mode_frame'):
+            self.value_mode_frame.pack_forget()
+        
+        # 控制预计批次预览的显示/隐藏
+        if hasattr(self, 'preview_frame'):
+            if batch_mode == "batch":
+                # 当选择批次模式时，隐藏预计批次预览
+                self.preview_frame.grid_remove()
+            else:
+                # 其他模式下显示预计批次预览
+                self.preview_frame.grid()
+        
+        # 更新批次预览
+        self._update_batch_preview()
+    
+    def _save_config(self):
+        """保存配置（自动调用，无需手动触发）"""
+        # 更新配置，将显示值转换为内部值
+        self.settings['translation_mode'] = self.modes_values.get(self.translation_mode_var.get(), 'hybrid')
+        
+        # 保存合并后的批次处理模式
+        self.settings['batch_processing_mode'] = self.batch_mode_var.get()
+        
+        # 保存三种模式的独立数值设置
+        try:
+            # 保存每批次单词数
+            self.settings['ai_batch_words'] = self.words_batch_var.get()
+            # 保存每批次条目数
+            self.settings['ai_batch_items'] = self.items_batch_var.get()
+            # 保存批次数
+            self.settings['ai_batch_count'] = self.batch_count_var.get()
+        except (tk.TclError, ValueError):
+            # 使用默认值
+            self.settings['ai_batch_words'] = self.settings.get('ai_batch_words', 2000)
+            self.settings['ai_batch_items'] = self.settings.get('ai_batch_items', 10)
+            self.settings['ai_batch_count'] = self.settings.get('ai_batch_count', 10)
+
+        # 保存模组隔离设置
+        self.settings['module_isolation'] = self.module_isolation_var.get()
+        
+        # 保存到文件
+        config_manager.save_config(self.settings)
+        
+        # 更新workbench的当前设置
+        self.workbench.current_settings = self.settings
+        
+        logging.info("配置已自动保存")
+    
+    def _on_start(self):
+        """开始处理"""
+        if self.processing:
+            return
+        
+        # 将显示值转换为内部值
+        operation_display = self.operation_var.get()
+        operation = self.operations_values.get(operation_display, "ai_translate")
+        
+        # 保存当前编辑
+        self.workbench._save_current_edit()
+        
+        # 禁用界面
+        self.processing = True
+        self.start_button.config(state="disabled")
+        self.cancel_button.config(text="取消")
+        
+        if operation != "ai_translate":
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
+            self._hide_ai_apply_completed_btn()
+        
+        # 获取选中的模组
+        selected_modules = self.workbench.ns_tree.selection()
+        
+        # 根据操作类型执行不同的处理
+        if operation == "ai_translate":
+            self._start_ai_translation(selected_modules)
+        elif operation == "export":
+            self._start_export(selected_modules)
+        elif operation == "import":
+            self._start_import(selected_modules)
+        elif operation == "punctuation_correct":
+            self._start_punctuation_correction(selected_modules)
+        elif operation == "remove_space":
+            self._start_space_removal(selected_modules)
+    
+    def _on_exit(self):
+        """退出翻译控制台模式，返回翻译工作台"""
+        # 检查是否有任务正在处理
+        if self.processing:
+            # 显示提示，要求先取消当前任务
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "当前有任务正在处理，请先点击'取消'按钮终止任务后再退出翻译控制台。")
+            return
+        
+        # 调用workbench的toggle_mode方法切换回翻译工作台模式
+        self.workbench._toggle_mode()
+    
+    def _on_cancel(self):
+        """取消处理"""
+        if self.processing:
+            # 记录取消操作
+            self.workbench.log_callback("用户点击取消按钮，正在终止AI翻译任务...", "INFO")
+            # 立即取消AI翻译操作
+            self.processing = False
+            # 取消翻译器任务
+            if hasattr(self, 'translator') and self.translator:
+                self.translator.cancel()
+                self.workbench.log_callback("已向翻译器发送取消命令", "INFO")
+            # 调用workbench的取消方法，它会处理线程池的关闭和重建
+            self.workbench.cancel_ai_translation()
+            # 恢复界面状态
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消", bootstyle="outline-secondary")
+            self.workbench.mode_switch_btn.config(state="normal")
+            # 记录取消完成
+            self.workbench.log_callback("AI翻译任务已成功取消", "INFO")
+            self._refresh_ai_apply_completed_btn_visibility()
+        else:
+            # 因为现在是Frame组件，不需要destroy，只需要重置状态
+            self.workbench.status_label.config(text="准备就绪")
+            self.workbench.log_callback("准备就绪", "INFO")
+    
+    def _show_ai_apply_completed_btn(self):
+        if hasattr(self, "apply_completed_ai_btn") and self.apply_completed_ai_btn.winfo_exists():
+            if not self.apply_completed_ai_btn.winfo_ismapped():
+                self.apply_completed_ai_btn.pack(side="right", padx=5, before=self.cancel_button)
+    
+    def _hide_ai_apply_completed_btn(self):
+        if hasattr(self, "apply_completed_ai_btn") and self.apply_completed_ai_btn.winfo_exists():
+            if self.apply_completed_ai_btn.winfo_ismapped():
+                self.apply_completed_ai_btn.pack_forget()
+    
+    def _refresh_ai_apply_completed_btn_visibility(self):
+        if not hasattr(self, "apply_completed_ai_btn") or not self.apply_completed_ai_btn.winfo_exists():
+            return
+        ctx = None
+        with self._ai_apply_lock:
+            ctx = self._ai_apply_context
+        if not ctx:
+            self._hide_ai_apply_completed_btn()
+            return
+        nested = ctx["translations_nested"]
+        applied = ctx.get("applied_batch_indices", set())
+        total = len(nested)
+        has_applicable = any(
+            i not in applied and nested[i] is not None for i in range(total)
+        )
+        if has_applicable:
+            self._show_ai_apply_completed_btn()
+        else:
+            self._hide_ai_apply_completed_btn()
+    
+    def _build_partial_ai_apply(self, ctx):
+        """从当前上下文收集所有已完成的批次，返回 (mapping, translations, applied_batch_indices)。"""
+        batches = ctx["batches"]
+        nested = ctx["translations_nested"]
+        mapping = ctx["all_item_mapping"]
+        already_applied = ctx.get("applied_batch_indices", set())
+        partial_mapping = []
+        partial_translations = []
+        applied_batch_indices = []
+        offset = 0
+        for i, (batch_texts, _) in enumerate(batches):
+            n = len(batch_texts)
+            chunk = nested[i]
+            if i in already_applied:
+                offset += n
+                continue
+            if chunk is None:
+                offset += n
+                continue
+            if len(chunk) != n:
+                logging.warning(
+                    "AI 批次 %s 返回条数与输入不一致（预期 %s，实际 %s），跳过该批次。",
+                    i + 1, n, len(chunk),
+                )
+                offset += n
+                continue
+            for j in range(n):
+                partial_mapping.append(mapping[offset + j])
+            partial_translations.extend(chunk)
+            applied_batch_indices.append(i)
+            offset += n
+        return partial_mapping, partial_translations, applied_batch_indices
+    
+    def _on_apply_completed_ai_batches(self):
+        """将当前已完成的 AI 翻译批次写入工作台；未完成的批次忽略。"""
+        with self._ai_apply_lock:
+            ctx = self._ai_apply_context
+            if not ctx:
+                built = None
+                translation_mode_snap = None
+                en_entries_snap = None
+            else:
+                built = self._build_partial_ai_apply(ctx)
+                translation_mode_snap = ctx["translation_mode"]
+                en_entries_snap = ctx["en_to_all_entries"]
+        if built is None:
+            messagebox.showinfo("提示", "当前没有可应用的 AI 翻译批次。", parent=self)
+            return
+        partial_mapping, partial_translations, applied_batch_indices = built
+        if not partial_translations:
+            messagebox.showinfo("提示", "当前没有已完成的翻译批次可应用。", parent=self)
+            return
+        self._update_translations(
+            partial_mapping,
+            partial_translations,
+            translation_mode_snap,
+            en_entries_snap,
+        )
+        with self._ai_apply_lock:
+            if self._ai_apply_context is ctx:
+                ctx.setdefault("applied_batch_indices", set()).update(applied_batch_indices)
+        self._refresh_ai_apply_completed_btn_visibility()
+        self.workbench.log_callback(
+            f"已应用 {len(applied_batch_indices)} 个已完成批次的翻译结果。", "SUCCESS"
+        )
+    
+    def _start_ai_translation(self, selected_modules):
+        """开始AI翻译"""
+        # 检查是否有选中的模组
+        if not selected_modules:
+            # 显示提示，要求先选中模组
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            # 恢复界面状态
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            self._hide_ai_apply_completed_btn()
+            return
+        
+        self.workbench.status_label.config(text="正在准备AI翻译...")
+        self.workbench.log_callback("正在准备AI翻译...", "INFO")
+        
+        # 禁用返回按钮
+        self.workbench.mode_switch_btn.config(state="disabled")
+        
+        # 更改取消按钮为红色
+        self.cancel_button.config(bootstyle="danger")
+        self._hide_ai_apply_completed_btn()
+        
+        # 在工作线程中执行AI翻译
+        threading.Thread(target=self._ai_translation_worker, args=(selected_modules,), daemon=True).start()
+    
+    def _ai_translation_worker(self, selected_modules):
+        """AI翻译工作线程"""
+        try:
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
+            # 检查取消标志
+            if not self.processing:
+                self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                return
+
+            # 获取翻译模式，将显示值转换为内部值
+            translation_mode_display = self.translation_mode_var.get()
+            translation_mode = self.modes_values.get(translation_mode_display, "hybrid")
+
+            # 1. 根据翻译模式获取待处理的条目，同时进行去重
+            # en_text -> list of (ns, idx, item) 用于记录所有相同原文的条目
+            all_items = []
+            all_texts = set()
+            # 按命名空间收集已译文本，供混合模式按批次内模组合并参考语料
+            translated_texts_by_ns = None
+            if translation_mode == "hybrid":
+                translated_texts_by_ns = defaultdict(lambda: defaultdict(list))
+            en_to_all_entries = defaultdict(list)  # 原文 -> 所有重复条目，用于翻译后同步
+
+            # 先收集已翻译文本（混合模式按 ns 分桶），同时记录所有条目
+            for ns in selected_modules:
+                # 检查取消标志
+                if not self.processing:
+                    self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                    return
+
+                items = self.workbench.translation_data.get(ns, {}).get("items", [])
+                for idx, item in enumerate(items):
+                    # 检查取消标志
+                    if not self.processing:
+                        self.workbench.log_callback("AI翻译已取消，停止执行", "INFO")
+                        return
+
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    if en_text:
+                        all_texts.add(en_text)
+                        en_to_all_entries[en_text].append((ns, idx, item))
+                        if zh_text and translated_texts_by_ns is not None:
+                            translated_texts_by_ns[ns][en_text].append(zh_text)
+
+            deduplicated_items = self._deduplicate_items(selected_modules, translation_mode)
+
+            self.workbench.log_callback(f"去重处理：共 {sum(len(v) for v in en_to_all_entries.values())} 条原始条目，去重后 {len(deduplicated_items)} 条", "INFO")
+
+            if not deduplicated_items:
+                self._show_no_items_warning()
+                return
+            
+            if not self.processing:
+                return
+
+            all_translation_inputs, all_item_mapping = self._prepare_translation_inputs(deduplicated_items, translation_mode)
+
+            pending_en_set = frozenset(
+                (item.get("en") or "").strip()
+                for _, _, item in deduplicated_items
+                if (item.get("en") or "").strip()
+            )
+            merged_hybrid_cache = {}
+            if translation_mode == "hybrid":
+                from utils.hybrid_context_index import HybridContextIndex
+
+                def _batch_hybrid_context(batch_payloads):
+                    nss = frozenset(p.get("ns") for p in batch_payloads if p.get("ns"))
+                    if not nss:
+                        return ""
+                    if nss not in merged_hybrid_cache:
+                        merged: dict[str, list] = {}
+                        for ns in nss:
+                            sub = translated_texts_by_ns.get(ns) if translated_texts_by_ns else None
+                            if not sub:
+                                continue
+                            for en, zhs in sub.items():
+                                merged.setdefault(en, []).extend(zhs)
+                        merged_hybrid_cache[nss] = HybridContextIndex(merged)
+                    idx = merged_hybrid_cache[nss]
+                    ens = []
+                    for p in batch_payloads:
+                        t = (p.get("text") or "").strip()
+                        if " -> " in t:
+                            ens.append(t.split(" -> ", 1)[0].strip())
+                        else:
+                            ens.append(t)
+                    return idx.build_context(ens, pending_en_set)
+
+            else:
+
+                def _batch_hybrid_context(batch_payloads):
+                    return ""
+
+            # 4. 执行AI翻译
+            self.after(0, lambda: self.workbench.status_label.config(text="正在进行AI翻译..."))
+            
+            # 每次翻译时都从配置文件加载最新设置
+            import utils.config_manager
+            s = utils.config_manager.load_config()
+            
+            # 初始化翻译器
+            translator = AITranslator(s.get('api_services', []))
+            
+            # 计算批次大小或批次数量
+            total_items = len(all_translation_inputs)
+            total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
+            batches = []
+
+            batch_mode, batch_value = self._get_batch_config()
+            
+            # 批次划分逻辑
+            module_isolation = self.module_isolation_var.get()
+
+            if module_isolation:
+                # 模组隔离模式：按命名空间分别创建批次
+                batches = []
+                ns_batches_list = []
+
+                # 按命名空间分组
+                ns_to_items = defaultdict(list)
+                for i, (ns, idx, item) in enumerate(all_item_mapping):
+                    ns_to_items[ns].append(i)
+
+                # 为每个命名空间分别创建批次
+                for ns, indices in ns_to_items.items():
+                    ns_inputs = [all_translation_inputs[i] for i in indices]
+
+                    if batch_mode == "words":
+                        ns_words = sum(self._count_words(item["text"]) for item in ns_inputs)
+                        ns_batches_count = max(1, (ns_words + batch_value - 1) // batch_value)
+                        words_per_batch = max(1, (ns_words + ns_batches_count - 1) // ns_batches_count)
+
+                        current_batch = []
+                        current_words = 0
+
+                        for payload in ns_inputs:
+                            text_words = self._count_words(payload["text"])
+                            current_batch.append(payload)
+                            current_words += text_words
+
+                            if len(current_batch) < len(ns_inputs) and abs(current_words - words_per_batch) <= abs((current_words + self._count_words(ns_inputs[len(current_batch)]["text"]) - words_per_batch)):
+                                ns_batches_list.append((current_batch.copy(), _batch_hybrid_context(current_batch)))
+                                current_batch.clear()
+                                current_words = 0
+
+                        if current_batch:
+                            ns_batches_list.append((current_batch, _batch_hybrid_context(current_batch)))
+                    elif batch_mode == "items":
+                        ns_items_count = len(ns_inputs)
+                        ns_batches_count = max(1, (ns_items_count + batch_value - 1) // batch_value)
+                        items_per_batch = max(1, (ns_items_count + ns_batches_count - 1) // ns_batches_count)
+
+                        for i in range(0, ns_items_count, items_per_batch):
+                            end_idx = min(i + items_per_batch, ns_items_count)
+                            ns_batches_list.append((ns_inputs[i:end_idx], _batch_hybrid_context(ns_inputs[i:end_idx])))
+                    else:
+                        ns_items_count = len(ns_inputs)
+                        ns_batches_count = batch_value
+                        items_per_batch = max(1, (ns_items_count + ns_batches_count - 1) // ns_batches_count)
+
+                        for i in range(0, ns_items_count, items_per_batch):
+                            end_idx = min(i + items_per_batch, ns_items_count)
+                            ns_batches_list.append((ns_inputs[i:end_idx], _batch_hybrid_context(ns_inputs[i:end_idx])))
+
+                batches = ns_batches_list
+                batch_size = batch_value
+            elif batch_mode == "words":
+                # 基于单词数量的批次划分：使用标准的向上取整算法
+                total_words = sum(self._count_words(item["text"]) for item in all_translation_inputs)
+                # 计算需要的批次数：向上取整(total_words / batch_value)
+                total_batches = max(1, (total_words + batch_value - 1) // batch_value)
+                
+                batches = []
+                current_batch = []
+                current_words = 0
+                
+                for payload in all_translation_inputs:
+                    text_words = self._count_words(payload["text"])
+                    
+                    # 检查当前条目加入后是否会超过每批次单词数
+                    if current_words + text_words > batch_value and current_batch:
+                        # 当前批次已达到或超过每批次单词数，创建新批次
+                        batches.append((current_batch.copy(), _batch_hybrid_context(current_batch)))
+                        current_batch.clear()
+                        current_words = 0
+                    
+                    # 添加当前条目到批次
+                    current_batch.append(payload)
+                    current_words += text_words
+                
+                # 添加最后一个批次
+                if current_batch:
+                    batches.append((current_batch, _batch_hybrid_context(current_batch)))
+                
+                # 记录批处理大小（每批次单词数）
+                batch_size = batch_value
+            elif batch_mode == "items":
+                # 基于条目数量的批次划分：平均分配每批次条目数
+                total_items = len(all_translation_inputs)
+                # 计算需要的批次数：向上取整(total_items / batch_value)
+                total_batches = max(1, (total_items + batch_value - 1) // batch_value)
+                # 计算每批次的平均条目数
+                items_per_batch = max(1, (total_items + total_batches - 1) // total_batches)
+                
+                batches = []
+                start_idx = 0
+                
+                for i in range(total_batches):
+                    # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
+                    end_idx = min(start_idx + items_per_batch, total_items)
+                    batch_texts = all_translation_inputs[start_idx:end_idx]
+                    batches.append((batch_texts, _batch_hybrid_context(batch_texts)))
+                    start_idx = end_idx
+                    
+                    # 如果已经处理完所有条目，退出循环
+                    if start_idx >= total_items:
+                        break
+                
+                # 记录批处理大小（平均每批次条目数）
+                batch_size = items_per_batch
+            else:
+                # 基于批次数量的批次划分：直接使用指定的批次数
+                num_batches = batch_value
+                # 计算每批次的条目数量
+                items_per_batch = max(1, (total_items + num_batches - 1) // num_batches)
+                
+                batches = []
+                start_idx = 0
+                
+                for i in range(num_batches):
+                    # 计算当前批次的结束索引，确保最后一个批次包含剩余的所有条目
+                    end_idx = min(start_idx + items_per_batch, total_items)
+                    batch_texts = all_translation_inputs[start_idx:end_idx]
+                    batches.append((batch_texts, _batch_hybrid_context(batch_texts)))
+                    start_idx = end_idx
+                    
+                    # 如果已经处理完所有条目，退出循环
+                    if start_idx >= total_items:
+                        break
+                
+                # 记录批处理大小（每批次条目数）
+                batch_size = items_per_batch
+            
+            total_batches = len(batches)
+            translations_nested = [None] * total_batches
+            
+            with self._ai_apply_lock:
+                self._ai_apply_context = {
+                    "translations_nested": translations_nested,
+                    "batches": batches,
+                    "all_item_mapping": all_item_mapping,
+                    "translation_mode": translation_mode,
+                    "en_to_all_entries": en_to_all_entries,
+                    "applied_batch_indices": set(),
+                }
+            self.after(0, self._refresh_ai_apply_completed_btn_visibility)
+            
+            # 记录翻译设置（模型名仅在混合模式下列出，与 API 实际选用规则一致）
+            mode_display = self.modes_reverse_values.get(translation_mode, translation_mode)
+            if translation_mode == "hybrid":
+                model_display = translator.describe_effective_models(s.get("model"))
+                settings_msg = (
+                    f"AI翻译设置 - 模式: {mode_display}, 模型: {model_display}, 批处理大小: {batch_size}"
+                )
+            else:
+                settings_msg = f"AI翻译设置 - 模式: {mode_display}, 批处理大小: {batch_size}"
+            logging.info(settings_msg)
+            self.workbench.log_callback(settings_msg, "INFO")
+
+            for bi, (batch, ctx) in enumerate(batches, start=1):
+                n_items = len(batch)
+                batch_msg = f"批次 {bi}：需要翻译 {n_items} 个文本"
+                if translation_mode == "hybrid":
+                    nss = {str(p.get("ns")) for p in batch if p.get("ns")}
+                    if nss:
+                        batch_msg += f"，命名空间 {len(nss)} 个"
+                    if ctx:
+                        ctx_lines = len(ctx.splitlines())
+                        batch_msg += f"；混合参考 {ctx_lines} 行 / {len(ctx)} 字"
+                    else:
+                        batch_msg += "；无混合参考"
+                logging.info(batch_msg)
+                self.workbench.log_callback(batch_msg, "INFO")
+
+            # 创建专用的AI翻译线程池
+            from concurrent.futures import ThreadPoolExecutor
+            ai_executor = ThreadPoolExecutor(max_workers=s.get('ai_max_threads', 4))
+            future_map = {}
+            
+            try:
+                # 保存当前翻译器实例和线程池
+                self.translator = translator
+                self.ai_executor = ai_executor
+                
+                for i, (batch, context) in enumerate(batches):
+                    # 检查取消标志
+                    if not self.processing:
+                        break
+                    # 根据模式调整提示词
+                    batch_prompt = self._adjust_prompt_for_mode("", translation_mode, context)
+                    future_map[ai_executor.submit(translator.translate_batch, (i, batch, s['model'], batch_prompt))] = i
+                
+                for i, future in enumerate(as_completed(future_map), 1):
+                    if not self.processing:
+                        # 取消所有未完成的任务
+                        for f in future_map:
+                            if not f.done():
+                                try:
+                                    f.cancel()
+                                except Exception:
+                                    pass
+                        # 取消翻译器任务
+                        if hasattr(self, 'translator') and self.translator:
+                            self.translator.cancel()
+                        # 关闭线程池
+                        if hasattr(self, 'ai_executor') and self.ai_executor:
+                            try:
+                                self.ai_executor.shutdown(wait=False, cancel_futures=True)
+                                self.workbench.log_callback("已关闭AI翻译线程池", "INFO")
+                            except Exception as e:
+                                self.workbench.log_callback(f"关闭线程池时发生错误: {e}", "ERROR")
+                        break
+                    
+                    batch_idx = future_map[future]
+                    batch_result = future.result()
+                    with self._ai_apply_lock:
+                        translations_nested[batch_idx] = batch_result
+                    
+                    self.after(0, self._refresh_ai_apply_completed_btn_visibility)
+                    
+                    # 更新状态
+                    status_text = f"AI翻译中... 已完成 {i}/{total_batches} 个批次"
+                    
+                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                    self.workbench.log_callback(status_text, "INFO")
+            except Exception as e:
+                logging.error(f"执行翻译任务时发生错误: {e}")
+            
+            if not self.processing:
+                # 记录取消日志
+                self.workbench.log_callback("AI翻译已取消，所有任务已终止", "INFO")
+                # 取消翻译器任务
+                if hasattr(self, 'translator') and self.translator:
+                    self.translator.cancel()
+                # 关闭线程池
+                if hasattr(self, 'ai_executor') and self.ai_executor:
+                    try:
+                        self.ai_executor.shutdown(wait=False, cancel_futures=True)
+                        self.workbench.log_callback("已关闭AI翻译线程池", "INFO")
+                    except Exception as e:
+                        self.workbench.log_callback(f"关闭线程池时发生错误: {e}", "ERROR")
+                return
+            
+            # 5. 合并翻译结果
+            processed_batches = []
+            for batch in translations_nested:
+                if batch is not None:
+                    processed_batches.extend(batch)
+                else:
+                    batch_idx = translations_nested.index(batch)
+                    if batch_idx < len(batches):
+                        batch_size = len(batches[batch_idx][0])
+                        processed_batches.extend([None] * batch_size)
+            
+            translations = processed_batches
+            
+            if len(translations) != len(all_translation_inputs):
+                raise ValueError(f"AI返回数量不匹配! 预期:{len(all_translation_inputs)}, 实际:{len(translations)}")
+            
+            # 6. 更新翻译结果，同步到所有相同原文的条目
+            with self._ai_apply_lock:
+                self._ai_apply_context = None
+            self.after(0, self._hide_ai_apply_completed_btn)
+            self.after(0, lambda: self._update_translations(all_item_mapping, translations, translation_mode, en_to_all_entries))
+            
+        except Exception as e:
+            logging.error(f"AI翻译失败: {e}", exc_info=True)
+            # 添加安全检查
+            if self.winfo_exists():
+                from tkinter import messagebox
+                self.after(0, lambda: messagebox.showerror("AI翻译失败", f"执行AI翻译时发生错误:\n{e}"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
+        finally:
+            # 添加安全检查
+            if self.winfo_exists():
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
+                if hasattr(self.workbench, 'mode_switch_btn') and self.workbench.mode_switch_btn.winfo_exists():
+                    self.after(0, lambda: self.workbench.mode_switch_btn.config(state="normal"))
+                if hasattr(self, 'cancel_button') and self.cancel_button.winfo_exists():
+                    self.after(0, lambda: self.cancel_button.config(bootstyle="outline-secondary"))
+                self.after(0, self._refresh_ai_apply_completed_btn_visibility)
+    
+    def _adjust_prompt_for_mode(self, base_prompt, mode, context):
+        """根据翻译模式调整提示词"""
+        core_specs = """核心规范（必须严格遵守）： 
+1. 仅翻译文本，不改动 JSON 结构；输出键必须与输入数字键完全一致。 
+   1.1 输入值可能是字符串，或对象 {"text":"原文","key":"资源键"}；若是对象，仅翻译 text 字段，并将 key 作为语义上下文参考。 
+
+2. 严格保留格式与控制符： 
+   - 占位符：%s、%d、{0}、%1$s 等，保留顺序、数量、拼写，不得新增/删除/重排。 
+   - 换行符：\\n、<br> 等保留。 
+   - 样式代码：§ 代码（如 §0、§r）、& 代码（如 &0、&r）保留原位置。 
+   - 标签：HTML/颜色标签、XML 标签（< > 包围）保留。 
+   - 命令帮助：命令本身（如 /time）和字面量（如 set|add）保留原文；描述性参数名翻译。 
+
+3. 术语与专有名词统一： 
+   - 原版术语：使用已知的 Minecraft 标准译名。 
+   - 模组术语：遵循主模组译法；附属模组名称格式为"主模组：子模组"；多个 ItemGroup 用"丨"分隔。 
+   - 动植物/矿石：有正式译名优先；矿石保留"矿"字（如"黄铁矿矿石"）；同物异名择一统一。 
+   - 树木名： 
+     * 单字树名（如 Oak → 橡）：树苗/树叶 → "橡树"，原木/木板/木制品 → "橡木"。 
+     * 多字不以"木"结尾（如 Spruce → 云杉）：树苗/树叶/原木/木板 → "云杉"，木制品 → "云杉木"。 
+     * 以"木"结尾（如 Mahogany → 桃花心木）：所有形式保留"木"，不加"树"。 
+   - 人名/神话名：有正式译名优先，否则音译。 
+   - 商标名（Patreon、Discord）：未进入中国大陆的保留原文；可归化翻译。 
+   - 网络昵称保留原文。 
+
+4. 固定表达与场景翻译： 
+   - 可通过添加位置标识调换占位符顺序以适应中文语序，翻译后占位符与中文之间不加空格。例如： 
+     输入：`Removed effect %s from %s` → 输出：`已移除%2$s的%1$s效果` 
+   - 字幕（subtitles）：格式为"主体：声音"（如 Bee buzzes → 蜜蜂：嗡嗡），短促、名词化、无句号；保留原文中的箭头/方向符（<、>）。 
+   - 能量单位（FE、RF）、体积单位（MB）保留不译；全称需翻译（如 Forge Energy → Forge 能量）。 
+   - 游戏动作（Sneak、Interact）翻译，不译成具体按键名。 
+   - 键盘功能键（Shift、Ctrl）不译，首字母大写。 
+   - 鼠标操作（Right Click）译作"右击"或"右键点击"。 
+   - 刷怪蛋/实体：体现"X刷怪蛋"等游戏内叫法。 
+   - 玩家死亡消息：保持"被……""因……而死"等死亡播报语气。 
+   - 进度/提示/系统消息：简洁、可读，符合原版提示风格。 
+
+5. 标点与排版： 
+   - 使用中文全角标点（句号、逗号、冒号等）。夹用英文时仅完整英文语境使用英文标点。 
+   - 中文字符与英文字母、数字之间不加空格（Patchouli 手册除外）。 
+   - 数字与英文单位缩写之间按原文处理，不一致时可自行统一。 
+   - 国际单位需翻译（如 km → 千米）。 
+
+6. 难译项处理：可使用保留原文、直译、音译（可加类别词）、归化、解释/括注等方法，但必须与模组整体风格一致。禁止使用不适宜的烂梗。 
+
+7. 若文本已是中文、为空、或仅符号/ID/占位符，返回原文。 
+
+输出要求： 
+- 你的回复必须是且只能是一个 JSON 对象，例如 {"0":"译文1","1":"译文2"}。 
+- 禁止输出任何额外说明、代码块标记或前后缀文本。"""
+        
+        if mode == "polish":
+            # 翻译润色模式：基于已有译文进行优化
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：对输入JSON对象中每个数字键对应的文本进行处理，输入格式为"英文原文 -> 中文译文"，你需要基于英文原文和现有中文译文生成更优质的中文翻译。 
+
+{core_specs}
+
+润色专属要求：
+1. 首先解析输入格式：英文原文 -> 中文译文
+2. 基于英文原文的准确含义，对现有中文译文进行优化
+3. 提高语言流畅度，使表达更符合中文习惯和游戏语境
+4. 统一专业术语，确保术语一致性
+5. 修正语法错误和用词不当
+6. 增强表达的自然度和可读性
+7. 保持原文意思和语气不变
+8. 优化句子结构，提升整体质量
+9. 只返回优化后的中文译文，不要包含英文原文或其他格式
+
+输入：{{input_data_json}}"""
+        elif mode == "hybrid" and context:
+            # 混合翻译模式：结合上下文的翻译要求
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：将输入JSON对象中每个数字键对应的英文字符串值翻译为简体中文，严格参考提供的上下文。 
+
+{core_specs}
+
+翻译参考上下文：
+{context}
+
+混合翻译专属要求：
+1. 严格参考上述上下文进行翻译，确保新翻译与现有翻译风格一致
+2. 使用相同的专业术语和表达方式
+3. 相似文本的翻译保持高度一致性
+4. 新翻译与现有翻译自然融合
+5. 注意上下文语境，避免孤立翻译
+
+输入：{{input_data_json}}"""
+        else:
+            # 默认为基础翻译模式
+            adjusted_prompt = f"""你是 Minecraft（我的世界）本地化专家，只输出 JSON。 
+任务：将输入 JSON 对象中每个数字键对应的英文文本翻译为简体中文。 
+
+{core_specs}
+
+输入：{{input_data_json}}"""
+        
+        return adjusted_prompt
+    
+
+    
+    def _update_translations(self, item_mapping, translations, translation_mode, en_to_all_entries=None):
+        """更新翻译结果"""
+        changes = []
+        updated_count = 0
+        skipped_count = 0
+
+        en_text_to_translation = {}
+
+        for ((ns, idx, _), translation) in zip(item_mapping, translations):
+            if translation and translation.strip():
+                item = self.workbench.translation_data[ns]['items'][idx]
+                original_text = item.get('en', '').strip()
+
+                final_translation = translation.strip()
+                if " -> " in final_translation:
+                    final_translation = final_translation.split(" -> ")[-1].strip()
+
+                punctuation_marks = ".，,。！!？?；;:"
+
+                if original_text and final_translation:
+                    original_has_punctuation = original_text[-1] in punctuation_marks
+                    translation_has_punctuation = final_translation[-1] in punctuation_marks
+
+                    if not original_has_punctuation and translation_has_punctuation:
+                        final_translation = final_translation.rstrip(punctuation_marks)
+
+                en_text_to_translation[original_text] = final_translation
+
+        for en_text, final_translation in en_text_to_translation.items():
+            all_entries = en_to_all_entries.get(en_text, []) if en_to_all_entries else []
+            for (ns, idx, item) in all_entries:
+                previous_translation = item.get('zh', '').strip()
+
+                if translation_mode == "polish":
+                    if final_translation != previous_translation:
+                        changes.append({
+                            'ns': ns,
+                            'key': item.get('key', ''),
+                            'original': previous_translation,
+                            'new': final_translation
+                        })
+                        item['zh'] = final_translation
+                        item['source'] = 'AI润色'
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
+                else:
+                    changes.append({
+                        'ns': ns,
+                        'key': item.get('key', ''),
+                        'original': previous_translation,
+                        'new': final_translation
+                    })
+                    item['zh'] = final_translation
+                    item['source'] = 'AI翻译'
+                    updated_count += 1
+
+        details = {
+            'process_type': 'ai_translation',
+            'changes': changes,
+            'updated_count': updated_count,
+            'skipped_count': skipped_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
+        self.workbench._update_history_buttons()
+
+        self.workbench._populate_namespace_tree()
+        self.workbench._populate_item_list()
+
+        if updated_count > 0:
+            self.workbench._set_dirty(True)
+
+        if translation_mode == "polish":
+            status_text = f"AI翻译润色完成，成功更新 {updated_count} 条翻译，跳过 {skipped_count} 条无变化译文"
+        else:
+            status_text = f"AI翻译完成，成功更新 {updated_count} 条翻译"
+        
+        self.workbench.status_label.config(text=status_text)
+        self.workbench.log_callback(status_text, "SUCCESS")
+        
+        # 更新菜单栏状态
+        if self.workbench.main_window:
+            self.workbench.main_window.update_menu_state()
+    
+    def _collect_translated_items(self, selected_modules):
+        all_items = []
+        for ns in selected_modules:
+            items = self.workbench.translation_data.get(ns, {}).get("items", [])
+            for idx, item in enumerate(items):
+                en_text = item.get("en", "").strip()
+                zh_text = item.get("zh", "").strip()
+                source = item.get("source", "")
+                if en_text and zh_text and source != "原文复制":
+                    all_items.append((ns, idx, item))
+        return all_items
+
+    def _show_no_items_warning(self):
+        if self.winfo_exists():
+            from tkinter import messagebox
+            self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要处理。"))
+            if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+            self.after(0, lambda: setattr(self, "processing", False))
+            if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                self.after(0, lambda: self.start_button.config(state="normal"))
+
+    def _restore_ui_after_processing(self):
+        if self.winfo_exists():
+            self.after(0, lambda: setattr(self, "processing", False))
+            if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                self.after(0, lambda: self.start_button.config(state="normal"))
+
+    def _run_text_processor_worker(self, selected_modules, process_func, process_name, source_label, update_result_func):
+        try:
+            all_items = self._collect_translated_items(selected_modules)
+            if not all_items:
+                self._show_no_items_warning()
+                return
+            if not self.processing:
+                return
+
+            self.after(0, lambda: self.workbench.status_label.config(text=f"正在进行{process_name}..."))
+
+            processed_count = 0
+            total_count = len(all_items)
+            changes = []
+            batch_size = 10
+
+            for i in range(0, total_count, batch_size):
+                if not self.processing:
+                    break
+                batch = all_items[i:i + batch_size]
+                for ns, idx, item in batch:
+                    en_text = item.get("en", "").strip()
+                    zh_text = item.get("zh", "").strip()
+                    if en_text and zh_text:
+                        result_text = process_func(en_text, zh_text)
+                        if result_text != zh_text:
+                            changes.append({'ns': ns, 'key': item.get('key', ''), 'original': zh_text, 'new': result_text})
+                            item['zh'] = result_text
+                            item['source'] = source_label
+                            processed_count += 1
+
+                processed = min(i + batch_size, total_count)
+                status_text = f"{process_name}中... 已处理 {processed}/{total_count} 条"
+                if self.winfo_exists() and hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+
+            if not self.processing:
+                return
+            if self.winfo_exists():
+                self.after(0, lambda: update_result_func(processed_count, total_count, changes))
+
+        except Exception as e:
+            logging.error(f"{process_name}失败: {e}", exc_info=True)
+            if self.winfo_exists():
+                from tkinter import messagebox
+                self.after(0, lambda: messagebox.showerror(f"{process_name}失败", f"执行{process_name}时发生错误:\n{e}"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda err=e: self.workbench.status_label.config(text=f"处理失败: {str(err)}"))
+        finally:
+            self._restore_ui_after_processing()
+
+    def _start_space_removal(self, selected_modules):
+        if not selected_modules:
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        self.workbench.status_label.config(text="正在准备去除空格...")
+        self.workbench.log_callback("正在准备去除空格...", "INFO")
+        threading.Thread(target=self._run_text_processor_worker,
+                         args=(selected_modules, lambda en, zh: __import__('services.space_remover', fromlist=['process_text']).process_text(en, zh),
+                               "去除空格", "去除空格", self._update_space_removal_results),
+                         daemon=True).start()
+
+    def _update_space_removal_results(self, removed_count, total_count, changes):
+        """更新去除空格结果"""
+        # 强制记录当前状态用于撤销
+        details = {
+            'process_type': 'space_removal',
+            'changes': changes,
+            'removed_count': removed_count,
+            'total_count': total_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
+        self.workbench._update_history_buttons()
+        
+        # 更新 UI
+        self.workbench._populate_namespace_tree()
+        self.workbench._populate_item_list()
+        
+        # 设置脏标志
+        if removed_count > 0:
+            self.workbench._set_dirty(True)
+        
+        # 更新状态和日志
+        status_text = f"去除空格完成，成功清理 {removed_count} 条翻译，共处理 {total_count} 条"
+        self.workbench.status_label.config(text=status_text)
+        self.workbench.log_callback(status_text, "SUCCESS")
+        
+        # 更新菜单栏状态
+        if self.workbench.main_window:
+            self.workbench.main_window.update_menu_state()
+    
+    def _start_export(self, selected_modules):
+        """开始导出文本"""
+        from tkinter import filedialog
+        
+        # 检查是否有选中的模组
+        if not selected_modules:
+            # 显示提示，要求先选中模组
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            # 恢复界面状态
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        
+        # 获取导出设置，将显示值转换为内部值
+        export_scope_display = self.export_scope_var.get()
+        export_scope = self.export_scopes_values.get(export_scope_display, "all")
+        
+        export_method_display = self.export_method_var.get()
+        export_method = self.export_method_values.get(export_method_display, "file")
+        
+        # 获取导出数据
+        export_data = []
+        
+        for ns in selected_modules:
+            items = self.workbench.translation_data.get(ns, {}).get("items", [])
+            for idx, item in enumerate(items):
+                en_text = item.get("en", "").strip()
+                zh_text = item.get("zh", "").strip()
+                source = item.get("source", "")
+                
+                # 根据导出范围过滤条目
+                include = False
+                if export_scope == "all":
+                    # 导出全部有原文的条目
+                    if en_text:
+                        include = True
+                elif export_scope == "pending":
+                    # 仅导出待翻译的条目（有原文但无译文）
+                    if en_text and not zh_text:
+                        include = True
+                elif export_scope == "completed":
+                    # 仅导出已翻译的条目（有原文且有译文）
+                    if en_text and zh_text:
+                        include = True
+                
+                if include:
+                    export_data.append({
+                        "key": item["key"],
+                        "en": item["en"],
+                        "zh": item.get("zh", "")
+                    })
+        
+        if not export_data:
+            # 添加安全检查
+            if self.winfo_exists():
+                from tkinter import messagebox
+                self.after(0, lambda: messagebox.showinfo("提示", "没有符合条件的条目需要导出。"))
+                if hasattr(self.workbench, 'status_label') and self.workbench.status_label.winfo_exists():
+                    self.after(0, lambda: self.workbench.status_label.config(text="准备就绪"))
+                self.after(0, lambda: setattr(self, "processing", False))
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.after(0, lambda: self.start_button.config(state="normal"))
+            return
+        
+        # 根据导出方式处理
+        if export_method == "file":
+            # 导出到文件
+            file_path = filedialog.asksaveasfilename(
+                title="选择导出文件",
+                defaultextension=".json",
+                filetypes=[("JSON 文件", "*.json"), ("文本文件", "*.txt"), ("所有文件", "*.*")]
+            )
+            
+            if not file_path:
+                self.processing = False
+                self.start_button.config(state="normal")
+                return
+            
+            try:
+                # 保存到文件
+                import json
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=4)
+                
+                status_text = f"导出完成，共导出 {len(export_data)} 条记录"
+                self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                self.after(0, lambda: self.workbench.log_callback(f"成功导出 {len(export_data)} 条记录到 {file_path}", "SUCCESS"))
+            except Exception as e:
+                logging.error(f"导出文件失败: {e}")
+                from tkinter import messagebox
+                self.after(0, lambda err=e: messagebox.showerror("导出失败", f"导出文件时发生错误:\n{err}"))
+        else:
+            # 导出到剪贴板
+            try:
+                import json
+                export_text = json.dumps(export_data, ensure_ascii=False, indent=4)
+                self.clipboard_clear()
+                self.clipboard_append(export_text)
+                
+                status_text = f"已将 {len(export_data)} 条记录复制到剪贴板"
+                self.after(0, lambda s=status_text: self.workbench.status_label.config(text=s))
+                self.after(0, lambda: self.workbench.log_callback(f"成功将 {len(export_data)} 条记录复制到剪贴板", "SUCCESS"))
+                from tkinter import messagebox
+                self.after(0, lambda: messagebox.showinfo("导出完成", f"已将 {len(export_data)} 条记录复制到剪贴板"))
+            except Exception as e:
+                logging.error(f"复制到剪贴板失败: {e}")
+                from tkinter import messagebox
+                self.after(0, lambda err=e: messagebox.showerror("导出失败", f"复制到剪贴板时发生错误:\n{err}"))
+        
+        self.after(0, lambda: setattr(self, "processing", False))
+        self.after(0, lambda: self.start_button.config(state="normal"))
+    
+    def _start_import(self, selected_modules):
+        """开始导入翻译"""
+        # 检查是否有选中的模组
+        if not selected_modules:
+            # 显示提示，要求先选中模组
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            # 恢复界面状态
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        
+        # 这里可以调用workbench的导入功能
+        # 暂时使用现有的导入机制
+        self.processing = False
+        self.start_button.config(state="normal")
+        
+        # 根据导入来源执行不同操作，将显示值转换为内部值
+        import_source_display = self.import_source_var.get()
+        import_source = self.import_sources_values.get(import_source_display, "file")
+        if import_source == "file":
+            self.workbench._import_from_file()
+        else:
+            self.workbench._import_from_clipboard()
+    
+    def _start_punctuation_correction(self, selected_modules):
+        if not selected_modules:
+            from tkinter import messagebox
+            messagebox.showwarning("操作提示", "请先在左侧选择一个或多个模组进行处理。")
+            self.processing = False
+            self.start_button.config(state="normal")
+            self.cancel_button.config(text="取消")
+            return
+        self.workbench.status_label.config(text="正在准备标点修正...")
+        self.workbench.log_callback("正在准备标点修正...", "INFO")
+        threading.Thread(target=self._run_text_processor_worker,
+                         args=(selected_modules,
+                               lambda en, zh: __import__('services.punctuation_corrector', fromlist=['punctuation_corrector']).punctuation_corrector.correct_punctuation(en, zh),
+                               "标点修正", "标点修正", self._update_punctuation_results),
+                         daemon=True).start()
+    
+    def _update_punctuation_results(self, corrected_count, total_count, changes):
+        """更新标点修正结果"""
+        # 强制记录当前状态用于撤销
+        details = {
+            'process_type': 'punctuation_correction',
+            'changes': changes,
+            'corrected_count': corrected_count,
+            'total_count': total_count
+        }
+        self.workbench.record_operation('BATCH_PROCESS', details, target_iid=None)
+        self.workbench._update_history_buttons()
+        
+        # 更新UI
+        self.workbench._populate_namespace_tree()
+        self.workbench._populate_item_list()
+        
+        # 设置脏标志
+        if corrected_count > 0:
+            self.workbench._set_dirty(True)
+        
+        # 更新状态和日志
+        status_text = f"标点修正完成，成功修正 {corrected_count} 条翻译，共处理 {total_count} 条"
+        self.workbench.status_label.config(text=status_text)
+        self.workbench.log_callback(status_text, "SUCCESS")
+        
+        # 更新菜单栏状态
+        if self.workbench.main_window:
+            self.workbench.main_window.update_menu_state()

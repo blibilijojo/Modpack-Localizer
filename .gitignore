@@ -1,0 +1,107 @@
+# Modpack Localizer - .gitignore
+
+# Python编译生成的文件
+__pycache__/
+*.pyc
+
+# 构建输出
+build/
+dist/
+*.spec
+*.exe
+
+# 日志目录和文件
+logs/
+error_logs/
+aio_error_logs/
+ModpackLocalizer.log
+updater_error.log
+
+# 缓存文件和目录
+.session_cache/
+session_cache.json
+
+# 配置和用户数据文件
+config.json
+user_dict.json
+Dict-Sqlite.db
+Dict-User.db
+Dict-Community.db
+term_database.json
+
+# 排除所有txt和json格式的文件
+*.txt
+*.json
+
+# 明确排除index.json文件
+index.json
+
+# IDE和编辑器文件
+.vscode/
+.idea/
+.trae/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# 操作系统生成的文件
+Thumbs.db
+.DS_Store
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# 加密和锁文件
+.encryption_key
+.__ModpackLocalizer.lock
+
+# 测试目录
+汉化包测试/
+
+# 明确包含的文件和目录（确保重要文件不被忽略）
+!main.py
+!README.md
+!requirements.txt
+!_version.py
+!updater.py
+!core/
+!gui/
+!services/
+!utils/
+!.github/
+
+# Cursor Helper Version: 0.1.5
+# Cursor Helper AI 相关文件
+# 忽略 .cursor/commands 目录（Cursor 命令文件）
+.cursor/commands/
+
+# cursor-helper 目录：只允许提交报告文件
+# 忽略所有 diff 目录（临时文件）
+cursor-helper/**/diff/
+
+# 忽略所有 docs 目录（PRD和技术方案文档）
+cursor-helper/**/docs/
+
+# 忽略 rule_improvements.md（临时规则优化建议文件）
+cursor-helper/**/rule_improvements.md
+
+# 忽略 fix 目录下的修复计划文件（临时文件）
+cursor-helper/**/fix/fix_plan.md
+
+# 忽略评审报告中的 files 目录（详细的文件评审报告，diff 报告）
+cursor-helper/**/review/reports/files/
+
+# 备份文件（.bak）
+# ⚠️ 重要提示：如果因为 Cursor 无法访问文件而通过文件操作命令修改文件时，可能会遗留 .bak 备份文件
+# 这些备份文件应该被忽略，请记得及时删除遗留的 .bak 文件
+*.bak
+
+# 保留所有报告文件：
+# - cursor-helper/**/review/reports/summary/** （总结性评审报告）
+# - cursor-helper/**/fix/fix_report.md （修复报告）
+# - cursor-helper/**/organize-rules/** （规则整理报告）

@@ -1,0 +1,9 @@
+# requirements.txt
+
+ttkbootstrap
+requests
+packaging
+psutil
+openai
+concurrent-log-handler
+ftb-snbt-lib

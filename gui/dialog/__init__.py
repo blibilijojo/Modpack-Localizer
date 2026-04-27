@@ -1,0 +1,2 @@
+from __future__ import annotations
+from .github_version_select import GitHubVersionSelectDialog

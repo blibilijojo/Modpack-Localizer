@@ -1,0 +1,5 @@
+MODRINTH_API_BASE = "https://api.modrinth.com/v2"
+CURSEFORGE_API_BASE = "https://api.curseforge.com"
+GITHUB_API_BASE = "https://api.github.com"
+DICT_RELEASE_API_URL = f"{GITHUB_API_BASE}/repos/VM-Chinese-translate-group/i18n-Dict-Extender/releases/latest"
+LATEST_RELEASE_API_URL = f"{GITHUB_API_BASE}/repos/blibilijojo/Modpack-Localizer/releases/latest"

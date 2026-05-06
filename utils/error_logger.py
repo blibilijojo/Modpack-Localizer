@@ -9,9 +9,9 @@ LOG_DIR = Path("logs") / "errors"
 AI_ERROR_LOG_DIR = LOG_DIR / "ai"
 GENERAL_ERROR_LOG_DIR = LOG_DIR / "general"
 MAX_LOG_DAYS = 10
-_CLEAN_INTERVAL = 100
+_CLEAN_INTERVAL_SECONDS = 3600  # 每小时清理一次
 
-_log_counter = 0
+_last_clean_time: float = 0.0
 
 
 class ErrorLogger:
@@ -37,10 +37,11 @@ class ErrorLogger:
 
     @staticmethod
     def _maybe_clean():
-        global _log_counter
-        _log_counter += 1
-        if _log_counter >= _CLEAN_INTERVAL:
-            _log_counter = 0
+        global _last_clean_time
+        import time
+        current_time = time.time()
+        if current_time - _last_clean_time >= _CLEAN_INTERVAL_SECONDS:
+            _last_clean_time = current_time
             ErrorLogger._clean_old_logs()
 
     @staticmethod

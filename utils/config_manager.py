@@ -198,7 +198,7 @@ def _migrate_config(config: dict) -> tuple[dict, bool]:
 
     for key, value in DEFAULT_CONFIG.items():
         if key not in config:
-            logging.warning(f"配置文件中缺少 '{key}' 项目，将使用默认值进行补充。")
+            logging.info(f"配置文件中缺少 '{key}' 项目，将使用默认值进行补充。")
             config[key] = value
             config_updated = True
 
@@ -293,10 +293,12 @@ def invalidate_config_cache():
     _config_cache_mtime = 0.0
 
 def auto_save_config(func):
+    """装饰器：函数执行后自动保存配置。
+    假设被装饰函数的第一个参数是 config dict。"""
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
-        save_config(args[0])
+    def wrapper(config: dict, *args, **kwargs):
+        result = func(config, *args, **kwargs)
+        save_config(config)
         return result
     return wrapper
 

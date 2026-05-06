@@ -15,6 +15,7 @@ from core.models import (
 )
 from core.mod_fingerprint import jar_mod_fingerprints_and_meta
 from core.mod_repository import ModrinthClient, CurseForgeClient
+from core.constants import EXTRACTOR_SCAN_MAX_WORKERS, EXTRACTOR_FINGERPRINT_MAX_WORKERS, JAR_READ_CHUNK_SIZE
 from utils.file_utils import decode_json_value_with_unicode
 
 
@@ -116,7 +117,7 @@ class Extractor:
                 logging.error(f"无法读取JAR文件: {jar_file.name} - 错误: {e}")
             return jar_file.name, local_lang_files
 
-        max_workers = min(8, len(jar_files), max(1, (os.cpu_count() or 1)))
+        max_workers = min(EXTRACTOR_SCAN_MAX_WORKERS, len(jar_files), max(1, (os.cpu_count() or 1)))
         all_results: list[tuple[str, list[ZipFileResult]]] = []
 
         if len(jar_files) <= 4:
@@ -255,8 +256,8 @@ class Extractor:
         modrinth_hashes: list[str] = []
         hash_to_jar: dict[str, str] = {}
         cache_hits = 0
-        cache_lock = threading.Lock()
-        completed: list[int] = [0]
+        data_lock = threading.Lock()  # 保护所有共享数据结构
+        completed = 0
         total_jars = len(jars_to_process)
 
         def _register_jar_mod_info(
@@ -265,32 +266,41 @@ class Extractor:
             curseforge_hash: str,
             modrinth_hash: str,
         ) -> None:
-            mod_info_by_jar[jar_name] = {
-                'curseforge_hash': curseforge_hash,
-                'modrinth_hash': modrinth_hash,
-            }
-            if curseforge_hash:
-                curseforge_hashes.append(curseforge_hash)
-                hash_to_jar[curseforge_hash] = jar_name
-            if modrinth_hash:
-                modrinth_hashes.append(modrinth_hash)
-                hash_to_jar[modrinth_hash] = jar_name
-            completed[0] += 1
+            nonlocal completed
+            with data_lock:
+                mod_info_by_jar[jar_name] = {
+                    'curseforge_hash': curseforge_hash,
+                    'modrinth_hash': modrinth_hash,
+                }
+                if curseforge_hash:
+                    curseforge_hashes.append(curseforge_hash)
+                    hash_to_jar[curseforge_hash] = jar_name
+                if modrinth_hash:
+                    modrinth_hashes.append(modrinth_hash)
+                    hash_to_jar[modrinth_hash] = jar_name
+                completed += 1
+                c = completed
             if extraction_progress_callback:
-                extraction_progress_callback("fingerprint", completed[0], total_jars)
-            c = completed[0]
+                extraction_progress_callback("fingerprint", c, total_jars)
             if c % 10 == 0 or c == total_jars:
                 logging.info(f"模组指纹进度 {c}/{total_jars}")
 
         def _process_one_jar(jf: Path):
             try:
+                # 流式计算 SHA1，避免大文件一次性读入内存
+                sha1 = hashlib.sha1()
                 with open(jf, 'rb') as f:
-                    data = f.read()
+                    while True:
+                        chunk = f.read(JAR_READ_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        sha1.update(chunk)
+                data = None  # 不保留完整数据
             except OSError as e:
                 logging.warning("无法读取 JAR: %s — %s", jf, e)
                 return None
-            modrinth_hash = hashlib.sha1(data).hexdigest()
-            with cache_lock:
+            modrinth_hash = sha1.hexdigest()
+            with data_lock:
                 rec = fingerprint_cache.get(modrinth_hash)
             if rec is not None:
                 return (
@@ -300,16 +310,23 @@ class Extractor:
                     rec["curseforge_hash"],
                     rec["modrinth_hash"],
                 )
+            # 缓存未命中，需要读取完整数据计算 MurmurHash
+            try:
+                with open(jf, 'rb') as f:
+                    data = f.read()
+            except OSError as e:
+                logging.warning("无法读取 JAR: %s — %s", jf, e)
+                return None
             jar_name, curseforge_hash, mr = jar_mod_fingerprints_and_meta(
                 jf, data, modrinth_hash
             )
-            with cache_lock:
+            with data_lock:
                 fingerprint_cache.put(modrinth_hash, {
                     'curseforge_hash': curseforge_hash,
                 })
             return (False, jf, jar_name, curseforge_hash, mr)
 
-        max_workers = min(32, len(jars_to_process), max(1, (os.cpu_count() or 1) * 4))
+        max_workers = min(EXTRACTOR_FINGERPRINT_MAX_WORKERS, len(jars_to_process), max(1, (os.cpu_count() or 1) * 4))
         logging.debug(
             "模组指纹：%d 个线程；键为整包 SHA1，命中则跳过 MurmurHash 计算",
             max_workers,
@@ -330,7 +347,8 @@ class Extractor:
                             continue
                         hit, jf, jar_name, cf_h, mr_h = row
                         if hit:
-                            cache_hits += 1
+                            with data_lock:
+                                cache_hits += 1
                         _register_jar_mod_info(jf, jar_name, cf_h, mr_h)
                     except Exception as e:
                         logging.error(f"处理JAR文件时发生错误: {e}")
@@ -345,7 +363,7 @@ class Extractor:
                 mod_scan_cache.cache_path(),
             )
 
-        return (mod_info_by_jar, cache_hits, hash_to_jar, curseforge_hashes, modrinth_hashes, completed[0])
+        return (mod_info_by_jar, cache_hits, hash_to_jar, curseforge_hashes, modrinth_hashes, completed)
 
     def _resolve_mod_names(
         self,
@@ -406,7 +424,7 @@ class Extractor:
             elif info['modrinth_hash'] in modrinth_info:
                 loaders_info = modrinth_info[info['modrinth_hash']].get('loaders', "")
 
-            logging.debug(f"模组: {mod_name}, 版本: {game_version}, 加载器: {loaders_info}, 来源: {source}")
+            logging.info(f"模组: {mod_name}, 版本: {game_version}, 加载器: {loaders_info}, 来源: {source}")
 
             module_names.append({
                 'name': mod_name,

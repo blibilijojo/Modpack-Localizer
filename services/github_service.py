@@ -423,12 +423,11 @@ class GitHubService:
                 logging.info(f'创建PR成功: {pr_url}')
                 return True, f'创建PR成功，PR标题: {pr_title}'
             else:
-                logging.info(f'创建PR成功: {self.upstream_repo} {head_branch} -> {base_branch}')
-                return True, f'创建PR成功，PR标题: {pr_title}'
+                logging.error(f'创建PR失败: API返回空结果')
+                return False, f'创建PR失败: API返回空结果'
         except Exception as e:
             logging.error(f'创建PR失败: {str(e)}')
-            logging.info(f'模拟创建PR成功: {self.upstream_repo} {self.branch} -> main')
-            return True, f'创建PR成功（模拟），PR标题: {pr_title}'
+            return False, f'创建PR失败: {str(e)}'
     
     def get_branches(self):
         """获取仓库分支列表"""

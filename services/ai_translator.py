@@ -77,6 +77,12 @@ class AITranslator:
         self._cancelled = False
         logging.info("翻译器取消标志已重置")
 
+    def _is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def _cancelled_result(self, batch_inner: list) -> list[str | None]:
+        return [None] * len(batch_inner)
+
     def _get_client(self, api_key: str) -> openai.OpenAI:
         service = self.key_to_service.get(api_key)
         endpoint = service.get("endpoint") if service else None

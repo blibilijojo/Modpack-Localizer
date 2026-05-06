@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import sqlite3
+import os
 from collections import defaultdict
 from utils import config_manager
 from core.models import resolve_origin_name_conflict
@@ -105,17 +106,40 @@ class DictionaryManager:
 
     def get_all_dictionaries(self, community_dict_dir: str, progress_callback=None) -> tuple[dict, dict[str, str], dict[str, list[dict]]]:
         cache_key = f"all_dicts_{community_dict_dir or 'none'}"
+
+        # 基于文件 mtime 检查缓存是否仍然有效
         if cache_key in self._cache:
-            logging.debug("从缓存中获取词典数据")
-            if progress_callback:
-                progress_callback("加载词典缓存...", 100)
-            return self._cache[cache_key]
+            dict_file_path = Path(community_dict_dir) / "Dict-Sqlite.db" if community_dict_dir else None
+            cached_mtime = self._cache.get(f"{cache_key}_mtime", 0)
+            current_mtime = 0
+            if dict_file_path and dict_file_path.is_file():
+                try:
+                    current_mtime = os.path.getmtime(dict_file_path)
+                except OSError:
+                    pass
+            if current_mtime == cached_mtime:
+                logging.debug("从缓存中获取词典数据")
+                if progress_callback:
+                    progress_callback("加载词典缓存...", 100)
+                return self._cache[cache_key]
+            else:
+                logging.debug("词典文件已更新，重新加载")
+                self.clear_cache()
 
         user_dict = self.load_user_dictionary()
         community_dict_by_key, community_dict_by_origin = self.load_community_dictionary(community_dict_dir, progress_callback)
 
         result = (user_dict, community_dict_by_key, community_dict_by_origin)
         self._cache[cache_key] = result
+        # 存储词典文件 mtime 用于缓存失效检查
+        dict_file_path = Path(community_dict_dir) / "Dict-Sqlite.db" if community_dict_dir else None
+        if dict_file_path and dict_file_path.is_file():
+            try:
+                self._cache[f"{cache_key}_mtime"] = os.path.getmtime(dict_file_path)
+            except OSError:
+                self._cache[f"{cache_key}_mtime"] = 0
+        else:
+            self._cache[f"{cache_key}_mtime"] = 0
 
         user_count = len(user_dict.get('by_key', {})) + len(user_dict.get('by_origin_name', {}))
         community_count = len(community_dict_by_key) + len(community_dict_by_origin)

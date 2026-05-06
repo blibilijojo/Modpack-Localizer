@@ -5,6 +5,7 @@ from datetime import datetime
 from core.workflow import Workflow
 from core.models import PackSettings, ExtractionResult, NamespaceInfo, TranslationResult, LanguageEntry, TranslationSource
 from core.exceptions import ConfigurationError, ExtractionError, TranslationError, BuildError
+from core.data_transformer import build_workbench_data, build_name_lookup, resolve_mod_metadata
 
 DEFAULT_NAME_TEMPLATE = "汉化资源包_{timestamp}"
 DEFAULT_DESC_TEMPLATE = (
@@ -33,108 +34,15 @@ class Orchestrator:
         self.project_name = 'Unnamed_Project'
         self.workflow = Workflow()
 
-    @staticmethod
-    def _build_name_lookup(name_list: list[dict]) -> dict[str, dict]:
-        lookup: dict[str, dict] = {}
-        for entry in name_list:
-            source = entry['source']
-            jar_name = source[:-4] if source.endswith('.jar') else source
-            lookup[jar_name.lower()] = entry
-        return lookup
-
-    @staticmethod
-    def _resolve_mod_metadata(
-        ns: str,
-        extraction_result: ExtractionResult,
-        module_names_lookup: dict[str, dict],
-        curseforge_lookup: dict[str, dict],
-        modrinth_lookup: dict[str, dict],
-    ) -> dict[str, str]:
-        jar_name_info = extraction_result.namespace_info.get(ns)
-        jar_name = jar_name_info.jar_name if jar_name_info else 'Unknown'
-
-        jar_name_without_ext = jar_name
-        if " (both formats)" in jar_name_without_ext:
-            jar_name_without_ext = jar_name_without_ext.replace(" (both formats)", "")
-        if jar_name_without_ext.endswith('.jar'):
-            jar_name_without_ext = jar_name_without_ext[:-4]
-
-        curseforge_entry = curseforge_lookup.get(jar_name_without_ext.lower())
-        modrinth_entry = modrinth_lookup.get(jar_name_without_ext.lower())
-
-        mod_name = ""
-        curseforge_name = ""
-        modrinth_name = ""
-        git_name = ""
-        game_version = ""
-        loaders = ""
-
-        if curseforge_entry:
-            curseforge_name = curseforge_entry.get('curseforge_name', '')
-            if 'slug' in curseforge_entry:
-                git_name = curseforge_entry['slug']
-            if 'game_version' in curseforge_entry:
-                game_version = curseforge_entry['game_version']
-
-        if modrinth_entry:
-            modrinth_name = modrinth_entry.get('modrinth_name', '')
-            if 'slug' in modrinth_entry:
-                git_name = f"modrinth-{modrinth_entry['slug']}"
-            if not game_version and 'game_version' in modrinth_entry:
-                game_version = modrinth_entry['game_version']
-
-        if not mod_name:
-            module_entry = module_names_lookup.get(jar_name_without_ext.lower())
-            if module_entry:
-                mod_name = module_entry.get('name', '')
-
-        if curseforge_entry and 'loaders' in curseforge_entry:
-            loaders = curseforge_entry.get('loaders', "")
-        elif modrinth_entry and 'loaders' in modrinth_entry:
-            loaders = modrinth_entry.get('loaders', "")
-
-        return {
-            'mod_name': mod_name,
-            'jar_name': jar_name,
-            'curseforge_name': curseforge_name,
-            'modrinth_name': modrinth_name,
-            'git_name': git_name,
-            'game_version': game_version,
-            'loaders': loaders,
-        }
-
     def _build_workbench_data(
         self,
         translation_result: TranslationResult,
         extraction_result: ExtractionResult,
     ) -> dict:
-        module_names_lookup = self._build_name_lookup(self.module_names)
-        curseforge_lookup = self._build_name_lookup(self.curseforge_names)
-        modrinth_lookup = self._build_name_lookup(self.modrinth_names)
-
-        workbench_data: dict[str, dict] = {}
-
-        for ns, entries in translation_result.workbench_data.items():
-            items = []
-            for key, entry in entries.items():
-                items.append({
-                    'key': entry.key,
-                    'en': entry.en,
-                    'zh': entry.zh,
-                    'source': entry.source
-                })
-
-            metadata = self._resolve_mod_metadata(
-                ns, extraction_result, module_names_lookup, curseforge_lookup, modrinth_lookup
-            )
-
-            workbench_data[ns] = {
-                **metadata,
-                'display_name': ns,
-                'items': items
-            }
-
-        return workbench_data
+        return build_workbench_data(
+            translation_result, extraction_result,
+            self.module_names, self.curseforge_names, self.modrinth_names,
+        )
 
     def _handle_error(self, error: Exception, title: str, message: str):
         logging.error(f"{title}：{error}", exc_info=True)

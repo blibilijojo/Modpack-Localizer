@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from core.class_parser import ExtractedString, parse_constant_pool_strings
 
 _STRING_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
@@ -42,26 +43,6 @@ _LOGGER_PATTERN = re.compile(
     r"(?:LOGGER|logger|LOG|log|LOGGER_FACTORY)\s*\.\s*(?:info|warn|error|debug|trace|fatal)\s*\(",
     re.IGNORECASE,
 )
-
-
-class ExtractedString:
-    __slots__ = ("text", "file", "line", "context_line", "priority")
-
-    def __init__(self, text: str, file: str, line: int, context_line: str, priority: str):
-        self.text = text
-        self.file = file
-        self.line = line
-        self.context_line = context_line
-        self.priority = priority
-
-    def to_dict(self) -> dict:
-        return {
-            "text": self.text,
-            "file": self.file,
-            "line": self.line,
-            "context": self.context_line[:120],
-            "priority": self.priority,
-        }
 
 
 def _is_translatable(text: str) -> bool:
@@ -149,7 +130,7 @@ def extract_strings_from_class_constants(class_dir: Path) -> list[ExtractedStrin
         except Exception:
             continue
 
-        strings = _parse_constant_pool_strings(data)
+        strings = parse_constant_pool_strings(data)
         rel_path = str(cls_file.relative_to(class_dir))
 
         for s in strings:
@@ -169,50 +150,3 @@ def extract_strings_from_class_constants(class_dir: Path) -> list[ExtractedStrin
     logging.info(f"常量池提取完成: {len(results)} 条唯一字符串")
     return results
 
-
-def _parse_constant_pool_strings(data: bytes) -> list[str]:
-    import struct
-
-    if len(data) < 10 or data[:4] != b'\xca\xfe\xba\xbe':
-        return []
-
-    strings: list[str] = []
-    try:
-        idx = 8
-        cp_count = struct.unpack(">H", data[8:10])[0]
-        idx = 10
-
-        i = 1
-        while i < cp_count and idx < len(data):
-            tag = data[idx]
-            idx += 1
-
-            if tag == 1:
-                if idx + 2 > len(data):
-                    break
-                length = struct.unpack(">H", data[idx:idx + 2])[0]
-                idx += 2
-                if idx + length > len(data):
-                    break
-                try:
-                    s = data[idx:idx + length].decode("utf-8", errors="replace")
-                    strings.append(s)
-                except Exception:
-                    pass
-                idx += length
-            elif tag in (7, 8, 16, 19, 20):
-                idx += 2
-            elif tag in (3, 4, 9, 10, 11, 12, 17, 18):
-                idx += 4
-            elif tag in (5, 6):
-                idx += 8
-                i += 1
-            elif tag == 15:
-                idx += 3
-            else:
-                break
-            i += 1
-    except Exception:
-        pass
-
-    return strings

@@ -12,6 +12,7 @@ from .models import (
     resolve_origin_name_conflict,
     JSON_KEY_VALUE_PATTERN, LANG_KV_PATTERN
 )
+from .constants import TRANSLATOR_VALIDATION_CACHE_SIZE, TRANSLATOR_MAX_WORKERS, TRANSLATOR_SERIAL_THRESHOLD
 
 class Translator:
 
@@ -26,7 +27,7 @@ class Translator:
         return resolve_origin_name_conflict(candidates)
 
     @staticmethod
-    @lru_cache(maxsize=131072)
+    @lru_cache(maxsize=TRANSLATOR_VALIDATION_CACHE_SIZE)
     def _is_valid_translation_cached(text: str) -> bool:
         if not text or not text.strip():
             return False
@@ -42,6 +43,11 @@ class Translator:
         if text is None:
             return False
         return self._is_valid_translation_cached(text)
+
+    @staticmethod
+    def clear_validation_cache():
+        """清理翻译验证缓存，释放内存。"""
+        Translator._is_valid_translation_cached.cache_clear()
 
     def _decide_translation_for_key(
         self,
@@ -246,7 +252,7 @@ class Translator:
                 with source_counts_lock:
                     source_counts[source] = source_counts.get(source, 0) + 1
 
-        if namespace_count <= 3:
+        if namespace_count <= TRANSLATOR_SERIAL_THRESHOLD:
             logging.info(f"使用串行方式处理 {namespace_count} 个命名空间")
             for namespace, english_entries in namespaces:
                 _, ns_result = self._process_namespace_task(
@@ -259,7 +265,7 @@ class Translator:
         else:
             logging.info(f"使用并行方式处理 {namespace_count} 个命名空间")
 
-            max_workers = min(8, namespace_count)
+            max_workers = min(TRANSLATOR_MAX_WORKERS, namespace_count)
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [

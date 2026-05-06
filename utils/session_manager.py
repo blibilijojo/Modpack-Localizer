@@ -135,14 +135,9 @@ def save_session(project_tabs: list):
         except Exception as e:
             logging.error(f"保存标签页缓存时出错：{e}")
 
+    existing_uuids = {tab.tab_uuid for tab in project_tabs if hasattr(tab, 'tab_uuid')}
     for tab_uuid in list(index_data["tabs"].keys()):
-        is_tab_exists = False
-        for tab in project_tabs:
-            if hasattr(tab, 'tab_uuid') and tab.tab_uuid == tab_uuid:
-                is_tab_exists = True
-                break
-
-        if not is_tab_exists:
+        if tab_uuid not in existing_uuids:
             tab_file = CACHE_ROOT / f"{tab_uuid}.json"
             if tab_file.exists():
                 try:

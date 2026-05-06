@@ -6,6 +6,13 @@ from pathlib import Path
 import logging
 
 _UNICODE_ESCAPE_RE = re.compile(r'\\u([0-9a-fA-F]{4})')
+_ESCAPE_PLACEHOLDER_MAP = {
+    '\\n': '\x00NL\x00',
+    '\\t': '\x00TB\x00',
+    '\\r': '\x00CR\x00',
+}
+_ESCAPE_RESTORE_MAP = {v: k for k, v in _ESCAPE_PLACEHOLDER_MAP.items()}
+_ESCAPE_PLACEHOLDER_RE = re.compile(r'\x00(NL|TB|CR)\x00')
 
 
 def is_frozen() -> bool:
@@ -15,15 +22,13 @@ def is_frozen() -> bool:
 def decode_json_value_with_unicode(value: str) -> str:
     if not value:
         return value
-    temp_value = value.replace('\\n', '__NEWLINE__')
-    temp_value = temp_value.replace('\\t', '__TAB__')
-    temp_value = temp_value.replace('\\r', '__CARRIAGE__')
-    temp_value = _UNICODE_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), temp_value)
-    temp_value = temp_value.replace('__NEWLINE__', '\\n')
-    temp_value = temp_value.replace('__TAB__', '\\t')
-    temp_value = temp_value.replace('__CARRIAGE__', '\\r')
-    temp_value = temp_value.replace('\\"', '"')
-    return temp_value
+    # 用单次 re.sub 替代多次 str.replace
+    for escaped, placeholder in _ESCAPE_PLACEHOLDER_MAP.items():
+        value = value.replace(escaped, placeholder)
+    value = _UNICODE_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), value)
+    value = _ESCAPE_PLACEHOLDER_RE.sub(lambda m: _ESCAPE_RESTORE_MAP[m.group(0)], value)
+    value = value.replace('\\"', '"')
+    return value
 
 
 def load_json(file_path: Path) -> dict | None:

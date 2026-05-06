@@ -31,6 +31,27 @@ class QuestWorkflowManager:
 
     def _log(self, message, level="INFO"):
         self.main_window.log_message(message, level)
+
+    def reinitialize_conversion_data(self):
+        if not self._detect_quests():
+            raise FileNotFoundError("在指定的实例文件夹中，未能自动找到任何支持的任务文件。")
+
+        quest_files_io = []
+        for name, path_str in self.quest_files_map.items():
+            file_bytes = Path(path_str).read_bytes()
+            bytes_io = BytesIO(file_bytes)
+            bytes_io.name = name
+            quest_files_io.append(bytes_io)
+
+        if self.quest_type == "ftb":
+            converter = FTBQuestConverter()
+        else:
+            converter = BQMQuestConverter()
+
+        conversion_manager = ConversionManager(converter)
+        self.converted_quest_data, self.source_lang_dict = conversion_manager(
+            "quest", quest_files_io, {}
+        )
         
     def _detect_quests(self):
         found_ftb_files = list((self.instance_path / "config" / "ftbquests" / "quests").glob("**/*.snbt"))
@@ -110,7 +131,8 @@ class QuestWorkflowManager:
             finish_callback=self._on_workbench_finish,
             cancel_callback=self._on_workbench_cancel,
             project_name="任务汉化",
-            main_window_instance=self.main_window
+            main_window_instance=self.main_window,
+            project_type="quest"
         )
         
         self.main_window.workbench_instance = workbench

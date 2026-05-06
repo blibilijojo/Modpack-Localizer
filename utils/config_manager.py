@@ -76,6 +76,7 @@ DEFAULT_CONFIG = {
     "ai_retry_max_delay": 120.0,
     "ai_retry_backoff_factor": 2.0,
     "ai_retry_rate_limit_cooldown": 60.0,
+    "disable_key_cooldown": False,
     "mods_dir": "", "output_dir": "",
     "community_dict_dir": "",
     "community_pack_paths": [],

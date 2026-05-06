@@ -46,4 +46,5 @@ __all__ = [
     'resolve_origin_name_conflict',
     'ModrinthClient',
     'CurseForgeClient',
+    'ServiceResult',
 ]

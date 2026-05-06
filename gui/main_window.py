@@ -53,6 +53,8 @@ class ProjectTab:
         self.jar_dir_var = tk.StringVar()
         self.instance_dir_var = tk.StringVar()
         self.modpack_name_var = tk.StringVar()
+        self.source_dir_var = tk.StringVar()
+        self.jar_path_var = tk.StringVar()
 
         self._create_widgets()
         if show_initial_welcome:
@@ -154,32 +156,60 @@ class ProjectTab:
         current_settings = config_manager.load_config()
         finish_text = ""
 
-        if self.project_type == "mod":
+        from gui.project_type_config import get_project_type_config
+        type_config = get_project_type_config(self.project_type)
+        finish_text = type_config.finish_button_text
+
+        if self.project_type == "palladium":
+            if not self.project_info or not self.project_info.get("jar_path"):
+                self.log_message("项目信息丢失，无法恢复 Palladium 汉化流程。", "ERROR")
+                self._show_welcome_view()
+                self._is_loading = False
+                return
+
+            from gui.palladium_workflow_manager import PalladiumWorkflowManager
+            self.palladium_manager = PalladiumWorkflowManager(project_info=self.project_info, main_window=self)
+            try:
+                self.palladium_manager._scan_jar()
+                logging.info(f"Palladium 恢复: 已扫描 {len(self.palladium_manager._jar_data)} 个能力文件")
+            except Exception as e:
+                logging.error(f"Palladium 恢复扫描 JAR 失败: {e}", exc_info=True)
+
+            def run_palladium_build(trans_dict):
+                threading.Thread(target=self.palladium_manager.run_build_phase, args=(trans_dict,), daemon=True).start()
+            self._run_palladium_build_phase = run_palladium_build
+
+        elif self.project_type == "quest":
+            if not self.project_info:
+                self.log_message("项目信息丢失，无法恢复任务汉化流程。", "ERROR")
+                self._show_welcome_view()
+                self._is_loading = False
+                return
+
+            self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
+            try:
+                self.quest_manager.reinitialize_conversion_data()
+            except Exception as e:
+                self.log_message(f"恢复任务汉化数据失败: {e}", "ERROR")
+                self._show_welcome_view()
+                self._is_loading = False
+                return
+
+            def run_quest_build(trans_dict):
+                threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True).start()
+            self._run_quest_build_phase = run_quest_build
+
+        else:
             self.orchestrator = Orchestrator(
                 settings=current_settings,
                 update_progress=self.update_progress,
                 log_callback=self.log_message,
                 show_error_callback=lambda title, msg: self.root.after(0, lambda: messagebox.showerror(title, msg)),
-                launch_workbench_callback=lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, current_settings, None, "完成并生成资源包", save_session_after=True)
+                launch_workbench_callback=lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, current_settings, None, finish_text, save_session_after=True)
             )
-            # 传递停止事件
             self.orchestrator.stop_event = self.stop_event
             self.orchestrator.raw_english_files = workbench_state['raw_english_files']
             self.orchestrator.namespace_formats = workbench_state['namespace_formats']
-            finish_text = "完成并生成资源包"
-        
-        elif self.project_type == "quest":
-            if not self.project_info:
-                self.log_message("项目信息丢失，无法恢复任务汉化流程。", "ERROR")
-                self._show_welcome_view()
-                self._is_loading = False  # 重置加载标志
-                return
-
-            self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
-            def run_quest_build(trans_dict):
-                threading.Thread(target=self.quest_manager._run_build_phase, args=(trans_dict,), daemon=True).start()
-            self._run_quest_build_phase = run_quest_build
-            finish_text = "完成"
 
         self._show_workbench_view(
             workbench_data=workbench_state['workbench_data'],
@@ -342,21 +372,19 @@ class ProjectTab:
         new_project_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         new_project_frame.rowconfigure(2, weight=1)
 
-        mod_rb = ttk.Radiobutton(new_project_frame, text="模组汉化", variable=self.project_type_var, value="mod", style="TRadiobutton")
-        mod_rb.pack(anchor="w", pady=(5, 0))
-        ttk.Label(new_project_frame, text="推荐流程。扫描Mods文件夹，生成标准汉化资源包。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+        from gui.project_type_config import get_all_project_types
+        desc_labels = []
+        for ptype_config in get_all_project_types():
+            rb = ttk.Radiobutton(new_project_frame, text=ptype_config.display_name, variable=self.project_type_var, value=ptype_config.type_id, style="TRadiobutton")
+            rb.pack(anchor="w", pady=(5, 0))
+            desc_label = ttk.Label(new_project_frame, text=ptype_config.description, bootstyle="secondary", wraplength=1)
+            desc_label.pack(anchor="w", padx=(20, 0), pady=(0, 15), fill="x")
+            desc_labels.append(desc_label)
 
-        mod_search_rb = ttk.Radiobutton(new_project_frame, text="模组搜索", variable=self.project_type_var, value="modsearch", style="TRadiobutton")
-        mod_search_rb.pack(anchor="w", pady=(5, 0))
-        ttk.Label(new_project_frame, text="从Modrinth和CurseForge平台搜索模组，自动下载并启动汉化流程。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
-
-        quest_rb = ttk.Radiobutton(new_project_frame, text="任务汉化", variable=self.project_type_var, value="quest", style="TRadiobutton")
-        quest_rb.pack(anchor="w", pady=(5, 0))
-        ttk.Label(new_project_frame, text="特定流程。处理FTB Quests或BQM任务文件。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
-
-        github_rb = ttk.Radiobutton(new_project_frame, text="获取我的GitHub汉化PR", variable=self.project_type_var, value="github", style="TRadiobutton")
-        github_rb.pack(anchor="w", pady=(5, 0))
-        ttk.Label(new_project_frame, text="从GitHub汉化仓库下载项目并创建标签页。", bootstyle="secondary").pack(anchor="w", padx=(20, 0), pady=(0, 15))
+        def _on_frame_resize(event):
+            for lbl in desc_labels:
+                lbl.configure(wraplength=event.width - 80)
+        new_project_frame.bind("<Configure>", _on_frame_resize)
 
         ttk.Button(new_project_frame, text="下一步", command=self._show_setup_view, bootstyle="primary").pack(side="bottom", anchor="se")
 
@@ -382,7 +410,18 @@ class ProjectTab:
     def _show_setup_view(self):
         self._clear_content_frame()
         self.project_type = self.project_type_var.get()
-        
+
+        from gui.project_type_config import get_project_type_config
+        type_config = get_project_type_config(self.project_type)
+
+        if self.project_type == "github":
+            self.main_window._open_github_download_ui()
+            return
+
+        if not type_config.path_fields:
+            self._show_welcome_view()
+            return
+
         container_wrapper = ttk.Frame(self.content_frame)
         container_wrapper.pack(expand=True)
 
@@ -390,69 +429,24 @@ class ProjectTab:
         container.pack(fill="both", expand=True)
         container.columnconfigure(1, weight=1)
 
-        title_text = "配置模组汉化项目" if self.project_type == "mod" else "配置任务汉化项目"
-        ttk.Label(container, text=title_text, font=("-size 14 -weight bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 20))
+        ttk.Label(container, text=type_config.setup_title, font=("-size 14 -weight bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 20))
+        self.main_window.update_tab_title(self.tab_id, type_config.setup_tab_title)
 
-        if self.project_type == "mod":
-            self.main_window.update_tab_title(self.tab_id, "模组汉化设置")
-            config = config_manager.load_config()
-            self.mods_dir_var.set(config.get("mods_dir", ""))
-            self.output_dir_var.set(config.get("output_dir", ""))
-
-            ttk.Label(container, text="Mods 文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.mods_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.mods_dir_var)).grid(row=1, column=2, padx=5, pady=8)
-
-            ttk.Label(container, text="输出文件夹:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
-            
-            start_command = self._setup_new_mod_project
-        
-        elif self.project_type == "modsearch":
-            self.main_window.update_tab_title(self.tab_id, "模组搜索设置")
-            config = config_manager.load_config()
-            self.output_dir_var.set(config.get("output_dir", ""))
-            self.jar_dir_var.set(config.get("jar_dir", ""))
-
-            ttk.Label(container, text="汉化包输出:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=1, column=2, padx=5, pady=8)
-
-            ttk.Label(container, text="JAR 下载:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.jar_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.jar_dir_var)).grid(row=2, column=2, padx=5, pady=8)
-
-            start_command = self._setup_new_mod_search_project
-        
-        elif self.project_type == "quest":
-            self.main_window.update_tab_title(self.tab_id, "任务汉化设置")
-            self.modpack_name_var.set("MyModpack")
-            config = config_manager.load_config()
-            self.output_dir_var.set(config.get("output_dir", ""))
-
-            ttk.Label(container, text="MC 实例文件夹:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.instance_dir_var, width=60).grid(row=1, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.instance_dir_var)).grid(row=1, column=2, padx=5, pady=8)
-
-            ttk.Label(container, text="输出文件夹:").grid(row=2, column=0, sticky="w", padx=5, pady=8)
-            ttk.Entry(container, textvariable=self.output_dir_var, width=60).grid(row=2, column=1, sticky="ew", padx=5, pady=8)
-            ttk.Button(container, text="浏览...", command=lambda: ui_utils.browse_directory(self.output_dir_var)).grid(row=2, column=2, padx=5, pady=8)
-            
-            start_command = self._setup_new_quest_project
-        elif self.project_type == "github":
-            # 直接打开GitHub下载UI
-            self.main_window._open_github_download_ui()
-            return
-        
-        else:
-            self._show_welcome_view()
-            return
+        config = config_manager.load_config()
+        for i, pf in enumerate(type_config.path_fields, start=1):
+            var = getattr(self, pf.var_attr)
+            var.set(config.get(pf.config_key, ""))
+            ttk.Label(container, text=pf.label).grid(row=i, column=0, sticky="w", padx=5, pady=8)
+            ttk.Entry(container, textvariable=var, width=60).grid(row=i, column=1, sticky="ew", padx=5, pady=8)
+            if pf.browse_mode == "file" and pf.filetypes:
+                ttk.Button(container, text="浏览...", command=lambda v=var, ft=pf.filetypes: ui_utils.browse_file(v, filetypes=ft)).grid(row=i, column=2, padx=5, pady=8)
+            else:
+                ttk.Button(container, text="浏览...", command=lambda v=var: ui_utils.browse_directory(v)).grid(row=i, column=2, padx=5, pady=8)
 
         btn_frame = ttk.Frame(container)
-        btn_frame.grid(row=3, column=0, columnspan=3, sticky="e", pady=(20, 0))
+        btn_frame.grid(row=len(type_config.path_fields) + 1, column=0, columnspan=3, sticky="e", pady=(20, 0))
         ttk.Button(btn_frame, text="返回", command=self._show_welcome_view, bootstyle="secondary").pack(side="left", padx=10)
-        ttk.Button(btn_frame, text="开始处理", command=start_command, bootstyle="success").pack(side="left")
+        ttk.Button(btn_frame, text="开始处理", command=lambda: self._setup_generic_project(type_config), bootstyle="success").pack(side="left")
 
     def _show_workbench_view(self, workbench_data, namespace_formats, raw_english_files, current_settings, project_path, finish_button_text="完成", save_session_after=False):
         self._clear_content_frame()
@@ -470,7 +464,8 @@ class ProjectTab:
             finish_callback=self._on_workbench_finish,
             cancel_callback=self._on_workbench_cancel,
             project_name=self.project_name,
-            main_window_instance=self.main_window
+            main_window_instance=self.main_window,
+            project_type=self.project_type
         )
         self.workbench_instance.pack(fill="both", expand=True)
         self.content_frame.update_idletasks()
@@ -482,16 +477,90 @@ class ProjectTab:
 
     def _on_workbench_finish(self, final_translations, final_workbench_data):
         self.main_window.update_menu_state()
-        if self.project_type == "mod":
+        from gui.project_type_config import get_project_type_config
+        type_config = get_project_type_config(self.project_type)
+
+        if self.project_type == "quest":
+             self.log_message(type_config.finish_log_message, "SUCCESS")
+             final_lang_dict = {}
+             for item in final_workbench_data.get('quest_files', {}).get('items', []):
+                 if item.get('zh', '').strip():
+                     final_lang_dict[item['key']] = item['zh']
+                 else:
+                     final_lang_dict[item['key']] = item['en']
+             self._run_quest_build_phase(final_lang_dict)
+             self._show_welcome_view()
+        elif self.project_type == "palladium":
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            translation_map = {}
+            for item in final_workbench_data.get('palladium', {}).get('items', []):
+                if item.get('zh', '').strip():
+                    translation_map[item['key']] = item['zh']
+            if translation_map:
+                self.log_message(f"正在将 {len(translation_map)} 条翻译写入 JAR...", "INFO")
+                wb = getattr(self, 'workbench_instance', None)
+                if wb and hasattr(wb, 'status_label'):
+                    try:
+                        wb.status_label.config(text=f"正在将 {len(translation_map)} 条翻译写入 JAR，请稍候...")
+                    except Exception:
+                        pass
+                try:
+                    self._run_palladium_build_phase(translation_map)
+                except Exception as e:
+                    logging.error(f"启动 Palladium 写入失败: {e}", exc_info=True)
+                    self.log_message(f"启动写入失败: {e}", "CRITICAL")
+                    self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动写入失败: {e}"))
+            else:
+                self.log_message("没有翻译内容，跳过写入。", "WARNING")
+                self.root.after(0, lambda: messagebox.showinfo("提示", "没有翻译内容，跳过写入。"))
+        elif self.project_type == "decompile":
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            wb = getattr(self, 'workbench_instance', None)
+            if wb and hasattr(wb, 'status_label'):
+                try:
+                    wb.status_label.config(text="正在将翻译写入 JAR，请稍候...")
+                except Exception:
+                    pass
+            try:
+                self._run_decompile_build_phase(final_workbench_data)
+            except Exception as e:
+                logging.error(f"启动 JAR 写入失败: {e}", exc_info=True)
+                self.log_message(f"启动 JAR 写入失败: {e}", "CRITICAL")
+                self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动 JAR 写入失败: {e}"))
+        elif self.project_type == "shader":
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            wb = getattr(self, 'workbench_instance', None)
+            if wb and hasattr(wb, 'status_label'):
+                try:
+                    wb.status_label.config(text="正在生成汉化文件，请稍候...")
+                except Exception:
+                    pass
+            try:
+                self._run_shader_build_phase(final_workbench_data)
+            except Exception as e:
+                logging.error(f"启动光影汉化写入失败: {e}", exc_info=True)
+                self.log_message(f"启动写入失败: {e}", "CRITICAL")
+                self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动写入失败: {e}"))
+        elif self.project_type == "datapack":
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            wb = getattr(self, 'workbench_instance', None)
+            if wb and hasattr(wb, 'status_label'):
+                try:
+                    wb.status_label.config(text="正在写入翻译到数据包文件，请稍候...")
+                except Exception:
+                    pass
+            try:
+                self._run_datapack_build_phase(final_workbench_data)
+            except Exception as e:
+                logging.error(f"启动数据包翻译写入失败: {e}", exc_info=True)
+                self.log_message(f"启动写入失败: {e}", "CRITICAL")
+                self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动写入失败: {e}"))
+        else:
             self.orchestrator.final_translations = final_translations
             self.orchestrator.final_workbench_data = final_workbench_data
-            self.log_message("翻译工作台已关闭，数据已准备好生成资源包。", "SUCCESS")
-            self.update_progress("翻译处理完成，现在可以生成资源包", -10)
-        elif self.project_type == "quest":
-             self.log_message("任务汉化已完成，准备生成最终文件。", "SUCCESS")
-             final_translations_quest = final_translations.get('quest_files', {})
-             self._run_quest_build_phase(final_translations_quest)
-             self._show_welcome_view()
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            if type_config.finish_progress_message:
+                self.update_progress(type_config.finish_progress_message, -10)
 
     def _on_workbench_cancel(self):
         self.main_window.update_menu_state()
@@ -547,23 +616,64 @@ class ProjectTab:
             if self.root.winfo_exists(): self.root.after(0, _update)
         except (RuntimeError, tk.TclError): pass
 
-    def _setup_new_mod_project(self):
-        mods_dir = self.mods_dir_var.get()
-        output_dir = self.output_dir_var.get()
-        if not mods_dir or not output_dir:
-            ui_utils.show_error("路径不能为空", "请同时指定 Mods 文件夹和输出文件夹。", parent=self.root)
+    def _setup_generic_project(self, type_config):
+        path_values = {}
+        for pf in type_config.path_fields:
+            var = getattr(self, pf.var_attr)
+            path_values[pf.config_key] = var.get()
+
+        required_empty = [pf for pf in type_config.path_fields if pf.required and not path_values.get(pf.config_key)]
+        if required_empty:
+            ui_utils.show_error(type_config.validation_error_title, type_config.validation_error_message, parent=self.root)
             return
-        
-        self.project_type = "mod"
-        self.project_name = Path(mods_dir).parent.name
-        self.project_info = {"mods_dir": mods_dir, "output_dir": output_dir}
+
+        self.project_type = type_config.type_id
+
+        if type_config.project_name_source == "source_dir_parent":
+            first_path = next(iter(path_values.values()), "")
+            self.project_name = Path(first_path).parent.name if first_path else type_config.display_name
+        elif type_config.project_name_source == "source_dir_name":
+            first_path = next(iter(path_values.values()), "")
+            self.project_name = Path(first_path).name if first_path else type_config.display_name
+        elif type_config.project_name_source == "fixed":
+            self.project_name = type_config.project_name_fixed
+        else:
+            self.project_name = type_config.display_name
+
+        self.project_info = dict(zip(type_config.project_info_keys, path_values.values()))
         self.main_window.update_tab_title(self.tab_id, self.project_name)
-        
+
         config = config_manager.load_config()
-        config['mods_dir'] = mods_dir
-        config['output_dir'] = output_dir
+        for pf in type_config.path_fields:
+            config[pf.config_key] = path_values[pf.config_key]
         config_manager.save_config(config)
-        self.log_message("模组汉化项目已配置，开始执行...", "INFO")
+
+        if type_config.setup_log_message:
+            self.log_message(type_config.setup_log_message, "INFO")
+
+        if self.project_type == "quest":
+            self._setup_quest_workflow(path_values, config)
+            return
+
+        if self.project_type == "palladium":
+            self._setup_palladium_workflow(path_values, config)
+            return
+
+        if self.project_type == "decompile":
+            self._setup_decompile_workflow(path_values, config)
+            return
+
+        if self.project_type == "shader":
+            self._setup_shader_workflow(path_values, config)
+            return
+
+        if self.project_type == "datapack":
+            self._setup_datapack_workflow(path_values, config)
+            return
+
+        if self.project_type == "modsearch":
+            self._show_mod_search_view()
+            return
 
         self._prepare_ui_for_workflow(1)
         self.orchestrator = Orchestrator(
@@ -571,36 +681,22 @@ class ProjectTab:
             update_progress=self.update_progress,
             log_callback=self.log_message,
             show_error_callback=lambda title, msg: self.root.after(0, lambda: messagebox.showerror(title, msg)),
-            launch_workbench_callback=lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config, None, "完成并生成资源包", save_session_after=True)
+            launch_workbench_callback=lambda data: self._show_workbench_view(data, self.orchestrator.namespace_formats, self.orchestrator.raw_english_files, config_manager.load_config(), None, type_config.finish_button_text, save_session_after=True)
         )
-        # 传递停止事件
         self.orchestrator.stop_event = self.stop_event
         thread = threading.Thread(target=self.orchestrator.run_translation_phase, daemon=True)
         self.add_background_thread(thread)
         thread.start()
 
-    def _setup_new_quest_project(self):
-        instance_dir = self.instance_dir_var.get()
-        output_dir = self.output_dir_var.get()
-        if not instance_dir:
-            ui_utils.show_error("输入不能为空", "请指定实例文件夹。", parent=self.root)
-            return
-
-        self.project_type = "quest"
-        self.project_name = "任务汉化"
+    def _setup_quest_workflow(self, path_values, config):
+        instance_dir = path_values.get("instance_dir", "")
+        output_dir = path_values.get("output_dir", "")
         self.project_info = {"instance_dir": instance_dir, "output_dir": output_dir}
-        self.log_message("任务汉化项目已配置，开始提取文本...", "INFO")
-        self.main_window.update_tab_title(self.tab_id, "任务汉化")
-        
-        # 保存配置
-        config = config_manager.load_config()
-        config['output_dir'] = output_dir
-        config_manager.save_config(config)
-        
+
         self.quest_manager = QuestWorkflowManager(project_info=self.project_info, main_window=self)
-        
+
         def launch_quest_workbench(data):
-             self._show_workbench_view(data, {}, {}, config_manager.load_config(), None, "完成")
+            self._show_workbench_view(data, {}, {}, config_manager.load_config(), None, "完成")
         self.quest_manager._launch_workbench = launch_quest_workbench
 
         def run_quest_build(trans_dict):
@@ -612,32 +708,97 @@ class ProjectTab:
         thread = threading.Thread(target=self.quest_manager.run_extraction_phase, daemon=True)
         self.add_background_thread(thread)
         thread.start()
-    
+
+    def _setup_palladium_workflow(self, path_values, config):
+        from gui.palladium_workflow_manager import PalladiumWorkflowManager
+        self.project_info = {"jar_path": path_values.get("jar_path", "")}
+        self.palladium_manager = PalladiumWorkflowManager(project_info=self.project_info, main_window=self)
+
+        def run_palladium_build(trans_dict):
+            thread = threading.Thread(target=self.palladium_manager.run_build_phase, args=(trans_dict,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
+        self._run_palladium_build_phase = run_palladium_build
+
+        thread = threading.Thread(target=self.palladium_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
+
+    def _launch_palladium_workbench(self, workbench_data):
+        self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并写入 JAR", save_session_after=True)
+
+    def _setup_decompile_workflow(self, path_values, config):
+        from gui.decompile_workflow_manager import DecompileWorkflowManager
+        self.project_info = {"jar_path": path_values.get("jar_path", "")}
+        self.decompile_manager = DecompileWorkflowManager(project_info=self.project_info, main_window=self)
+
+        def run_decompile_build(final_workbench_data):
+            thread = threading.Thread(target=self.decompile_manager.run_build_phase, args=(final_workbench_data,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
+        self._run_decompile_build_phase = run_decompile_build
+
+        thread = threading.Thread(target=self.decompile_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
+
+    def _launch_decompile_workbench(self, workbench_data):
+        self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并替换 JAR", save_session_after=True)
+
+    def _setup_shader_workflow(self, path_values, config):
+        from gui.shader_workflow_manager import ShaderWorkflowManager
+        self.project_info = {
+            "shader_dir": path_values.get("shader_dir", ""),
+            "output_dir": path_values.get("output_dir", ""),
+        }
+        self.shader_manager = ShaderWorkflowManager(project_info=self.project_info, main_window=self)
+
+        def run_shader_build(final_workbench_data):
+            thread = threading.Thread(target=self.shader_manager.run_build_phase, args=(final_workbench_data,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
+        self._run_shader_build_phase = run_shader_build
+
+        thread = threading.Thread(target=self.shader_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
+
+    def _launch_shader_workbench(self, workbench_data):
+        self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并替换文件", save_session_after=True)
+
+    def _setup_datapack_workflow(self, path_values, config):
+        from gui.datapack_workflow_manager import DatapackWorkflowManager
+        self.project_info = {
+            "datapack_dir": path_values.get("datapack_dir", ""),
+        }
+        self.datapack_manager = DatapackWorkflowManager(project_info=self.project_info, main_window=self)
+
+        def run_datapack_build(final_workbench_data):
+            thread = threading.Thread(target=self.datapack_manager.run_build_phase, args=(final_workbench_data,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
+        self._run_datapack_build_phase = run_datapack_build
+
+        thread = threading.Thread(target=self.datapack_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
+
+    def _launch_datapack_workbench(self, workbench_data):
+        self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并替换文件", save_session_after=True)
+
+    def _setup_new_mod_project(self):
+        from gui.project_type_config import get_project_type_config
+        self._setup_generic_project(get_project_type_config("mod"))
+
+    def _setup_new_quest_project(self):
+        from gui.project_type_config import get_project_type_config
+        self._setup_generic_project(get_project_type_config("quest"))
+
     def _setup_new_mod_search_project(self):
-        output_dir = self.output_dir_var.get()
-        jar_dir = self.jar_dir_var.get()
-        if not output_dir:
-            ui_utils.show_error("输入不能为空", "请指定汉化包输出文件夹。", parent=self.root)
-            return
-        if not jar_dir:
-            ui_utils.show_error("输入不能为空", "请指定 JAR 下载文件夹。", parent=self.root)
-            return
+        from gui.project_type_config import get_project_type_config
+        self._setup_generic_project(get_project_type_config("modsearch"))
 
-        self.project_type = "modsearch"
-        self.project_name = "模组搜索"
-        self.project_info = {"output_dir": output_dir, "jar_dir": jar_dir}
-        self.log_message("模组搜索项目已配置，开始搜索界面...", "INFO")
-        self.main_window.update_tab_title(self.tab_id, "模组搜索")
 
-        # 保存配置
-        config = config_manager.load_config()
-        config['output_dir'] = output_dir
-        config['jar_dir'] = jar_dir
-        config_manager.save_config(config)
-
-        # 显示模组搜索界面
-        self._show_mod_search_view()
-    
     def _show_mod_search_view(self):
         """显示模组搜索界面"""
         self._clear_content_frame()
@@ -1458,6 +1619,54 @@ class ProjectTab:
             ui_utils.show_error("加载失败", f"无法加载或解析项目文件：\n{e}", parent=self.root)
             logging.error(f"加载项目文件 '{path}' 失败: {e}", exc_info=True)
 
+    def load_from_save_data(self, save_data: dict, project_name: str):
+        """从局域网接收的存档数据加载项目到工作台。"""
+        try:
+            inner = save_data.get("save_data", save_data)
+            translation_state = inner.get("translation_state", {})
+            mc_version = inner.get("target_minecraft_version", "")
+
+            if not translation_state:
+                raise ValueError("存档中没有翻译数据")
+
+            self.project_type = "mod"
+            self.project_name = project_name
+            self.main_window.update_tab_title(self.tab_id, project_name)
+
+            workbench_data = {}
+            namespace_formats = {}
+            for ns, entries in translation_state.items():
+                items = []
+                for key, entry in entries.items():
+                    if isinstance(entry, dict):
+                        items.append({
+                            "key": entry.get("key", key),
+                            "en": entry.get("origin", entry.get("en", "")),
+                            "zh": entry.get("zh", ""),
+                            "source": entry.get("source", "unknown"),
+                        })
+                workbench_data[ns] = {
+                    "display_name": ns,
+                    "items": items,
+                    "jar_name": entries[list(entries.keys())[0]].get("mod", "") if entries else "",
+                    "modrinth_info": None,
+                    "curseforge_info": None,
+                }
+                namespace_formats[ns] = "json"
+
+            settings = config_manager.load_config()
+            self._show_workbench_view(
+                workbench_data, namespace_formats, {},
+                settings, None, "完成并生成资源包", save_session_after=False
+            )
+
+            self.log_message(f"已从局域网接收项目: {project_name}", "SUCCESS")
+            self.log_message(f"包含 {len(workbench_data)} 个命名空间", "INFO")
+
+        except Exception as e:
+            ui_utils.show_error("加载失败", f"无法加载接收到的存档：\n{e}", parent=self.root)
+            logging.error(f"加载局域网接收存档失败: {e}", exc_info=True)
+
     def _prepare_ui_for_workflow(self, stage: int):
         if self.workbench_instance:
             self.workbench_instance.pack_forget()
@@ -1730,6 +1939,8 @@ class MainWindow:
         from gui.user_dictionary_editor import UserDictionaryEditor
         # 在工具菜单中添加编辑个人词典选项
         self.tools_menu.add_command(label="管理个人词典", command=lambda: UserDictionaryEditor(self.root))
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label="局域网传输", command=self._open_lan_transfer)
         
         # 视图菜单已移除，功能已整合到底栏
 
@@ -1993,6 +2204,10 @@ class MainWindow:
             main_window_instance=self
         )
         self.settings_window.transient(self.root)
+
+    def _open_lan_transfer(self):
+        from gui.lan_transfer_dialog import LANTransferDialog
+        LANTransferDialog(self.root, self)
 
     def _create_widgets(self):
         self.notebook = ttk.Notebook(self.root, padding=(5, 5, 0, 0))

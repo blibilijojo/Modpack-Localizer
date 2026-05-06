@@ -614,11 +614,14 @@ class EnhancedComprehensiveProcessing(tk.Frame):
     
     def _check_module_selection(self):
         """检查选中的模组，并更新开始按钮的状态"""
-        selected_modules = self.workbench.ns_tree.selection()
-        if selected_modules:
-            self.start_button.config(state="normal")
-        else:
+        if self.processing:
             self.start_button.config(state="disabled")
+        else:
+            selected_modules = self.workbench.ns_tree.selection()
+            if selected_modules:
+                self.start_button.config(state="normal")
+            else:
+                self.start_button.config(state="disabled")
         
         # 更新批次预览
         self._update_batch_preview()
@@ -1235,7 +1238,7 @@ class EnhancedComprehensiveProcessing(tk.Frame):
             s = utils.config_manager.load_config()
             
             # 初始化翻译器
-            translator = AITranslator(s.get('api_services', []))
+            translator = AITranslator(s.get('api_services', []), disable_cooldown=s.get('disable_key_cooldown', False))
             
             # 计算批次大小或批次数量
             total_items = len(all_translation_inputs)

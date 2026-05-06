@@ -59,6 +59,7 @@ class AISettings:
         self.ai_retry_initial_delay_var = tk.DoubleVar(value=self.config.get("ai_retry_initial_delay", 2.0))
         self.ai_retry_max_delay_var = tk.DoubleVar(value=self.config.get("ai_retry_max_delay", 120.0))
         self.ai_retry_backoff_factor_var = tk.DoubleVar(value=self.config.get("ai_retry_backoff_factor", 2.0))
+        self.disable_key_cooldown_var = tk.BooleanVar(value=self.config.get("disable_key_cooldown", False))
         
         # 绑定变量变化事件
         self._bind_variables()
@@ -68,7 +69,8 @@ class AISettings:
         variables = [
             self.ai_max_threads_var, self.ai_max_retries_var,
             self.ai_retry_rate_limit_cooldown_var, self.ai_retry_initial_delay_var,
-            self.ai_retry_max_delay_var, self.ai_retry_backoff_factor_var
+            self.ai_retry_max_delay_var, self.ai_retry_backoff_factor_var,
+            self.disable_key_cooldown_var
         ]
         
         for var in variables:
@@ -294,7 +296,21 @@ class AISettings:
         
         self._create_spinbox_row(retry_frame, "速率限制冷却", self.ai_retry_rate_limit_cooldown_var,
                                  (1.0, 300.0), "因速率限制失败后，单个密钥的冷却时间（秒）", suffix="秒", is_float=True)
-        
+
+        ttk.Separator(retry_frame, orient="horizontal").pack(fill="x", pady=8)
+
+        cooldown_frame = ttk.Frame(retry_frame)
+        cooldown_frame.pack(fill="x", pady=4)
+        cooldown_check = ttk.Checkbutton(
+            cooldown_frame, text="禁止密钥冷却",
+            variable=self.disable_key_cooldown_var,
+            bootstyle="success-round-toggle"
+        )
+        cooldown_check.pack(side="left")
+        custom_widgets.ToolTip(cooldown_check,
+            "开启后，API调用失败时密钥不会进入冷却期，所有线程可持续并发使用同一密钥。\n"
+            "适合API服务稳定可靠、不限速的场景，可显著提升翻译速度。")
+
         self._create_spinbox_row(retry_frame, "初始重试延迟", self.ai_retry_initial_delay_var,
                                  (0.1, 60.0), "常规错误第一次重试前的等待时间（秒）", suffix="秒", is_float=True)
         
@@ -689,7 +705,8 @@ class AISettings:
             "ai_retry_rate_limit_cooldown": safe_get_float(self.ai_retry_rate_limit_cooldown_var, 60.0),
             "ai_retry_initial_delay": safe_get_float(self.ai_retry_initial_delay_var, 2.0),
             "ai_retry_max_delay": safe_get_float(self.ai_retry_max_delay_var, 120.0),
-            "ai_retry_backoff_factor": safe_get_float(self.ai_retry_backoff_factor_var, 2.0)
+            "ai_retry_backoff_factor": safe_get_float(self.ai_retry_backoff_factor_var, 2.0),
+            "disable_key_cooldown": self.disable_key_cooldown_var.get()
         }
         
         # 保留其他AI相关参数

@@ -71,7 +71,7 @@ class Workflow:
 
             logging.info("开始加载翻译词典...")
             if context.progress_callback:
-                context.progress_callback("正在加载用户词典...", 52)
+                context.progress_callback("正在加载翻译词典...", 52)
             user_dict, community_dict_by_key, community_dict_by_origin = self._load_dictionaries(
                 context.settings['community_dict_dir'],
                 lambda msg, progress: context.progress_callback(msg, 50 + progress // 2) if context.progress_callback else None

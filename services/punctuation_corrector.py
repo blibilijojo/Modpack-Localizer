@@ -3,31 +3,25 @@ import re
 
 _ELLIPSIS_PATTERN = re.compile(r'\.{2,}')
 _ELLIPSIS_REPLACE_PATTERN = re.compile(r'\.{3,}')
-_BRACKET_PATTERN = re.compile(r'(\[|\])')
 _QUOTE_PATTERN = re.compile(r'"')
 _PUNCTUATION_DETECT_PATTERN = re.compile(r'[.!?,;:()\[\]{}<>"\']')
 
 _PUNCTUATION_MAP = {
     '.': '。', ',': '，', '!': '！', '?': '？',
     ':': '：', ';': '；', '(': '（', ')': '）',
-    '[': '【', ']': '】', '{': '｛', '}': '｝',
-    '<': '＜', '>': '＞', '"': '"', "'": "'"
 }
 
-_PUNCTUATION_PAIRS = {
-    '(': ')', '[': ']', '{': '}', '<': '>', '"': '"', "'": "'"
-}
+_TECHNICAL_PUNCTS = frozenset('[]{}<>\'"')
 
-_TRANSLATE_MAP = str.maketrans({k: v for k, v in _PUNCTUATION_MAP.items() if k not in ('[', ']', '"', "'")})
+_TRANSLATE_MAP = str.maketrans(_PUNCTUATION_MAP)
 
-_START_PUNCTS = frozenset('([{<"\'')
-_END_PUNCTS = frozenset(')]}>"\'')
+_START_PUNCTS = frozenset('("<\'')
+_END_PUNCTS = frozenset(')>"\'')
 
 
 class PunctuationCorrector:
 
     PUNCTUATION_MAP = _PUNCTUATION_MAP
-    PUNCTUATION_PAIRS = _PUNCTUATION_PAIRS
 
     def detect_punctuation(self, text: str) -> list[str]:
         return _PUNCTUATION_DETECT_PATTERN.findall(text)
@@ -35,30 +29,21 @@ class PunctuationCorrector:
     def get_chinese_punct(self, eng_punct: str, is_end: bool = False) -> str:
         return _PUNCTUATION_MAP.get(eng_punct, eng_punct)
 
-    def process_punctuation_pairs(self, zh_text: str, start_punct: str, end_punct: str) -> str:
-        return zh_text
-
     def process_start_punctuation(self, zh_text: str, en_punct: str) -> str:
-        if en_punct in _START_PUNCTS:
-            return zh_text
-
         if en_punct and zh_text:
             zh_punct = self.get_chinese_punct(en_punct)
             if zh_text.startswith(en_punct):
                 zh_text = zh_punct + zh_text[len(en_punct):]
-            elif not zh_text.startswith(zh_punct):
+            elif not zh_text.startswith(zh_punct) and en_punct not in _START_PUNCTS:
                 zh_text = zh_punct + zh_text
         return zh_text
 
     def process_end_punctuation(self, zh_text: str, en_punct: str) -> str:
-        if en_punct in _END_PUNCTS:
-            return zh_text
-
         if en_punct and zh_text:
             zh_punct = self.get_chinese_punct(en_punct)
             if zh_text.endswith(en_punct):
                 zh_text = zh_text[:-len(en_punct)] + zh_punct
-            elif not zh_text.endswith(zh_punct):
+            elif not zh_text.endswith(zh_punct) and en_punct not in _END_PUNCTS:
                 zh_text = zh_text + zh_punct
         return zh_text
 
@@ -78,10 +63,6 @@ class PunctuationCorrector:
         if en_line[-1] in _PUNCTUATION_MAP:
             if not _ELLIPSIS_PATTERN.search(en_line[-2:]):
                 zh_line = self.process_end_punctuation(zh_line, en_line[-1])
-
-        for start_punct, end_punct in _PUNCTUATION_PAIRS.items():
-            if start_punct in en_line and end_punct in en_line:
-                zh_line = self.process_punctuation_pairs(zh_line, start_punct, end_punct)
 
         return zh_line
 
@@ -111,11 +92,6 @@ class PunctuationCorrector:
 
         temp_text = _ELLIPSIS_REPLACE_PATTERN.sub('__ELLIPSIS__', text)
 
-        temp_text = _BRACKET_PATTERN.sub(
-            lambda m: '__LEFT_BRACKET__' if m.group(1) == '[' else '__RIGHT_BRACKET__',
-            temp_text
-        )
-
         temp_text = _QUOTE_PATTERN.sub('__QUOTE__', temp_text)
 
         temp_text = temp_text.translate(_TRANSLATE_MAP)
@@ -131,8 +107,6 @@ class PunctuationCorrector:
             temp_text = ''.join(result_parts)
 
         temp_text = temp_text.replace('__ELLIPSIS__', '…')
-        temp_text = temp_text.replace('__LEFT_BRACKET__', '[')
-        temp_text = temp_text.replace('__RIGHT_BRACKET__', ']')
 
         return temp_text
 

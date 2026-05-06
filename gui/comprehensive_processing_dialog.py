@@ -243,7 +243,7 @@ class ComprehensiveProcessingDialog(tk.Toplevel):
             s = utils.config_manager.load_config()
             
             # 初始化翻译器
-            translator = AITranslator(s.get('api_services', []))
+            translator = AITranslator(s.get('api_services', []), disable_cooldown=s.get('disable_key_cooldown', False))
             
             # 分批次处理原文
             batches = [translation_inputs[i:i + s['ai_batch_size']] for i in range(0, len(translation_inputs), s['ai_batch_size'])]

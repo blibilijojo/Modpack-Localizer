@@ -78,30 +78,18 @@ class GitHubVersionSelectDialog(ttk.Toplevel):
         self.status_label = ttk.Label(main_frame, textvariable=self.status_var, bootstyle="secondary")
         self.status_label.pack(fill="x", pady=(10, 0))
     
+    OLD_VERSIONS = [
+        '1.12.2', '1.16-fabric', '1.16', '1.18-fabric', '1.18',
+        '1.19', '1.20-fabric', '1.20', '1.21-fabric', '1.21',
+    ]
+
     def _load_versions(self):
-        """加载版本列表"""
-        # 清空现有列表
         for item in self.versions_tree.get_children():
             self.versions_tree.delete(item)
-        
-        # 模拟版本数据
-        # 实际项目中，这里应该从配置或API获取真实的版本列表
-        versions = [
-            {"version": "1.20.1", "date": "2024-01-15"},
-            {"version": "1.20.0", "date": "2023-12-05"},
-            {"version": "1.19.4", "date": "2023-06-07"},
-            {"version": "1.19.3", "date": "2023-03-14"},
-            {"version": "1.19.2", "date": "2022-08-05"},
-            {"version": "1.18.2", "date": "2022-02-28"},
-            {"version": "1.17.1", "date": "2021-07-06"},
-            {"version": "1.16.5", "date": "2021-01-15"},
-        ]
-        
-        # 添加版本到树视图
-        for version_info in versions:
-            self.versions_tree.insert("", "end", values=(version_info["version"], version_info["date"]), tags=(version_info["version"],))
-        
-        # 默认选择第一个版本
+
+        for version in self.OLD_VERSIONS:
+            self.versions_tree.insert("", "end", values=(version, ""), tags=(version,))
+
         if self.versions_tree.get_children():
             first_item = self.versions_tree.get_children()[0]
             self.versions_tree.selection_set(first_item)

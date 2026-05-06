@@ -14,11 +14,10 @@ class GitHubUploadUI(tk.Frame):
         self.default_file_format = default_file_format
         self.github_config = github_config or {}
         
-        # 从配置中加载最后使用的版本号和版本列表
+        # 从配置中加载最后使用的版本号
         from utils import config_manager
         config = config_manager.load_config()
         self.last_used_version = config.get('last_used_version', '1.21')
-        self.saved_versions = config.get('github_versions', [])
         
         # 自动填充标志，防止自动填充时触发保存逻辑
         self._is_auto_filling = False
@@ -44,20 +43,16 @@ class GitHubUploadUI(tk.Frame):
         # 配置网格列权重
         form_frame.columnconfigure(0, weight=0, minsize=120)
         form_frame.columnconfigure(1, weight=1, minsize=450)
-        form_frame.columnconfigure(2, weight=0, minsize=100)
         
         # 版本号输入（改为下拉选择形式）
         ttk.Label(form_frame, text="版本号:").grid(row=0, column=0, sticky="w", padx=5, pady=8)
         self.version_var = tk.StringVar(value=self.last_used_version)
-        self.version_combo = ttk.Combobox(form_frame, textvariable=self.version_var, width=60, state="readonly")
-        if self.saved_versions:
-            self.version_combo['values'] = self.saved_versions
+        self.version_combo = ttk.Combobox(form_frame, textvariable=self.version_var, width=60)
+        self.version_combo['values'] = self.OLD_VERSIONS
         # 绑定ComboboxSelected事件，取消自动选中
         self.version_combo.bind("<<ComboboxSelected>>", lambda e: self.version_combo.selection_clear())
         self.version_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=8)
-        # 获取版本按钮
-        self.get_versions_btn = ttk.Button(form_frame, text="获取版本", command=self._get_versions, bootstyle="primary-outline")
-        self.get_versions_btn.grid(row=0, column=2, sticky="e", padx=5, pady=8)
+
         
         # 项目名称输入
         ttk.Label(form_frame, text="项目名称:").grid(row=1, column=0, sticky="w", padx=5, pady=8)
@@ -173,90 +168,15 @@ class GitHubUploadUI(tk.Frame):
         self.upload_btn = ttk.Button(btn_frame, text="开始上传", command=self._on_upload, bootstyle="success-outline", width=12)
         self.upload_btn.pack(side="right", padx=5)
     
-    def _get_versions(self):
-        """从GitHub仓库获取所有版本号"""
-        # 验证配置
-        if not self.github_config.get('repo') or not self.github_config.get('token'):
-            self.status_var.set("请先在设置中配置GitHub仓库地址和访问令牌")
-            return
-        
-        self.status_var.set("正在获取版本号...")
-        self.get_versions_btn.config(state="disabled")
-        
-        def get_versions_task():
-            try:
-                from services.github_service import GitHubService
-                from utils import config_manager
-                
-                # 初始化GitHub服务
-                github_service = GitHubService(
-                    self.github_config['repo'],
-                    self.github_config['token']
-                )
-                
-                # 获取projects目录内容
-                projects_path = 'projects'
-                endpoint = f'/repos/{github_service.repo}/contents/{projects_path}'
-                projects_content = github_service._make_request('GET', endpoint)
-                
-                if not projects_content:
-                    self.status_var.set("未找到projects目录或无法访问")
-                    return
-                
-                # 提取版本号（只保留目录，过滤掉占位符和示例）
-                versions = []
-                for item in projects_content:
-                    if item.get('type') == 'dir':
-                        version_name = item.get('name')
-                        # 过滤掉占位符和示例目录
-                        if version_name not in ['.placeholder', 'packer-example']:
-                            versions.append(version_name)
-                
-                if not versions:
-                    self.status_var.set("未找到版本号目录")
-                    return
-                
-                # 更新下拉选择框的选项
-                def update_version_combo():
-                    if not self.winfo_exists():
-                        return
-                    
-                    # 更新下拉选择框的选项
-                    self.version_combo['values'] = versions
-                    
-                    # 如果当前版本号不在列表中，选择第一个版本号
-                    current_version = self.version_var.get()
-                    if current_version not in versions and versions:
-                        self.version_var.set(versions[0])
-                    
-                    # 持久化保存版本号和版本列表
-                    config = config_manager.load_config()
-                    config['last_used_version'] = self.version_var.get()
-                    config['github_versions'] = versions
-                    config_manager.save_config(config)
-                    
-                    self.status_var.set(f"成功获取 {len(versions)} 个版本号")
-                
-                self.after(0, update_version_combo)
-                
-            except Exception as e:
-                import logging
-                logging.error(f"获取版本号失败: {str(e)}")
-                self.status_var.set(f"获取版本号失败: {str(e)}")
-            finally:
-                if self.winfo_exists():
-                    self.get_versions_btn.config(state="normal")
-        
-        # 在后台线程中执行
-        threading.Thread(target=get_versions_task, daemon=True).start()
+    OLD_VERSIONS = ['1.12.2', '1.16', '1.18', '1.19', '1.20', '1.21']
+
+
     
     def _update_path_display(self):
-        # 构建路径
         version = self.version_var.get().strip()
-        # 使用项目名称作为项目名称
         project_name = self.project_name_var.get().strip() or self.default_namespace
         namespace = self.namespace_var.get().strip()
-        path = f"projects/{version}/assets/{project_name}/{namespace}/lang"
+        path = f"projects/assets/{project_name}/{version}/{namespace}/lang"
         self.path_var.set(path)
     
     def _on_upload(self):
@@ -449,30 +369,29 @@ class GitHubUploadUI(tk.Frame):
         self._update_path_display()
     
     def _auto_match_version(self):
-        """自动匹配最适合的GitHub版本号"""
         if hasattr(self.workbench, 'ns_tree'):
             selection = self.workbench.ns_tree.selection()
             if selection:
                 current_mod = selection[0]
                 if hasattr(self.workbench, 'translation_data') and current_mod in self.workbench.translation_data:
                     mod_data = self.workbench.translation_data[current_mod]
-                    # 获取游戏版本和加载器信息
                     game_version = mod_data.get('game_version', '')
                     loaders = mod_data.get('loaders', '')
-                    
-                    # 获取GitHub版本列表
-                    versions = list(self.version_combo['values'])
-                    if not versions:
-                        # 如果下拉框中没有版本，尝试从配置中获取
-                        from utils import config_manager
-                        config = config_manager.load_config()
-                        versions = config.get('github_versions', [])
-                    
-                    if versions and game_version:
+
+                    if not game_version:
+                        return
+
+                    is_old_version = game_version.startswith('1')
+                    if is_old_version:
                         from core.mod_fingerprint import match_github_version
-                        matched_version = match_github_version(game_version, loaders, versions)
+                        matched_version = match_github_version(game_version, loaders, self.OLD_VERSIONS)
                         if matched_version:
                             self.version_var.set(matched_version)
+                    else:
+                        version = game_version
+                        if loaders == 'fabric' and '-' not in version:
+                            version = f'{version}-fabric'
+                        self.version_var.set(version)
     
     def _auto_fill_mod_name(self):
         """自动填充模组名称"""

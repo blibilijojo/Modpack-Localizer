@@ -141,97 +141,115 @@ class Orchestrator:
         self.show_error(title, message)
         self.update_progress(f"错误：{error}", -1)
 
+    def _validate_translation_config(self):
+        if not self.settings.get('mods_dir'):
+            raise ConfigurationError("未配置Mods目录，请先在设置中配置")
+        mods_path = Path(self.settings['mods_dir'])
+        if not mods_path.exists() or not mods_path.is_dir():
+            raise ConfigurationError(f"配置的Mods目录不存在或不是目录: {mods_path}")
+
+    def _create_extraction_progress_callback(self):
+        def extraction_progress(phase: str, cur: int, total: int):
+            if total <= 0:
+                return
+            r = min(max(cur / total, 0.0), 1.0)
+            if phase == "scan_lang":
+                self.update_progress(f"扫描语言文件… ({cur}/{total})", 10 + r * 28)
+            elif phase == "fingerprint":
+                self.update_progress(f"计算模组指纹… ({cur}/{total})", 38 + r * 10)
+            elif phase == "repo_metadata":
+                if cur == 0:
+                    self.update_progress("正在查询CurseForge平台...", 48)
+                elif cur == 1:
+                    self.update_progress("正在查询Modrinth平台...", 49)
+                else:
+                    self.update_progress("平台查询完成", 50)
+        return extraction_progress
+
+    def _create_workflow_context(self, extraction_progress):
+        context = self.workflow.create_context(
+            settings=self.settings,
+            progress_callback=lambda msg, p: self.update_progress(msg, 50 + p // 2),
+            extraction_progress=extraction_progress,
+        )
+        if hasattr(self, 'stop_event'):
+            context.stop_event = self.stop_event
+        return context
+
+    def _run_data_extraction(self, context):
+        try:
+            extraction_result = self.workflow.run_extraction(context)
+            self.module_names = extraction_result.module_names
+            self.curseforge_names = getattr(extraction_result, 'curseforge_names', [])
+            self.modrinth_names = getattr(extraction_result, 'modrinth_names', [])
+            return extraction_result
+        except KeyboardInterrupt:
+            logging.info("用户取消了操作")
+            self.update_progress("操作已取消", -2)
+            return None
+        except Exception as agg_error:
+            logging.error(f"数据提取失败: {agg_error}", exc_info=True)
+            raise ExtractionError(f"数据提取失败: {agg_error}")
+
+    def _validate_extraction_result(self, extraction_result):
+        master_english_count = len(extraction_result.master_english)
+        self.log(f"数据提取完成，共发现 {master_english_count} 个命名空间", "INFO")
+        if master_english_count == 0:
+            raise ExtractionError("未从模组中提取到任何英文语言文件。请确保下载的模组包含 lang/en_us.lang 或 lang/en_us.json 文件。")
+        self.update_progress("数据聚合完成", 50)
+        self.raw_english_files = extraction_result.raw_english_files
+        self.namespace_formats = {
+            ns: info.file_format
+            for ns, info in extraction_result.namespace_info.items()
+        }
+
+    def _run_translation_decision(self, context):
+        try:
+            return self.workflow.run_translation(context)
+        except KeyboardInterrupt:
+            logging.info("用户取消了操作")
+            self.update_progress("操作已取消", -2)
+            return None
+        except Exception as dec_error:
+            logging.error(f"翻译决策失败: {dec_error}", exc_info=True)
+            raise TranslationError(f"翻译决策失败: {dec_error}")
+
+    def _validate_translation_result(self, translation_result):
+        workbench_data_count = len(translation_result.workbench_data)
+        logging.info(f"翻译决策完成，共生成 {workbench_data_count} 个命名空间的翻译数据")
+        if not translation_result.workbench_data:
+            raise TranslationError("翻译决策未生成任何数据。可能是因为模组中的语言文件格式不正确或无法解析。")
+        self.update_progress("翻译决策完成", 100)
+
+    def _prepare_and_launch_workbench(self, translation_result, extraction_result):
+        workbench_data = self._build_workbench_data(translation_result, extraction_result)
+        self.update_progress("决策完成，准备打开工作台", 90)
+        self.log("阶段 3/3: 启动翻译工作台...", "INFO")
+        self.launch_workbench(workbench_data)
+
     def run_translation_phase(self):
         try:
             self.log("阶段 1/3: 开始聚合语言数据...", "INFO")
             self.update_progress("正在聚合数据...", 10)
+            self._validate_translation_config()
 
-            if not self.settings.get('mods_dir'):
-                raise ConfigurationError("未配置Mods目录，请先在设置中配置")
+            extraction_progress = self._create_extraction_progress_callback()
+            context = self._create_workflow_context(extraction_progress)
 
-            mods_path = Path(self.settings['mods_dir'])
-            if not mods_path.exists() or not mods_path.is_dir():
-                raise ConfigurationError(f"配置的Mods目录不存在或不是目录: {mods_path}")
-
-            def extraction_progress(phase: str, cur: int, total: int):
-                if total <= 0:
-                    return
-                r = min(max(cur / total, 0.0), 1.0)
-                if phase == "scan_lang":
-                    self.update_progress(f"扫描语言文件… ({cur}/{total})", 10 + r * 28)
-                elif phase == "fingerprint":
-                    self.update_progress(f"计算模组指纹… ({cur}/{total})", 38 + r * 10)
-                elif phase == "repo_metadata":
-                    if cur == 0:
-                        self.update_progress("正在查询CurseForge平台...", 48)
-                    elif cur == 1:
-                        self.update_progress("正在查询Modrinth平台...", 49)
-                    else:
-                        self.update_progress("平台查询完成", 50)
-
-            context = self.workflow.create_context(
-                settings=self.settings,
-                progress_callback=lambda msg, p: self.update_progress(msg, 50 + p // 2),
-                extraction_progress=extraction_progress,
-            )
-            if hasattr(self, 'stop_event'):
-                context.stop_event = self.stop_event
-
-            try:
-                extraction_result = self.workflow.run_extraction(context)
-
-                self.module_names = extraction_result.module_names
-                self.curseforge_names = getattr(extraction_result, 'curseforge_names', [])
-                self.modrinth_names = getattr(extraction_result, 'modrinth_names', [])
-            except KeyboardInterrupt:
-                logging.info("用户取消了操作")
-                self.update_progress("操作已取消", -2)
+            extraction_result = self._run_data_extraction(context)
+            if extraction_result is None:
                 return
-            except Exception as agg_error:
-                logging.error(f"数据提取失败: {agg_error}", exc_info=True)
-                raise ExtractionError(f"数据提取失败: {agg_error}")
-
-            master_english_count = len(extraction_result.master_english)
-            self.log(f"数据提取完成，共发现 {master_english_count} 个命名空间", "INFO")
-
-            if master_english_count == 0:
-                raise ExtractionError("未从模组中提取到任何英文语言文件。请确保下载的模组包含 lang/en_us.lang 或 lang/en_us.json 文件。")
-
-            self.update_progress("数据聚合完成", 50)
-
-            self.raw_english_files = extraction_result.raw_english_files
-            self.namespace_formats = {
-                ns: info.file_format
-                for ns, info in extraction_result.namespace_info.items()
-            }
+            self._validate_extraction_result(extraction_result)
 
             self.log("阶段 2/3: 执行翻译决策...", "INFO")
             self.update_progress("正在应用翻译规则...", 60)
 
-            try:
-                translation_result = self.workflow.run_translation(context)
-            except KeyboardInterrupt:
-                logging.info("用户取消了操作")
-                self.update_progress("操作已取消", -2)
+            translation_result = self._run_translation_decision(context)
+            if translation_result is None:
                 return
-            except Exception as dec_error:
-                logging.error(f"翻译决策失败: {dec_error}", exc_info=True)
-                raise TranslationError(f"翻译决策失败: {dec_error}")
+            self._validate_translation_result(translation_result)
 
-            workbench_data_count = len(translation_result.workbench_data)
-            logging.info(f"翻译决策完成，共生成 {workbench_data_count} 个命名空间的翻译数据")
-
-            if not translation_result.workbench_data:
-                raise TranslationError("翻译决策未生成任何数据。可能是因为模组中的语言文件格式不正确或无法解析。")
-
-            self.update_progress("翻译决策完成", 100)
-
-            workbench_data = self._build_workbench_data(translation_result, extraction_result)
-
-            self.update_progress("决策完成，准备打开工作台", 90)
-            self.log("阶段 3/3: 启动翻译工作台...", "INFO")
-
-            self.launch_workbench(workbench_data)
+            self._prepare_and_launch_workbench(translation_result, extraction_result)
         except ValueError as ve:
             self._handle_error(ve, "配置错误", f"请检查配置后重试:\n{ve}")
         except ConfigurationError as ce:

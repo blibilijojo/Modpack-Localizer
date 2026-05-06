@@ -12,6 +12,7 @@ import logging
 import concurrent.futures
 from utils.file_utils import decode_json_value_with_unicode
 from core.models import JSON_KEY_VALUE_PATTERN
+from core.exceptions import ServiceResult
 
 _REPO_URL_PATTERN = re.compile(r'https?://github\.com/([^/]+)/([^/]+)(?:\.git)?/?$')
 _OWNER_REPO_PATTERN = re.compile(r'^([^/]+)/([^/]+)$')
@@ -67,8 +68,10 @@ class GitHubService:
             return repo_url
         return repo_url
     
-    def _make_request(self, method, endpoint, **kwargs):
-        """发送API请求，不支持重试"""
+    def _make_request(self, method, endpoint, repo=None, **kwargs):
+        target_repo = repo or self.repo
+        if repo and repo != self.repo:
+            endpoint = endpoint.replace(f'/repos/{self.repo}/', f'/repos/{target_repo}/', 1)
         url = f'{self.api_base}{endpoint}'
         
         try:
@@ -106,13 +109,12 @@ class GitHubService:
             raise
     
     def test_authentication(self):
-        """测试认证是否成功"""
         endpoint = f'/repos/{self.repo}'
         try:
             result = self._make_request('GET', endpoint)
-            return True, f'认证成功！仓库: {result.get("name")}'
+            return ServiceResult.ok(message=f'认证成功！仓库: {result.get("name")}')
         except Exception as e:
-            return False, f'认证失败: {str(e)}'
+            return ServiceResult.fail(f'认证失败: {str(e)}')
     
     def get_file_sha(self, path):
         """获取文件的SHA值"""
@@ -129,17 +131,12 @@ class GitHubService:
             raise
     
     def _delete_branch(self):
-        """删除分支"""
         try:
-            # 删除分支引用
             endpoint = f'/repos/{self.repo}/git/refs/heads/{self.branch}'
-            result = self._make_request('DELETE', endpoint)
-            if result or result is None:
-                # 删除成功
-                logging.info(f'分支 {self.branch} 删除成功')
-                return True
+            self._make_request('DELETE', endpoint)
+            logging.info(f'分支 {self.branch} 删除成功')
+            return True
         except Exception as e:
-            # 分支不存在或删除失败，记录错误但继续执行
             logging.warning(f'删除分支失败: {str(e)}')
             return False
 
@@ -194,40 +191,32 @@ class GitHubService:
         return False
     
     def upload_file(self, path, content, message):
-        """上传或更新文件"""
-        # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
         path = path.replace('\\', '/')
         
         endpoint = f'/repos/{self.repo}/contents/{path}'
         
-        # 编码文件内容
         encoded_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
         
-        # 构建请求数据
         data = {
             'message': message,
             'content': encoded_content,
             'branch': self.branch
         }
         
-        # 尝试获取文件SHA（如果存在）
         try:
             sha = self.get_file_sha(path)
             if sha:
                 data['sha'] = sha
-        except Exception as e:
-            # 如果获取SHA失败（比如分支不存在），继续执行，不添加sha字段
+        except Exception:
             pass
         
         try:
             result = self._make_request('PUT', endpoint, json=data)
             if result:
-                return True, f'文件上传成功: {result.get("content", {}).get("name")}'
+                return ServiceResult.ok(message=f'文件上传成功: {result.get("content", {}).get("name")}')
             else:
-                # 当result为None时，表示文件不存在但创建成功
-                return True, f'文件创建成功: {Path(path).name}'
+                return ServiceResult.ok(message=f'文件创建成功: {Path(path).name}')
         except requests.RequestException as e:
-            # 尝试获取详细的错误信息
             error_details = ''
             if e.response and e.response.content:
                 try:
@@ -240,9 +229,9 @@ class GitHubService:
                                 error_details += f' - {error["message"]}'
                 except (json.JSONDecodeError, KeyError, AttributeError):
                     pass
-            return False, f'文件上传失败: {str(e)}{error_details}'
+            return ServiceResult.fail(f'文件上传失败: {str(e)}{error_details}')
         except Exception as e:
-            return False, f'文件上传失败: {str(e)}'
+            return ServiceResult.fail(f'文件上传失败: {str(e)}')
     
     def _parse_json_with_unicode_only(self, content):
         result = {}
@@ -275,7 +264,7 @@ class GitHubService:
                 current_project_name = project_name or (ns.split(':')[0] if ':' in ns else ns)
                 current_namespace = namespace or (ns.split(':')[0] if ':' in ns else ns)
 
-                lang_dir = Path(temp_dir) / 'projects' / version / 'assets' / current_project_name / current_namespace / 'lang'
+                lang_dir = Path(temp_dir) / 'projects' / 'assets' / current_project_name / version / current_namespace / 'lang'
                 lang_dir.mkdir(parents=True, exist_ok=True)
 
                 parsed_english = {}
@@ -332,7 +321,7 @@ class GitHubService:
             return path_parts[5]
         return 'unknown'
 
-    def _upload_files_from_dir(self, temp_dir: str, version: str, namespace: str | None) -> tuple[bool, str, list[str]]:
+    def _upload_files_from_dir(self, temp_dir: str, version: str, namespace: str | None) -> ServiceResult:
         uploaded_files: list[str] = []
         for root, dirs, files in os.walk(temp_dir):
             for file in files:
@@ -347,44 +336,46 @@ class GitHubService:
 
                 full_message = f'提交 {resolved_namespace} {file_type} - {version}\n\n文件: {github_path}'
 
-                success, message = self.upload_file(github_path, content, full_message)
-                if not success:
-                    return False, f'上传文件失败: {message}', uploaded_files
+                result = self.upload_file(github_path, content, full_message)
+                if not result.success:
+                    return ServiceResult.fail(f'上传文件失败: {result.message}', extra=uploaded_files)
 
                 uploaded_files.append(github_path)
 
-        return True, '', uploaded_files
+        return ServiceResult.ok(data=uploaded_files)
 
     def upload_translations(self, translations, version, commit_message, project_name=None, namespace=None, file_format='json', raw_english_files=None):
         if not translations:
-            return False, '没有可上传的翻译内容'
+            return ServiceResult.fail('没有可上传的翻译内容')
 
         try:
             temp_dir = self.build_resource_pack_structure(translations, version, project_name, namespace, file_format, raw_english_files)
 
             try:
                 if not self._check_and_create_branch():
-                    return False, '分支创建失败'
+                    return ServiceResult.fail('分支创建失败')
 
-                success, error_msg, uploaded_files = self._upload_files_from_dir(temp_dir, version, namespace)
-                if not success:
-                    return False, error_msg
+                upload_result = self._upload_files_from_dir(temp_dir, version, namespace)
+                if not upload_result.success:
+                    return ServiceResult.fail(upload_result.message)
+
+                uploaded_files = upload_result.data or []
 
                 if self.push_to_upstream:
                     push_success, push_message = self._push_to_upstream()
                     if push_success:
-                        return True, f'成功上传 {len(uploaded_files)} 个文件到版本 {version}，并推送到源仓库'
+                        return ServiceResult.ok(message=f'成功上传 {len(uploaded_files)} 个文件到版本 {version}，并推送到源仓库')
                     else:
-                        return True, f'成功上传 {len(uploaded_files)} 个文件到版本 {version}，但推送到源仓库失败: {push_message}'
+                        return ServiceResult.ok(message=f'成功上传 {len(uploaded_files)} 个文件到版本 {version}，但推送到源仓库失败: {push_message}')
                 else:
-                    return True, f'成功上传 {len(uploaded_files)} 个文件到版本 {version}'
+                    return ServiceResult.ok(message=f'成功上传 {len(uploaded_files)} 个文件到版本 {version}')
 
             finally:
                 shutil.rmtree(temp_dir)
 
         except Exception as e:
             logging.error(f'上传翻译失败: {str(e)}', exc_info=True)
-            return False, f'上传失败: {str(e)}'
+            return ServiceResult.fail(f'上传失败: {str(e)}')
     
     def get_repo_info(self):
         """获取仓库信息"""
@@ -396,23 +387,18 @@ class GitHubService:
             return None
     
     def _push_to_upstream(self):
-        """推送到源仓库 - 创建PR"""
         try:
-            # 对于源仓库，始终使用main分支作为目标
             base_branch = 'main'
             
-            # 使用预设的PR标题
             pr_title = ''
             if hasattr(self, 'pr_title'):
                 pr_title = self.pr_title
             else:
                 pr_title = f'更新汉化资源包 {self.branch}'
             
-            # 从当前仓库地址中提取fork的所有者
             fork_owner = self.repo.split('/')[0]
             head_branch = f'{fork_owner}:{self.branch}'
             
-            # 检查是否已存在PR
             endpoint = f'/repos/{self.upstream_repo}/pulls'
             params = {'state': 'open'}
             existing_prs = self._make_request('GET', endpoint, params=params)
@@ -420,33 +406,27 @@ class GitHubService:
             if existing_prs:
                 for pr in existing_prs:
                     if pr.get('head', {}).get('ref') == self.branch and pr.get('head', {}).get('user', {}).get('login') == fork_owner:
-                        # PR已存在
                         pr_url = pr.get('html_url', '')
                         logging.info(f'PR已存在: {pr_url}')
                         return True, f'PR已存在: {pr_url}'
             
-            # 构建创建PR的请求
             data = {
                 'title': pr_title,
-                'head': head_branch,  # 格式: {fork_owner}:{branch}
-                'base': base_branch,  # 目标分支为源仓库的main
+                'head': head_branch,
+                'base': base_branch,
                 'body': f'来自分支 {self.branch} 的汉化更新\n\n请审核并合并此PR。'
             }
             
-            # 发送创建PR的请求
             result = self._make_request('POST', endpoint, json=data)
             if result:
                 pr_url = result.get('html_url', '')
                 logging.info(f'创建PR成功: {pr_url}')
                 return True, f'创建PR成功，PR标题: {pr_title}'
             else:
-                # 即使result为None，也认为创建成功
                 logging.info(f'创建PR成功: {self.upstream_repo} {head_branch} -> {base_branch}')
                 return True, f'创建PR成功，PR标题: {pr_title}'
         except Exception as e:
             logging.error(f'创建PR失败: {str(e)}')
-            # 即使出现错误，也返回成功，因为我们只是尝试创建PR
-            # 实际的PR可能需要在GitHub上手动创建
             logging.info(f'模拟创建PR成功: {self.upstream_repo} {self.branch} -> main')
             return True, f'创建PR成功（模拟），PR标题: {pr_title}'
     
@@ -488,174 +468,104 @@ class GitHubService:
             return False, '', str(e)
     
     def sync_with_upstream(self):
-        """同步原仓库的最新代码到当前复刻仓库
-
-        Returns:
-            tuple: (success, message)
-        """
         try:
-            # 获取源仓库的默认分支信息
             upstream_info = self._make_request('GET', f'/repos/{self.upstream_repo}')
             if not upstream_info:
-                return False, '无法获取源仓库信息'
+                return ServiceResult.fail('无法获取源仓库信息')
             
             upstream_default_branch = upstream_info.get('default_branch', 'main')
             
-            # 获取源仓库默认分支的最新提交
             upstream_branch_info = self._make_request('GET', f'/repos/{self.upstream_repo}/branches/{upstream_default_branch}')
             if not upstream_branch_info or 'commit' not in upstream_branch_info:
-                return False, '无法获取源仓库分支信息'
+                return ServiceResult.fail('无法获取源仓库分支信息')
             
             upstream_latest_sha = upstream_branch_info['commit']['sha']
             logging.info(f'源仓库最新提交: {upstream_latest_sha}')
             
-            # 获取当前仓库的默认分支信息
             repo_info = self._make_request('GET', f'/repos/{self.repo}')
             if not repo_info:
-                return False, '无法获取当前仓库信息'
+                return ServiceResult.fail('无法获取当前仓库信息')
             
             repo_default_branch = repo_info.get('default_branch', 'main')
             
-            # 获取当前仓库默认分支的最新提交
             repo_branch_info = self._make_request('GET', f'/repos/{self.repo}/branches/{repo_default_branch}')
             if not repo_branch_info or 'commit' not in repo_branch_info:
-                return False, '无法获取当前仓库分支信息'
+                return ServiceResult.fail('无法获取当前仓库分支信息')
             
             repo_latest_sha = repo_branch_info['commit']['sha']
             logging.info(f'当前仓库最新提交: {repo_latest_sha}')
             
-            # 比较两个SHA是否相同
             if upstream_latest_sha == repo_latest_sha:
-                return True, '当前仓库已是最新版本，无需同步'
+                return ServiceResult.ok(message='当前仓库已是最新版本，无需同步')
             
-            # 构建同步消息
             sync_message = f'同步源仓库 {self.upstream_repo}:{upstream_default_branch} 的最新代码'
             logging.info(sync_message)
             
-            # 使用GitHub API更新分支引用
-            # 构建引用路径
             ref_path = f'heads/{repo_default_branch}'
-            
-            # 构建更新分支的请求
             endpoint = f'/repos/{self.repo}/git/refs/{ref_path}'
-            
-            # 构建请求数据
             data = {
                 'sha': upstream_latest_sha,
-                'force': True  # 强制更新，确保能覆盖本地变更
+                'force': True
             }
             
-            # 发送更新分支的请求
             result = self._make_request('PATCH', endpoint, json=data)
             if result:
                 logging.info(f'成功更新分支 {repo_default_branch} 到提交 {upstream_latest_sha}')
-                return True, f'成功同步源仓库最新代码到 {repo_default_branch} 分支'
+                return ServiceResult.ok(message=f'成功同步源仓库最新代码到 {repo_default_branch} 分支')
             else:
-                # 即使result为None，也认为更新成功
                 logging.info(f'成功更新分支 {repo_default_branch} 到提交 {upstream_latest_sha}')
-                return True, f'成功同步源仓库最新代码到 {repo_default_branch} 分支'
+                return ServiceResult.ok(message=f'成功同步源仓库最新代码到 {repo_default_branch} 分支')
             
         except Exception as e:
             logging.error(f'同步原仓库失败: {str(e)}')
-            return False, f'同步失败: {str(e)}'
+            return ServiceResult.fail(f'同步失败: {str(e)}')
     
     def download_file(self, path, branch=None):
-        """从GitHub仓库下载文件
-        
-        Args:
-            path: 文件路径
-            branch: 分支名称，默认使用实例的branch属性
-            
-        Returns:
-            tuple: (success, content, message)
-        """
-        # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
         path = path.replace('\\', '/')
-        
-        # 使用指定的分支或默认分支
         target_branch = branch or self.branch
-        
         endpoint = f'/repos/{self.repo}/contents/{path}'
         
         try:
             result = self._make_request('GET', endpoint, params={'ref': target_branch})
             if result:
-                # 解码文件内容
                 content = base64.b64decode(result.get('content', '')).decode('utf-8')
-                return True, content, f'文件下载成功: {Path(path).name}'
+                return ServiceResult.ok(data=content, message=f'文件下载成功: {Path(path).name}')
             else:
-                return False, None, f'文件不存在: {path}'
+                return ServiceResult.fail(f'文件不存在: {path}')
         except Exception as e:
-            return False, None, f'文件下载失败: {str(e)}'
+            return ServiceResult.fail(f'文件下载失败: {str(e)}')
     
     def list_files(self, path='', branch=None):
-        """列出GitHub仓库指定路径下的文件和目录
-        
-        Args:
-            path: 目录路径
-            branch: 分支名称，默认使用实例的branch属性
-            
-        Returns:
-            tuple: (success, files, message)
-        """
-        # 将反斜杠替换为正斜杠，符合GitHub API的URL格式要求
         path = path.replace('\\', '/')
-        
-        # 使用指定的分支或默认分支
         target_branch = branch or self.branch
-        
         endpoint = f'/repos/{self.repo}/contents/{path}'
         
         try:
             result = self._make_request('GET', endpoint, params={'ref': target_branch})
             if result:
-                return True, result, f'成功列出 {path} 下的文件'
+                return ServiceResult.ok(data=result, message=f'成功列出 {path} 下的文件')
             else:
-                return False, None, f'路径不存在: {path}'
+                return ServiceResult.fail(f'路径不存在: {path}')
         except Exception as e:
-            return False, None, f'列出文件失败: {str(e)}'
+            return ServiceResult.fail(f'列出文件失败: {str(e)}')
     
     def get_projects(self, version=None, branch=None):
-        """获取GitHub仓库中的项目列表
-        
-        Args:
-            version: Minecraft版本号，默认获取所有版本
-            branch: 分支名称，默认使用实例的branch属性
-            
-        Returns:
-            tuple: (success, projects, message)
-        """
         try:
-            # 从上游仓库的pull请求中获取项目
-            # 保存当前仓库
-            original_repo = self.repo
-            
-            # 从仓库地址中提取用户名
             user_login = self.repo.split('/')[0] if '/' in self.repo else self.repo
-            
-            try:
-                # 临时切换到上游仓库
-                self.repo = self.upstream_repo
-                
-                # 获取所有open的pull请求
-                endpoint = f'/repos/{self.repo}/pulls'
-                params = {'state': 'open'}
-                pull_requests = self._make_request('GET', endpoint, params=params)
-                if not pull_requests:
-                    return False, None, '未找到pull请求'
-            finally:
-                # 恢复原来的仓库
-                self.repo = original_repo
+
+            endpoint = f'/repos/{self.repo}/pulls'
+            params = {'state': 'open'}
+            pull_requests = self._make_request('GET', endpoint, repo=self.upstream_repo, params=params)
+            if not pull_requests:
+                return ServiceResult.fail('未找到pull请求')
             
             projects = []
-            processed_paths = set()  # 用于去重
-            
-            # 遍历每个pull请求，只处理用户自己的PR
+            processed_paths = set()
+
             for pr in pull_requests:
                 pr_user = pr.get('user', {})
                 pr_user_login = pr_user.get('login')
                 
-                # 只处理用户自己的PR
                 if pr_user_login != user_login:
                     continue
                 
@@ -664,28 +574,20 @@ class GitHubService:
                 pr_head = pr.get('head', {})
                 pr_branch = pr_head.get('ref')
                 
-                # 获取pull请求中的文件
-                try:
-                    # 临时切换到上游仓库
-                    self.repo = self.upstream_repo
-                    endpoint = f'/repos/{self.repo}/pulls/{pr_number}/files'
-                    pr_files = self._make_request('GET', endpoint)
-                    if not pr_files:
-                        continue
-                finally:
-                    # 恢复原来的仓库
-                    self.repo = original_repo
+                endpoint = f'/repos/{self.repo}/pulls/{pr_number}/files'
+                pr_files = self._make_request('GET', endpoint, repo=self.upstream_repo)
+                if not pr_files:
+                    continue
                 
                 # 遍历pull请求中的文件
                 for file in pr_files:
                     file_path = file.get('filename')
                     # 检查文件路径是否符合项目结构
                     if file_path and 'projects/' in file_path and '/lang/zh_cn.json' in file_path:
-                        # 提取项目信息
                         parts = file_path.split('/')
-                        if len(parts) >= 6:
-                            version_name = parts[1]
-                            project_name = parts[3]
+                        if len(parts) >= 6 and parts[1] == 'assets':
+                            project_name = parts[2]
+                            version_name = parts[3]
                             namespace = parts[4]
                             # 保持完整的文件路径，包括zh_cn.json
                             lang_path = file_path
@@ -708,78 +610,58 @@ class GitHubService:
                                     'pr_branch': pr_branch
                                 })
             
-            return True, projects, f'成功从上游仓库的pull请求中获取 {len(projects)} 个项目'
+            return ServiceResult.ok(data=projects, message=f'成功从上游仓库的pull请求中获取 {len(projects)} 个项目')
         except Exception as e:
-            return False, None, f'获取项目列表失败: {str(e)}'
+            return ServiceResult.fail(f'获取项目列表失败: {str(e)}')
     
     def download_project_translations(self, project_info, branch=None):
-        """下载项目的翻译文件
-        
-        Args:
-            project_info: 项目信息，包含version、project_name、namespace、path、pr_branch
-            branch: 分支名称，默认使用实例的branch属性
-            
-        Returns:
-            tuple: (success, translations, message)
-        """
         try:
-            # 检查project_info是否为字符串，如果是，尝试解析
             if isinstance(project_info, str):
-                import json
                 try:
-                    # 尝试将字符串解析为JSON
                     project_info = json.loads(project_info)
                 except (json.JSONDecodeError, ValueError):
-                    return False, None, '项目信息格式错误'
-            
-            # 使用用户的复刻仓库，而不是上游仓库
-            # 使用pull请求的分支（如果有）
+                    return ServiceResult.fail('项目信息格式错误')
+
             download_branch = project_info.get('pr_branch', branch) if hasattr(project_info, 'get') else branch
-            
-            # 构建文件路径
+
             zh_cn_path = f"{project_info['path']}"
             en_us_path = f"{project_info['path'].replace('zh_cn.json', 'en_us.json')}"
-            
-            # 并行下载文件
+
             file_paths = [zh_cn_path, en_us_path]
             results = {}
-            
+
             def download_file_task(path):
                 return path, self.download_file(path, download_branch)
-            
-            # 使用线程池并行下载
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 future_to_path = {executor.submit(download_file_task, path): path for path in file_paths}
                 for future in concurrent.futures.as_completed(future_to_path):
                     path = future_to_path[future]
                     try:
-                        path, (success, content, message) = future.result()
-                        if success:
-                            results[path] = content
+                        path, dl_result = future.result()
+                        if dl_result.success:
+                            results[path] = dl_result.data
                         else:
-                            return False, None, f'下载文件失败: {message}'
+                            return ServiceResult.fail(f'下载文件失败: {dl_result.message}')
                     except Exception as e:
-                        return False, None, f'下载文件时发生错误: {str(e)}'
-            
-            # 解析下载的内容
+                        return ServiceResult.fail(f'下载文件时发生错误: {str(e)}')
+
             zh_cn_content = results.get(zh_cn_path)
             en_us_content = results.get(en_us_path)
-            
+
             if not zh_cn_content or not en_us_content:
-                return False, None, '部分文件下载失败'
-            
+                return ServiceResult.fail('部分文件下载失败')
+
             zh_cn_data = self._parse_json_with_unicode_only(zh_cn_content)
             en_us_data = self._parse_json_with_unicode_only(en_us_content)
-            
-            # 构建翻译数据结构
+
             translations = {}
             namespace = project_info['namespace']
             translations[namespace] = zh_cn_data
-            
-            # 构建原始英文文件内容
+
             raw_english_files = {}
             raw_english_files[namespace] = en_us_content
-            
-            return True, {'translations': translations, 'raw_english_files': raw_english_files}, '成功从上游仓库的pull请求中下载项目翻译文件'
+
+            return ServiceResult.ok(data={'translations': translations, 'raw_english_files': raw_english_files}, message='成功从上游仓库的pull请求中下载项目翻译文件')
         except Exception as e:
-            return False, None, f'下载项目翻译失败: {str(e)}'
+            return ServiceResult.fail(f'下载项目翻译失败: {str(e)}')

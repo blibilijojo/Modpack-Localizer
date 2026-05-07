@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import tkinter as tk
 import ttkbootstrap as ttk
 
 

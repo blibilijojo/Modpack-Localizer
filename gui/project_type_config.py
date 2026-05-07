@@ -255,7 +255,7 @@ register_project_type(ProjectTypeConfig(
     enable_ai_translation=True,
     enable_batch_operations=True,
     enable_undo_redo=True,
-    hidden=False,
+    hidden=True,
 ))
 
 register_project_type(ProjectTypeConfig(
@@ -287,7 +287,7 @@ register_project_type(ProjectTypeConfig(
     enable_ai_translation=True,
     enable_batch_operations=True,
     enable_undo_redo=True,
-    hidden=False,
+    hidden=True,
 ))
 
 register_project_type(ProjectTypeConfig(

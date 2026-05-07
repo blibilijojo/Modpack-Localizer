@@ -4,6 +4,7 @@ import logging
 import re
 import webbrowser
 from pathlib import Path
+import tkinter as tk
 from tkinter import messagebox
 from tkinter import ttk as tk_ttk
 import ttkbootstrap as ttk

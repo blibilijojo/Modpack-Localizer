@@ -2,6 +2,8 @@ from __future__ import annotations
 import logging
 import json
 import threading
+from pathlib import Path
+import tkinter as tk
 import ttkbootstrap as ttk
 from utils import config_manager
 from services.ai_translator import AITranslator

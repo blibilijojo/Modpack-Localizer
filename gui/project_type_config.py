@@ -199,14 +199,13 @@ register_project_type(ProjectTypeConfig(
     output_mode="in_place",
     path_fields=[
         PathField("地图存档文件夹:", "source_dir_var", "javamap_dir"),
-        PathField("输出文件夹:", "output_dir_var", "output_dir"),
     ],
     project_name_source="source_dir_name",
-    project_info_keys=["source_dir", "output_dir"],
+    project_info_keys=["source_dir"],
     setup_log_message="JAVA地图汉化项目已配置，开始扫描...",
-    finish_log_message="JAVA地图汉化已完成，数据已准备好替换文件。",
+    finish_log_message="JAVA地图汉化已完成，文件已原地替换。",
     finish_progress_message="翻译处理完成，现在可以替换文件",
-    validation_error_message="请同时指定地图存档文件夹和输出文件夹。",
+    validation_error_message="请指定地图存档文件夹或 .zip 文件。",
     enable_github_upload=False,
     enable_translation_console=True,
     enable_export_json=False,
@@ -223,7 +222,7 @@ register_project_type(ProjectTypeConfig(
         "scan_targets": ["advancements", "datapacks", "region", "data"],
         "file_patterns": ["*.json", "*.nbt", "*.dat"],
     },
-    hidden=True,
+    hidden=False,
 ))
 
 register_project_type(ProjectTypeConfig(

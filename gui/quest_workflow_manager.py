@@ -194,7 +194,7 @@ class QuestWorkflowManager:
 
             elif self.quest_type == 'bqm':
                 self._log("开始写回已转换的 Better Questing 文件...", "INFO")
-                # BQM usually has one file
+                # BQM 通常只有一个文件
                 _, quest_data = self.converted_quest_data[0]
                 original_path_str = list(self.quest_files_map.values())[0]
                 content_to_write = json.dumps(quest_data, indent=4, ensure_ascii=False)

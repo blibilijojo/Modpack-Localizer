@@ -108,6 +108,26 @@ class ProjectTabWorkflowMixin:
     def _launch_datapack_workbench(self, workbench_data):
         self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并替换文件", save_session_after=True)
 
+    def _setup_javamap_workflow(self, path_values, config):
+        from gui.javamap_workflow_manager import JavamapWorkflowManager
+        self.project_info = {
+            "source_dir": path_values.get("javamap_dir", ""),
+        }
+        self.javamap_manager = JavamapWorkflowManager(project_info=self.project_info, main_window=self)
+
+        def run_javamap_build(final_workbench_data):
+            thread = threading.Thread(target=self.javamap_manager.run_build_phase, args=(final_workbench_data,), daemon=True)
+            self.add_background_thread(thread)
+            thread.start()
+        self._run_javamap_build_phase = run_javamap_build
+
+        thread = threading.Thread(target=self.javamap_manager.run_extraction_phase, daemon=True)
+        self.add_background_thread(thread)
+        thread.start()
+
+    def _launch_javamap_workbench(self, workbench_data):
+        self._show_workbench_view(workbench_data, {}, {}, config_manager.load_config(), None, "完成并替换文件", save_session_after=True)
+
     def _setup_new_mod_project(self):
         from gui.project_type_config import get_project_type_config
         self._setup_generic_project(get_project_type_config("mod"))

@@ -97,11 +97,11 @@ def parse_constant_pool_strings(data: bytes) -> list[str]:
                 except Exception:
                     pass
                 idx += length
-            elif tag in (7, 8, 16, 19, 20):  # 2-byte entries
+            elif tag in (7, 8, 16, 19, 20):  # 2字节条目
                 idx += 2
-            elif tag in (3, 4, 9, 10, 11, 12, 17, 18):  # 4-byte entries
+            elif tag in (3, 4, 9, 10, 11, 12, 17, 18):  # 4字节条目
                 idx += 4
-            elif tag in (5, 6):  # 8-byte entries (Long, Double)
+            elif tag in (5, 6):  # 8字节条目（Long, Double）
                 idx += 8
                 i += 1
             elif tag == 15:  # MethodHandle

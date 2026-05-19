@@ -1,4 +1,4 @@
-"""Hybrid-mode translation context: keyword overlap via inverted index."""
+"""混合模式翻译上下文：通过倒排索引实现关键词重叠匹配。"""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ HYBRID_EN_STOPWORDS: frozenset[str] = frozenset(w.lower() for w in _HYBRID_EN_ST
 
 
 class HybridContextIndex:
-    """Content-word -> translated English keys, for O(batch + hits) context lookup."""
+    """内容词 -> 已翻译的英文键，用于 O(batch + hits) 复杂度的上下文查找。"""
 
     __slots__ = ("_postings", "_en_tokens", "_en_to_zh", "_stopwords")
 

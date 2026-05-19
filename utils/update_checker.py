@@ -1,4 +1,4 @@
-# utils/update_checker.py
+# 工具模块/更新检查器
 
 import requests
 import logging

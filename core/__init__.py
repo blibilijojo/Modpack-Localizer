@@ -1,4 +1,4 @@
-# Core module exports
+# 核心模块导出
 from .builder import Builder
 from .dictionary_manager import DictionaryManager
 from .exceptions import (

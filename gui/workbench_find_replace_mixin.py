@@ -5,7 +5,7 @@ import ttkbootstrap as ttk
 
 
 class WorkbenchFindReplaceMixin:
-    """Find/replace functionality mixin for TranslationWorkbench."""
+    """TranslationWorkbench 的查找/替换功能混入类。"""
 
     def _get_searchable_items(self, scope):
         if scope == 'current':

@@ -11,7 +11,7 @@ from services.punctuation_corrector import punctuation_corrector
 
 
 class WorkbenchAIMixin:
-    """AI translation, terms, import/export functionality mixin for TranslationWorkbench."""
+    """TranslationWorkbench 的 AI 翻译、术语、导入导出功能混入类。"""
 
     def _show_export_menu(self):
         """显示导出菜单"""

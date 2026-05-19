@@ -94,6 +94,20 @@ class ModWorkflowMixin:
                 logging.error(f"启动数据包翻译写入失败: {e}", exc_info=True)
                 self.log_message(f"启动写入失败: {e}", "CRITICAL")
                 self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动写入失败: {e}"))
+        elif self.project_type == "javamap":
+            self.log_message(type_config.finish_log_message, "SUCCESS")
+            wb = getattr(self, 'workbench_instance', None)
+            if wb and hasattr(wb, 'status_label'):
+                try:
+                    wb.status_label.config(text="正在写入翻译到地图文件，请稍候...")
+                except Exception:
+                    pass
+            try:
+                self._run_javamap_build_phase(final_workbench_data)
+            except Exception as e:
+                logging.error(f"启动地图翻译写入失败: {e}", exc_info=True)
+                self.log_message(f"启动写入失败: {e}", "CRITICAL")
+                self.root.after(0, lambda: messagebox.showerror("启动失败", f"启动写入失败: {e}"))
         else:
             self.orchestrator.final_translations = final_translations
             self.orchestrator.final_workbench_data = final_workbench_data

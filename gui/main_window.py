@@ -581,6 +581,10 @@ class ProjectTab(ModWorkflowMixin, ModSearchMixin, ProjectTabWorkflowMixin):
             self._setup_datapack_workflow(path_values, config)
             return
 
+        if self.project_type == "javamap":
+            self._setup_javamap_workflow(path_values, config)
+            return
+
         if self.project_type == "modsearch":
             self._show_mod_search_view()
             return

@@ -52,8 +52,8 @@ class ErrorLogger:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             log_file_path = AI_ERROR_LOG_DIR / f"ai_{error_type}_{timestamp}.log"
             log_content = f"""# AI Response Error Log
-# Timestamp: {datetime.now().isoformat()}
-# Error Type: {error_type}
+# 时间戳: {datetime.now().isoformat()}
+# 错误类型: {error_type}
 # --------------------------------------------------
 ### PROMPT SENT TO AI ###
 # --------------------------------------------------
@@ -79,12 +79,12 @@ class ErrorLogger:
             log_file_path = GENERAL_ERROR_LOG_DIR / f"general_{error_level.lower()}_{timestamp}.log"
 
             log_content = [
-                f"# General Error Log",
-                f"# Timestamp: {datetime.now().isoformat()}",
-                f"# Error Level: {error_level}",
-                f"# Error Title: {error_title}",
+                f"# 通用错误日志",
+                f"# 时间戳: {datetime.now().isoformat()}",
+                f"# 错误级别: {error_level}",
+                f"# 错误标题: {error_title}",
                 f"# --------------------------------------------------",
-                f"### ERROR MESSAGE ###",
+                f"### 错误信息 ###",
                 f"# --------------------------------------------------",
                 f"{error_message}"
             ]
@@ -94,12 +94,12 @@ class ErrorLogger:
                 tb_text = ''.join(tb_lines)
                 log_content.extend([
                     f"# --------------------------------------------------",
-                    f"### EXCEPTION DETAILS ###",
+                    f"### 异常详情 ###",
                     f"# --------------------------------------------------",
                     f"Type: {type(exception).__name__}",
                     f"Message: {str(exception)}",
                     f"# --------------------------------------------------",
-                    f"### TRACEBACK ###",
+                    f"### 调用栈 ###",
                     f"# --------------------------------------------------",
                     f"{tb_text}"
                 ])
@@ -107,7 +107,7 @@ class ErrorLogger:
             if context:
                 log_content.extend([
                     f"# --------------------------------------------------",
-                    f"### CONTEXT INFORMATION ###",
+                    f"### 上下文信息 ###",
                     f"# --------------------------------------------------"
                 ])
                 for key, value in context.items():
